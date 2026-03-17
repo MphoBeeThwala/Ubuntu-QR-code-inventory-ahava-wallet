@@ -1,0 +1,29 @@
+# Node
+node_modules/
+
+# Turbo
+.turbo/
+
+# Build outputs
+dist/
+.next/
+
+# Environment
+.env
+.env.*
+
+# Secrets (do NOT commit private keys or credentials)
+secrets/
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/

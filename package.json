@@ -1,0 +1,58 @@
+{
+  "name": "ahava-ewallet",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Ahava eWallet — inclusive South African digital wallet platform",
+  "workspaces": [
+    "apps/*",
+    "services/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "test": "turbo run test",
+    "test:coverage": "turbo run test:coverage",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "db:migrate": "npx prisma migrate dev --schema=prisma/schema.prisma",
+    "db:migrate:prod": "npx prisma migrate deploy --schema=prisma/schema.prisma",
+    "db:seed": "npx ts-node packages/database/src/seed.ts",
+    "db:studio": "npx prisma studio --schema=prisma/schema.prisma",
+    "docker:up": "docker-compose up -d",
+    "docker:down": "docker-compose down",
+    "docker:reset": "docker-compose down -v && docker-compose up -d",
+    "secrets:validate": "node scripts/validate-secrets.js",
+    "audit:deps": "npm audit --audit-level=high"
+  },
+  "devDependencies": {
+    "@prisma/client": "^5.8.0",
+    "@typescript-eslint/eslint-plugin": "^7.0.0",
+    "@typescript-eslint/parser": "^7.0.0",
+    "eslint": "^8.57.0",
+    "husky": "^9.0.0",
+    "lint-staged": "^15.0.0",
+    "prettier": "^3.2.0",
+    "prisma": "^5.8.0",
+    "ts-node": "^10.9.2",
+    "turbo": "^1.13.0",
+    "typescript": "^5.4.0"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "npm": ">=10.0.0"
+  },
+  "lint-staged": {
+    "*.{ts,tsx}": [
+      "eslint --fix",
+      "prettier --write"
+    ],
+    "*.{json,md,yml,yaml}": [
+      "prettier --write"
+    ]
+  },
+  "dependencies": {
+    "axios": "^1.13.6",
+    "winston": "^3.19.0"
+  }
+}

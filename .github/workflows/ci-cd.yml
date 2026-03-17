@@ -1,0 +1,421 @@
+name: Ahava eWallet — CI/CD Pipeline
+
+on:
+  push:
+    branches: [main, staging, develop]
+  pull_request:
+    branches: [main, staging]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '20'
+  FLUTTER_VERSION: '3.19.0'
+  AWS_REGION: 'af-south-1'
+  ECR_REGISTRY: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.af-south-1.amazonaws.com
+
+jobs:
+  # ─────────────────────────────────────────────────────────────────
+  # 1. STATIC ANALYSIS (runs in parallel)
+  # ─────────────────────────────────────────────────────────────────
+
+  lint-typecheck:
+    name: Lint & Type Check (Node.js services)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint (ESLint)
+        run: npm run lint
+
+      - name: Type check (TypeScript strict)
+        run: npm run typecheck
+
+  flutter-analyze:
+    name: Flutter Analyze
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+
+      - name: Install Flutter dependencies
+        working-directory: apps/mobile
+        run: flutter pub get
+
+      - name: Run flutter analyze (strict)
+        working-directory: apps/mobile
+        run: flutter analyze --fatal-infos --fatal-warnings
+
+      - name: Check formatting
+        working-directory: apps/mobile
+        run: dart format --set-exit-if-changed .
+
+  # ─────────────────────────────────────────────────────────────────
+  # 2. SECURITY SCANNING
+  # ─────────────────────────────────────────────────────────────────
+
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: NPM audit (fail on high/critical)
+        run: npm audit --audit-level=high
+
+      - name: Snyk dependency vulnerability scan
+        uses: snyk/actions/node@master
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        with:
+          args: --severity-threshold=high --all-projects
+
+      - name: Secret detection (Gitleaks)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
+
+      - name: SAST scan (Semgrep)
+        uses: returntocorp/semgrep-action@v1
+        with:
+          config: >-
+            p/nodejs
+            p/typescript
+            p/jwt
+            p/sql-injection
+            p/express
+          auditOn: push
+
+  # ─────────────────────────────────────────────────────────────────
+  # 3. UNIT TESTS (Node.js)
+  # ─────────────────────────────────────────────────────────────────
+
+  test-services:
+    name: Unit Tests — Node.js Services
+    runs-on: ubuntu-latest
+    needs: [lint-typecheck]
+
+    services:
+      postgres:
+        image: timescale/timescaledb:latest-pg16
+        env:
+          POSTGRES_USER: ahava_test
+          POSTGRES_PASSWORD: ahava_test_pw
+          POSTGRES_DB: ahava_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql://ahava_test:ahava_test_pw@localhost:5432/ahava_test
+      REDIS_URL: redis://localhost:6379
+      NODE_ENV: test
+      JWT_ALGORITHM: RS256
+      # Test RSA keys (NOT production keys — generated fresh per run)
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate test RSA keypair
+        run: |
+          openssl genrsa -out test-private.pem 2048
+          openssl rsa -in test-private.pem -pubout -out test-public.pem
+          echo "JWT_PRIVATE_KEY_PATH=test-private.pem" >> $GITHUB_ENV
+          echo "JWT_PUBLIC_KEY_PATH=test-public.pem" >> $GITHUB_ENV
+
+      - name: Run Prisma migrations (test DB)
+        run: npm run db:migrate
+        env:
+          DATABASE_URL: postgresql://ahava_test:ahava_test_pw@localhost:5432/ahava_test
+
+      - name: Run unit tests with coverage
+        run: npm run test:coverage
+        env:
+          DATABASE_URL: postgresql://ahava_test:ahava_test_pw@localhost:5432/ahava_test
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: true
+          flags: backend
+
+      - name: Enforce coverage thresholds
+        run: |
+          # Payment service and auth service must meet 95% threshold
+          node scripts/check-coverage.js --min-global=80 --min-payment-service=95 --min-auth-service=95
+
+  # ─────────────────────────────────────────────────────────────────
+  # 4. FLUTTER TESTS
+  # ─────────────────────────────────────────────────────────────────
+
+  test-flutter:
+    name: Flutter Unit & Widget Tests
+    runs-on: ubuntu-latest
+    needs: [flutter-analyze]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+
+      - name: Install dependencies
+        working-directory: apps/mobile
+        run: flutter pub get
+
+      - name: Run tests with coverage
+        working-directory: apps/mobile
+        run: flutter test --coverage --reporter=github
+
+      - name: Upload Flutter coverage
+        uses: codecov/codecov-action@v4
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          directory: apps/mobile/coverage
+          flags: flutter
+
+  # ─────────────────────────────────────────────────────────────────
+  # 5. BUILD DOCKER IMAGES
+  # ─────────────────────────────────────────────────────────────────
+
+  build-services:
+    name: Build Docker Images
+    runs-on: ubuntu-latest
+    needs: [test-services, security-scan]
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging'
+
+    strategy:
+      matrix:
+        service:
+          - api-gateway
+          - auth-service
+          - wallet-service
+          - payment-service
+          - kyc-service
+          - notification-service
+          - aml-service
+          - reporting-service
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push ${{ matrix.service }}
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: services/${{ matrix.service }}/Dockerfile
+          push: true
+          tags: |
+            ${{ env.ECR_REGISTRY }}/ahava-${{ matrix.service }}:${{ github.sha }}
+            ${{ env.ECR_REGISTRY }}/ahava-${{ matrix.service }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            BUILD_DATE=${{ github.run_id }}
+            GIT_COMMIT=${{ github.sha }}
+            NODE_ENV=production
+
+      - name: Trivy container scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.ECR_REGISTRY }}/ahava-${{ matrix.service }}:${{ github.sha }}
+          format: 'sarif'
+          output: 'trivy-${{ matrix.service }}.sarif'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '1'
+
+  # ─────────────────────────────────────────────────────────────────
+  # 6. DEPLOY TO STAGING
+  # ─────────────────────────────────────────────────────────────────
+
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: [build-services, test-flutter]
+    if: github.ref == 'refs/heads/staging'
+    environment: staging
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'v1.29.0'
+
+      - name: Configure kubectl (EKS)
+        run: aws eks update-kubeconfig --name ahava-staging --region ${{ env.AWS_REGION }}
+
+      - name: Run database migrations (staging)
+        run: |
+          kubectl exec -n ahava-staging deployment/api-gateway -- \
+            npx prisma migrate deploy
+
+      - name: Deploy all services (rolling update)
+        run: |
+          for SERVICE in api-gateway auth-service wallet-service payment-service kyc-service notification-service aml-service reporting-service; do
+            kubectl set image deployment/$SERVICE \
+              $SERVICE=${{ env.ECR_REGISTRY }}/ahava-$SERVICE:${{ github.sha }} \
+              -n ahava-staging
+          done
+
+      - name: Wait for rollout
+        run: |
+          for SERVICE in api-gateway auth-service wallet-service payment-service kyc-service notification-service aml-service reporting-service; do
+            kubectl rollout status deployment/$SERVICE -n ahava-staging --timeout=300s
+          done
+
+      - name: Run smoke tests (Playwright)
+        run: |
+          npm run test:smoke -- --env=staging
+
+  # ─────────────────────────────────────────────────────────────────
+  # 7. DEPLOY TO PRODUCTION
+  # ─────────────────────────────────────────────────────────────────
+
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: [deploy-staging]
+    if: github.ref == 'refs/heads/main'
+    environment: production  # Requires manual approval in GitHub Environments
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (production role — separate account)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_PROD_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_PROD_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ secrets.AWS_PROD_DEPLOY_ROLE_ARN }}
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v3
+
+      - name: Configure kubectl (production EKS)
+        run: aws eks update-kubeconfig --name ahava-production --region ${{ env.AWS_REGION }}
+
+      - name: Run database migrations (production — careful!)
+        run: |
+          echo "Running migrations on production database..."
+          kubectl exec -n ahava-prod deployment/api-gateway -- \
+            npx prisma migrate deploy
+          echo "Migrations complete"
+
+      - name: Blue/green deployment
+        run: |
+          # Update image tags on green deployments
+          for SERVICE in api-gateway auth-service wallet-service payment-service kyc-service notification-service aml-service reporting-service; do
+            kubectl set image deployment/$SERVICE-green \
+              $SERVICE=${{ env.ECR_REGISTRY }}/ahava-$SERVICE:${{ github.sha }} \
+              -n ahava-prod
+          done
+
+          # Wait for green to be healthy
+          for SERVICE in api-gateway auth-service wallet-service payment-service kyc-service notification-service aml-service reporting-service; do
+            kubectl rollout status deployment/$SERVICE-green -n ahava-prod --timeout=600s
+          done
+
+          # Switch traffic to green (update ALB target group weights)
+          aws elbv2 modify-rule \
+            --rule-arn ${{ secrets.ALB_MAIN_RULE_ARN }} \
+            --actions '[{"Type":"forward","ForwardConfig":{"TargetGroups":[{"TargetGroupArn":"${{ secrets.TG_GREEN_ARN }}","Weight":100},{"TargetGroupArn":"${{ secrets.TG_BLUE_ARN }}","Weight":0}]}}]'
+
+      - name: Post-deploy health check
+        run: |
+          sleep 30  # Allow 30s for traffic to shift
+          HEALTH=$(curl -sf https://api.ahava.co.za/health | jq -r '.status')
+          if [ "$HEALTH" != "healthy" ]; then
+            echo "Health check failed — initiating rollback"
+            # Switch traffic back to blue
+            aws elbv2 modify-rule \
+              --rule-arn ${{ secrets.ALB_MAIN_RULE_ARN }} \
+              --actions '[{"Type":"forward","ForwardConfig":{"TargetGroups":[{"TargetGroupArn":"${{ secrets.TG_BLUE_ARN }}","Weight":100},{"TargetGroupArn":"${{ secrets.TG_GREEN_ARN }}","Weight":0}]}}]'
+            exit 1
+          fi
+          echo "Production deployment healthy"
+
+      - name: Notify team (Slack)
+        if: always()
+        uses: slackapi/slack-github-action@v1
+        with:
+          payload: |
+            {
+              "text": "${{ job.status == 'success' && '✅' || '🚨' }} Ahava eWallet production deploy: ${{ job.status }}\nCommit: ${{ github.sha }}\nAuthor: ${{ github.actor }}"
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_ENGINEERING_WEBHOOK }}

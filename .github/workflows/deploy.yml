@@ -1,0 +1,239 @@
+name: Build & Deploy Ahava Services
+
+on:
+  push:
+    branches: [main, staging, develop]
+  pull_request:
+    branches: [main, staging]
+
+env:
+  AWS_REGION: af-south-1
+  ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run tests
+        run: npm run test
+
+      - name: Check coverage
+        run: npm run test:coverage
+
+  build:
+    name: Build & Push
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.event_name == 'push'
+    
+    strategy:
+      matrix:
+        service:
+          - api-gateway
+          - auth-service
+          - wallet-service
+          - payment-service
+          - kyc-service
+          - notification-service
+          - reporting-service
+          - aml-service
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build image
+        working-directory: services/${{ matrix.service }}
+        run: |
+          npm run build
+          docker build -t $ECR_REGISTRY/ahava-${{ matrix.service }}:${{ github.sha }} \
+            -t $ECR_REGISTRY/ahava-${{ matrix.service }}:latest .
+
+      - name: Push image to ECR
+        run: |
+          docker push $ECR_REGISTRY/ahava-${{ matrix.service }}:${{ github.sha }}
+          docker push $ECR_REGISTRY/ahava-${{ matrix.service }}:latest
+
+      - name: Update image in deployment manifest
+        run: |
+          sed -i "s|IMAGE_TAG|${{ github.sha }}|g" infrastructure/k8s/${{ matrix.service }}-deployment.yaml
+
+  build-apps:
+    name: Build Frontend Apps
+    runs-on: ubuntu-latest
+    needs: test
+
+    strategy:
+      matrix:
+        app: [pwa, mobile, ussd]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Setup Flutter (mobile)
+        if: matrix.app == 'mobile'
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.19.0'
+
+      - name: Build ${{ matrix.app }}
+        working-directory: apps/${{ matrix.app }}
+        run: |
+          if [ "${{ matrix.app }}" = "mobile" ]; then
+            flutter pub get
+            flutter build apk --release
+          elif [ "${{ matrix.app }}" = "pwa" ]; then
+            npm install
+            npm run build
+          else
+            npm install
+            npm run build
+          fi
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: ${{ matrix.app }}-build
+          path: apps/${{ matrix.app }}/build/
+
+  deploy-dev:
+    name: Deploy to Dev
+    runs-on: ubuntu-latest
+    needs: [build, build-apps]
+    if: github.ref == 'refs/heads/develop' && github.event_name == 'push'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Update kubeconfig
+        run: |
+          aws eks update-kubeconfig --name ahava-dev --region ${{ env.AWS_REGION }}
+
+      - name: Deploy services
+        run: |
+          kubectl apply -f infrastructure/k8s/
+          kubectl rollout status deployment/api-gateway -n ahava-dev
+
+      - name: Health check
+        run: |
+          kubectl run -it --rm health-check \
+            --image=curlimages/curl:latest \
+            --restart=Never \
+            -- curl http://api-gateway:3000/health
+
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: [build, build-apps]
+    if: github.ref == 'refs/heads/staging' && github.event_name == 'push'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Update kubeconfig
+        run: |
+          aws eks update-kubeconfig --name ahava-staging --region ${{ env.AWS_REGION }}
+
+      - name: Deploy services
+        run: |
+          kubectl apply -f infrastructure/k8s/
+          kubectl rollout status deployment/api-gateway -n ahava-staging
+
+      - name: Smoke tests
+        run: |
+          # Run basic smoke tests
+          npm run test:smoke
+
+  deploy-prod:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: [build, build-apps]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    environment:
+      name: production
+      url: https://app.ahava.co.za
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Update kubeconfig
+        run: |
+          aws eks update-kubeconfig --name ahava-prod --region ${{ env.AWS_REGION }}
+
+      - name: Deploy services with blue-green strategy
+        run: |
+          # Deploy to green environment
+          kubectl apply -f infrastructure/k8s/ --selector=environment=green
+          kubectl rollout status deployment/api-gateway -n ahava-prod
+
+          # Run smoke tests
+          npm run test:smoke
+
+          # Switch traffic to green
+          kubectl patch service api-gateway -n ahava-prod \
+            -p '{"spec":{"selector":{"environment":"green"}}}'
+
+          # Monitor for 5 minutes before marking success
+          sleep 300
+
+      - name: Notify deployment
+        if: success()
+        run: |
+          echo "Production deployment successful"
+          # TODO: Send Slack/email notification
+
+      - name: Rollback on failure
+        if: failure()
+        run: |
+          kubectl patch service api-gateway -n ahava-prod \
+            -p '{"spec":{"selector":{"environment":"blue"}}}'
+          echo "Rolled back to previous version"

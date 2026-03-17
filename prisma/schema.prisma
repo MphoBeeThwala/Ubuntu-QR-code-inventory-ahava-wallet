@@ -1,0 +1,666 @@
+// Ahava eWallet — Master Prisma Schema
+// All monetary values in CENTS (integers). Never floats.
+// No hard deletes. All records use soft delete (deleted_at + is_deleted).
+// All timestamps UTC. Display SAST (UTC+2) in application layer.
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["fullTextSearch", "postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [pgcrypto, uuid_ossp, pg_trgm, timescaledb(schema: "timescale")]
+}
+
+// ─────────────────────────────────────────────────────────────────
+// ENUMS
+// ─────────────────────────────────────────────────────────────────
+
+enum KycTier {
+  TIER_0  // Phone + selfie only. No ID. R500/day, R2500 max balance.
+  TIER_1  // SA ID or asylum doc + phone. R2000/day, R10000 max.
+  TIER_2  // Full FICA: ID + address + source of funds. R5000/day, R25000 max.
+  MERCHANT // Full FICA + business declaration. Unlimited (AML monitored).
+}
+
+enum KycStatus {
+  PENDING
+  VERIFIED
+  REJECTED
+  UNDER_REVIEW
+  EXPIRED
+}
+
+enum WalletStatus {
+  ACTIVE
+  SUSPENDED   // Temporary — AML review
+  FROZEN      // Regulatory order
+  CLOSED      // Permanent, soft delete
+}
+
+enum WalletType {
+  PERSONAL
+  YOUTH       // Under 18, guardian controlled
+  MERCHANT
+  AGENT       // Cash in/out agent float wallet
+  ESCROW      // System escrow for pending transactions
+  FEE_POOL    // Platform fee collection
+}
+
+enum TransactionType {
+  CREDIT          // Money into wallet
+  DEBIT           // Money out of wallet
+  FEE             // Platform fee
+  REFUND          // Reversal credit
+  REVERSAL        // Debit reversal
+  INTEREST        // Float interest credit
+  ADJUSTMENT      // Manual MLRO adjustment
+}
+
+enum TransactionStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  REVERSED
+  DISPUTED
+}
+
+enum PaymentMethod {
+  UBUNTUPAY_WALLET  // Internal wallet-to-wallet
+  PAYSHAP           // SARB real-time payment
+  CASH_IN           // Agent cash deposit
+  CASH_OUT          // Agent cash withdrawal
+}
+
+enum QrCodeType {
+  STATIC    // Merchant permanent display QR
+  DYNAMIC   // Single transaction, amount-locked, 10min expiry
+  REQUEST   // Consumer requests specific amount
+}
+
+enum AmlFlagSeverity {
+  INFO
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum AmlFlagStatus {
+  OPEN
+  UNDER_REVIEW
+  DISMISSED
+  ESCALATED
+  STR_FILED
+}
+
+enum DocumentType {
+  SA_ID_BOOK
+  SA_ID_CARD
+  PASSPORT
+  ASYLUM_DOCUMENT
+  REFUGEE_DOCUMENT
+  PROOF_OF_ADDRESS
+  PROOF_OF_INCOME
+  BUSINESS_REGISTRATION
+  SELFIE
+}
+
+enum NotificationChannel {
+  PUSH
+  SMS
+  EMAIL
+  WHATSAPP
+}
+
+enum NotificationStatus {
+  PENDING
+  SENT
+  DELIVERED
+  FAILED
+  READ
+}
+
+enum AgentStatus {
+  ACTIVE
+  SUSPENDED
+  TRAINING
+  TERMINATED
+}
+
+// ─────────────────────────────────────────────────────────────────
+// USERS & AUTHENTICATION
+// ─────────────────────────────────────────────────────────────────
+
+model User {
+  id                    String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  phoneNumber           String    @unique @db.VarChar(20)  // Stored encrypted via pgcrypto
+  phoneNumberHash       String    @unique @db.VarChar(64)  // SHA-256 for lookup without decrypting
+  email                 String?   @db.VarChar(255)
+  emailVerified         Boolean   @default(false)
+  fullName              String?   @db.VarChar(200)
+  preferredName         String?   @db.VarChar(100)
+  dateOfBirth           DateTime? @db.Date
+  isMinor               Boolean   @default(false)
+  guardianUserId        String?   @db.Uuid
+
+  // KYC
+  kycTier               KycTier   @default(TIER_0)
+  kycStatus             KycStatus @default(PENDING)
+  idNumber              String?   @db.VarChar(13)   // Encrypted
+  idNumberHash          String?   @db.VarChar(64)   // SHA-256 hash for dedup
+  idType                DocumentType?
+  idVerifiedAt          DateTime?
+  idVerificationRef     String?   @db.VarChar(100)
+
+  // Biometric
+  facialBiometricHash   String?   @db.VarChar(256)  // One-way hash only
+  biometricEnrolledAt   DateTime?
+
+  // Device & session
+  primaryDeviceId       String?   @db.VarChar(200)  // Bound device fingerprint
+  deviceBoundAt         DateTime?
+  pinHash               String?   @db.VarChar(256)  // Argon2id hash
+  pinChangedAt          DateTime?
+  failedPinAttempts     Int       @default(0)
+  pinLockedUntil        DateTime?
+  biometricEnabled      Boolean   @default(false)
+
+  // Language & preferences
+  preferredLanguage     String    @default("en") @db.VarChar(5)
+  pushNotifications     Boolean   @default(true)
+  smsNotifications      Boolean   @default(true)
+  marketingOptIn        Boolean   @default(false)
+
+  // Compliance
+  sanctionsScreenedAt   DateTime?
+  sanctionsResult       String?   @db.VarChar(20)   // CLEAR | MATCH | PENDING
+  pepFlag               Boolean   @default(false)    // Politically exposed person
+  popiConsentAt         DateTime?
+  termsAcceptedAt       DateTime?
+  termsVersion          String?   @db.VarChar(10)
+
+  // Soft delete
+  isDeleted             Boolean   @default(false)
+  deletedAt             DateTime?
+  deletedReason         String?   @db.VarChar(500)
+
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  // Relations
+  guardian              User?     @relation("GuardianMinor", fields: [guardianUserId], references: [id])
+  minors                User[]    @relation("GuardianMinor")
+  wallets               Wallet[]
+  kycDocuments          KycDocument[]
+  refreshTokens         RefreshToken[]
+  auditLogs             AuditLog[]
+  amlFlags              AmlFlag[]
+  notifications         Notification[]
+  agentProfile          Agent?
+  youthWalletControls   YouthWalletControl[] @relation("GuardianControls")
+
+  @@index([phoneNumberHash])
+  @@index([idNumberHash])
+  @@index([kycTier])
+  @@index([createdAt])
+  @@map("users")
+}
+
+model RefreshToken {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId          String    @db.Uuid
+  tokenHash       String    @unique @db.VarChar(64)
+  deviceId        String    @db.VarChar(200)
+  deviceName      String?   @db.VarChar(200)
+  ipAddress       String?   @db.VarChar(45)
+  userAgent       String?   @db.VarChar(500)
+  expiresAt       DateTime
+  revokedAt       DateTime?
+  revokedReason   String?   @db.VarChar(200)
+  createdAt       DateTime  @default(now())
+
+  user            User      @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([tokenHash])
+  @@map("refresh_tokens")
+}
+
+model KycDocument {
+  id                    String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId                String        @db.Uuid
+  documentType          DocumentType
+  s3Key                 String        @db.VarChar(500)  // Encrypted S3 path
+  documentHash          String        @db.VarChar(64)   // SHA-256 of document
+  verificationStatus    KycStatus     @default(PENDING)
+  verifiedBy            String?       @db.Uuid           // Admin user ID
+  verifiedAt            DateTime?
+  rejectedReason        String?       @db.VarChar(500)
+  expiresAt             DateTime?
+  createdAt             DateTime      @default(now())
+
+  user                  User          @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([verificationStatus])
+  @@map("kyc_documents")
+}
+
+// ─────────────────────────────────────────────────────────────────
+// WALLETS
+// ─────────────────────────────────────────────────────────────────
+
+model Wallet {
+  id                    String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId                String        @db.Uuid
+  walletNumber          String        @unique @db.VarChar(20)  // AHV-XXXX-XXXX-XXXX
+  walletType            WalletType    @default(PERSONAL)
+  status                WalletStatus  @default(ACTIVE)
+  kycTier               KycTier       @default(TIER_0)
+
+  // Balances — ALL IN CENTS
+  balance               BigInt        @default(0)  // Available balance
+  pendingBalance        BigInt        @default(0)  // In-flight transactions
+  reservedBalance       BigInt        @default(0)  // Dispute holds
+
+  // Limits — ALL IN CENTS
+  dailyLimit            BigInt        @default(50000)    // R500 default (Tier 0)
+  monthlyLimit          BigInt        @default(200000)   // R2000 default (Tier 0)
+  maxBalance            BigInt        @default(250000)   // R2500 default (Tier 0)
+  perTransactionLimit   BigInt        @default(50000)    // R500 default (Tier 0)
+
+  // Rolling usage — reset daily/monthly via cron
+  dailySpent            BigInt        @default(0)
+  monthlySpent          BigInt        @default(0)
+  dailyReceived         BigInt        @default(0)
+  lastDailyReset        DateTime      @default(now())
+  lastMonthlyReset      DateTime      @default(now())
+
+  // Currency
+  currency              String        @default("ZAR") @db.VarChar(3)
+
+  // Interest / float
+  floatInterestRate     Decimal       @default(0) @db.Decimal(5, 4)
+  lastInterestCreditAt  DateTime?
+
+  // Soft delete
+  isDeleted             Boolean       @default(false)
+  deletedAt             DateTime?
+  suspendedAt           DateTime?
+  suspendedReason       String?       @db.VarChar(500)
+  frozenAt              DateTime?
+  frozenReason          String?       @db.VarChar(500)
+
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
+
+  // Relations
+  user                  User          @relation(fields: [userId], references: [id])
+  transactions          WalletTransaction[]
+  paymentQrCodes        PaymentQrCode[]
+  youthControl          YouthWalletControl?
+  agentWallet           Agent?        @relation("AgentFloat")
+
+  @@index([userId])
+  @@index([walletNumber])
+  @@index([status])
+  @@index([walletType])
+  @@map("wallets")
+}
+
+model WalletTransaction {
+  id                    String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  walletId              String              @db.Uuid
+  transactionType       TransactionType
+  status                TransactionStatus   @default(PENDING)
+  paymentMethod         PaymentMethod
+
+  // Amount — ALL IN CENTS
+  amount                BigInt              // Gross amount
+  feeAmount             BigInt              @default(0)
+  netAmount             BigInt              // amount - feeAmount for debits
+
+  // Balances snapshot at time of transaction — for reconciliation
+  balanceBefore         BigInt
+  balanceAfter          BigInt
+
+  // Counterparty
+  counterpartyWalletId  String?             @db.Uuid
+  counterpartyName      String?             @db.VarChar(200)
+  counterpartyRef       String?             @db.VarChar(100)  // External ref (PayShap ID etc.)
+
+  // QR / Payment reference
+  paymentQrId           String?             @db.Uuid
+  idempotencyKey        String              @unique @db.VarChar(36)  // UUID from client
+
+  // Descriptions
+  description           String?             @db.VarChar(500)
+  reference             String?             @db.VarChar(200)   // User-facing reference
+  internalNote          String?             @db.VarChar(1000)  // Internal/audit note
+
+  // External payment rail
+  payshapRef            String?             @db.VarChar(100)
+  payshapStatus         String?             @db.VarChar(50)
+  externalRef           String?             @db.VarChar(200)
+
+  // Metadata
+  deviceId              String?             @db.VarChar(200)
+  ipAddress             String?             @db.VarChar(45)
+  latitude              Decimal?            @db.Decimal(10, 8)
+  longitude             Decimal?            @db.Decimal(11, 8)
+
+  // AML
+  amlScreened           Boolean             @default(false)
+  amlScreenedAt         DateTime?
+  amlRiskScore          Int?                // 0-100
+  amlFlagId             String?             @db.Uuid
+
+  // Reversal
+  reversedAt            DateTime?
+  reversalReason        String?             @db.VarChar(500)
+  originalTransactionId String?             @db.Uuid
+
+  // Timestamps — immutable financial record
+  createdAt             DateTime            @default(now())
+  completedAt           DateTime?
+  failedAt              DateTime?
+
+  wallet                Wallet              @relation(fields: [walletId], references: [id])
+  paymentQr             PaymentQrCode?      @relation(fields: [paymentQrId], references: [id])
+
+  @@index([walletId])
+  @@index([status])
+  @@index([transactionType])
+  @@index([createdAt])
+  @@index([idempotencyKey])
+  @@index([payshapRef])
+  @@index([counterpartyWalletId])
+  @@map("wallet_transactions")
+}
+
+model PaymentQrCode {
+  id              String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  walletId        String        @db.Uuid
+  qrType          QrCodeType
+  qrPayload       String        @db.Text  // JSON payload encoded in QR
+  qrHash          String        @db.VarChar(64)  // SHA-256 of payload for validation
+
+  // For dynamic QR
+  amountCents     BigInt?       // Locked amount (dynamic only)
+  currency        String        @default("ZAR") @db.VarChar(3)
+  description     String?       @db.VarChar(200)
+
+  // Lifecycle
+  expiresAt       DateTime?     // Null for static QR
+  usedAt          DateTime?     // Single use for dynamic
+  usageCount      Int           @default(0)  // Static QR: counts up
+  maxUsage        Int?          // Static: unlimited (null), dynamic: 1
+
+  isActive        Boolean       @default(true)
+  createdAt       DateTime      @default(now())
+
+  wallet          Wallet        @relation(fields: [walletId], references: [id])
+  transactions    WalletTransaction[]
+
+  @@index([walletId])
+  @@index([qrHash])
+  @@index([expiresAt])
+  @@map("payment_qr_codes")
+}
+
+model YouthWalletControl {
+  id                    String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  walletId              String    @unique @db.Uuid
+  guardianUserId        String    @db.Uuid
+
+  // Spending controls — ALL IN CENTS
+  dailySpendLimit       BigInt    @default(8000)   // R80 default
+  singleTxnLimit        BigInt    @default(5000)   // R50 per transaction
+  allowCashOut          Boolean   @default(false)  // No cash withdrawal without guardian PIN
+
+  // Merchant category controls (comma-separated category codes)
+  allowedCategories     String?   @db.VarChar(500) // e.g. "FOOD,EDUCATION,PHARMACY"
+  blockedCategories     String?   @db.VarChar(500) // e.g. "LIQUOR,GAMBLING,ADULT"
+
+  // Notifications to guardian
+  notifyOnEveryTxn      Boolean   @default(true)
+  notifyThresholdCents  BigInt?   // Notify if single txn > this
+
+  // Guardian PIN required for
+  guardianPinForCashOut Boolean   @default(true)
+  guardianPinForLimitChange Boolean @default(true)
+
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  wallet                Wallet    @relation(fields: [walletId], references: [id])
+  guardian              User      @relation("GuardianControls", fields: [guardianUserId], references: [id])
+
+  @@index([guardianUserId])
+  @@map("youth_wallet_controls")
+}
+
+// ─────────────────────────────────────────────────────────────────
+// AGENTS
+// ─────────────────────────────────────────────────────────────────
+
+model Agent {
+  id                String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId            String        @unique @db.Uuid
+  agentCode         String        @unique @db.VarChar(20)  // AHV-AGT-XXXXX
+  businessName      String        @db.VarChar(200)
+  businessAddress   String        @db.VarChar(500)
+  latitude          Decimal?      @db.Decimal(10, 8)
+  longitude         Decimal?      @db.Decimal(11, 8)
+  status            AgentStatus   @default(TRAINING)
+  floatWalletId     String?       @unique @db.Uuid
+
+  // Commission rate (basis points — 100 = 1%)
+  cashInCommissionBps   Int       @default(80)   // 0.8%
+  cashOutCommissionBps  Int       @default(70)   // 0.7%
+
+  // Liquidity
+  minFloatCents     BigInt        @default(50000)   // R500 minimum float
+  maxFloatCents     BigInt        @default(5000000) // R50,000 maximum float
+
+  bondDepositCents  BigInt        @default(0)  // Security bond held by Ahava
+
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  user              User          @relation(fields: [userId], references: [id])
+  floatWallet       Wallet?       @relation("AgentFloat", fields: [floatWalletId], references: [id])
+
+  @@index([agentCode])
+  @@index([status])
+  @@map("agents")
+}
+
+// ─────────────────────────────────────────────────────────────────
+// AML & COMPLIANCE
+// ─────────────────────────────────────────────────────────────────
+
+model AmlFlag {
+  id                    String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId                String?           @db.Uuid
+  walletId              String?           @db.Uuid
+  transactionId         String?           @db.Uuid
+  flagType              String            @db.VarChar(100)  // VELOCITY|ROUND_TRIP|STRUCTURING|SANCTIONS_MATCH|GEO_ANOMALY
+  severity              AmlFlagSeverity
+  status                AmlFlagStatus     @default(OPEN)
+  description           String            @db.VarChar(2000)
+  riskScore             Int               // 0-100
+  evidenceJson          String?           @db.Text  // JSON blob of supporting data
+
+  // MLRO handling
+  assignedTo            String?           @db.Uuid  // MLRO user ID
+  assignedAt            DateTime?
+  reviewedAt            DateTime?
+  reviewNote            String?           @db.VarChar(2000)
+  strReference          String?           @db.VarChar(100)  // FIC STR reference number
+  strFiledAt            DateTime?
+
+  autoResolved          Boolean           @default(false)
+  resolvedAt            DateTime?
+
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+
+  user                  User?             @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([walletId])
+  @@index([status])
+  @@index([severity])
+  @@index([createdAt])
+  @@map("aml_flags")
+}
+
+model SanctionsScreening {
+  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  entityType        String    @db.VarChar(20)  // USER | TRANSACTION
+  entityId          String    @db.Uuid
+  screenedAt        DateTime  @default(now())
+  provider          String    @db.VarChar(50)  // COMPLY_ADVANTAGE | INTERNAL
+  result            String    @db.VarChar(20)  // CLEAR | MATCH | POTENTIAL_MATCH
+  matchDetails      String?   @db.Text  // JSON if match found
+  responseTimeMs    Int?
+
+  @@index([entityId])
+  @@index([screenedAt])
+  @@map("sanctions_screenings")
+}
+
+// ─────────────────────────────────────────────────────────────────
+// AUDIT LOG — IMMUTABLE
+// ─────────────────────────────────────────────────────────────────
+
+model AuditLog {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId          String?   @db.Uuid
+  action          String    @db.VarChar(200)   // e.g. WALLET_DEBIT, KYC_UPGRADE, PIN_CHANGE
+  entityType      String?   @db.VarChar(100)   // wallet | user | transaction
+  entityId        String?   @db.Uuid
+  previousState   String?   @db.Text  // JSON snapshot before change
+  newState        String?   @db.Text  // JSON snapshot after change
+  ipAddress       String?   @db.VarChar(45)
+  deviceId        String?   @db.VarChar(200)
+  userAgent       String?   @db.VarChar(500)
+  serviceId       String    @db.VarChar(50)   // Which microservice created this log
+  correlationId   String?   @db.VarChar(36)   // Request trace ID
+  createdAt       DateTime  @default(now())
+
+  user            User?     @relation(fields: [userId], references: [id])
+
+  // NO updatedAt — audit logs are immutable. No updates, no deletes.
+  @@index([userId])
+  @@index([action])
+  @@index([entityType, entityId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+// ─────────────────────────────────────────────────────────────────
+// NOTIFICATIONS
+// ─────────────────────────────────────────────────────────────────
+
+model Notification {
+  id              String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId          String                @db.Uuid
+  channel         NotificationChannel
+  status          NotificationStatus    @default(PENDING)
+  title           String                @db.VarChar(200)
+  body            String                @db.VarChar(1000)
+  data            String?               @db.Text  // JSON payload for push
+  templateId      String?               @db.VarChar(100)
+  externalRef     String?               @db.VarChar(200)  // FCM/SES message ID
+  sentAt          DateTime?
+  deliveredAt     DateTime?
+  readAt          DateTime?
+  failedAt        DateTime?
+  failureReason   String?               @db.VarChar(500)
+  retryCount      Int                   @default(0)
+  createdAt       DateTime              @default(now())
+
+  user            User                  @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("notifications")
+}
+
+// ─────────────────────────────────────────────────────────────────
+// PAYSHAP INTEGRATION
+// ─────────────────────────────────────────────────────────────────
+
+model PayshapTransaction {
+  id                    String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  ahavaTransactionId    String    @db.Uuid
+  payshapMsgId          String    @unique @db.VarChar(100)  // SARB assigned message ID
+  payshapEndToEndId     String    @db.VarChar(100)
+  amountCents           BigInt
+  currency              String    @default("ZAR") @db.VarChar(3)
+  debtorName            String    @db.VarChar(200)
+  debtorAccountRef      String    @db.VarChar(100)  // Ahava wallet number
+  creditorName          String    @db.VarChar(200)
+  creditorAccountRef    String    @db.VarChar(100)
+  remittanceInfo        String?   @db.VarChar(140)
+  status                String    @db.VarChar(50)   // ACCEPTED|PENDING|REJECTED|SETTLED
+  statusReason          String?   @db.VarChar(200)
+  submittedAt           DateTime
+  settledAt             DateTime?
+  rejectedAt            DateTime?
+  rawRequest            String?   @db.Text  // Full ISO 20022 XML (audit)
+  rawResponse           String?   @db.Text  // Full response (audit)
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@index([ahavaTransactionId])
+  @@index([payshapMsgId])
+  @@index([status])
+  @@map("payshap_transactions")
+}
+
+// ─────────────────────────────────────────────────────────────────
+// FEE CONFIGURATION
+// ─────────────────────────────────────────────────────────────────
+
+model FeeRule {
+  id                  String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  ruleName            String    @db.VarChar(100)
+  paymentMethod       PaymentMethod
+  transactionType     TransactionType
+  minAmountCents      BigInt    @default(0)
+  maxAmountCents      BigInt?   // Null = no upper bound
+  flatFeeCents        BigInt    @default(0)
+  percentageBps       Int       @default(0)  // Basis points. 50 = 0.5%
+  isActive            Boolean   @default(true)
+  effectiveFrom       DateTime  @default(now())
+  effectiveTo         DateTime?
+  description         String?   @db.VarChar(500)
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  @@index([paymentMethod, transactionType, isActive])
+  @@map("fee_rules")
+}
+
+// ─────────────────────────────────────────────────────────────────
+// SYSTEM CONFIG
+// ─────────────────────────────────────────────────────────────────
+
+model SystemConfig {
+  key         String    @id @db.VarChar(200)
+  value       String    @db.Text
+  description String?   @db.VarChar(500)
+  isSecret    Boolean   @default(false)
+  updatedBy   String?   @db.Uuid
+  updatedAt   DateTime  @updatedAt
+
+  @@map("system_config")
+}

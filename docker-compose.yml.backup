@@ -1,0 +1,236 @@
+# Ahava eWallet — Local Development Environment
+# Simplified: Only Postgres + Redis run in Docker
+# Services run locally for fast iteration
+# Run: docker-compose up -d
+# Stop: docker-compose down
+
+version: '3.9'
+
+services:
+
+  postgres:
+    image: timescale/timescaledb:latest-pg16
+    container_name: ahava-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ahava
+      POSTGRES_PASSWORD: ahava_dev_pw_local
+      POSTGRES_DB: ahava_dev
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8"
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infrastructure/docker/postgres-init:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ahava -d ahava_dev"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    command: >
+      postgres
+      -c log_min_duration_statement=1000
+      -c log_statement=none
+      -c max_connections=200
+      -c shared_buffers=256MB
+
+  redis:
+    image: redis:7-alpine
+    container_name: ahava-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: >
+      redis-server
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+      --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+    build:
+      context: .
+      dockerfile: services/api-gateway/Dockerfile.dev
+    container_name: ahava-api-gateway
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: development
+      PORT: 3000
+      AUTH_SERVICE_URL: http://auth-service:3001
+      WALLET_SERVICE_URL: http://wallet-service:3002
+      PAYMENT_SERVICE_URL: http://payment-service:3003
+      KYC_SERVICE_URL: http://kyc-service:3004
+      AML_SERVICE_URL: http://aml-service:3005
+      NOTIFICATION_SERVICE_URL: http://notification-service:3006
+      REPORTING_SERVICE_URL: http://reporting-service:3007
+      REDIS_URL: redis://redis:6379
+      # JWT public key for token verification
+      JWT_PUBLIC_KEY_PATH: /run/secrets/jwt_public_key
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./services/api-gateway/src:/app/src
+      - ./secrets/dev:/run/secrets
+    secrets:
+      - jwt_public_key
+
+  auth-service:
+    build:
+      context: .
+      dockerfile: services/auth-service/Dockerfile.dev
+    container_name: ahava-auth-service
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    environment:
+      NODE_ENV: development
+      PORT: 3001
+      DATABASE_URL: postgresql://ahava:ahava_dev_pw_local@postgres:5432/ahava_dev
+      REDIS_URL: redis://redis:6379
+      JWT_PRIVATE_KEY_PATH: /run/secrets/jwt_private_key
+      JWT_PUBLIC_KEY_PATH: /run/secrets/jwt_public_key
+      ARGON2_MEMORY_COST: 65536
+      ARGON2_TIME_COST: 3
+      ARGON2_PARALLELISM: 4
+      DB_ENCRYPTION_KEY_PATH: /run/secrets/db_encryption_key
+      AT_API_KEY: sandbox     # Africa's Talking sandbox
+      AT_USERNAME: sandbox
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./services/auth-service/src:/app/src
+      - ./secrets/dev:/run/secrets
+
+  wallet-service:
+    build:
+      context: .
+      dockerfile: services/wallet-service/Dockerfile.dev
+    container_name: ahava-wallet-service
+    restart: unless-stopped
+    ports:
+      - "3002:3002"
+    environment:
+      NODE_ENV: development
+      PORT: 3002
+      DATABASE_URL: postgresql://ahava:ahava_dev_pw_local@postgres:5432/ahava_dev
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  payment-service:
+    build:
+      context: .
+      dockerfile: services/payment-service/Dockerfile.dev
+    container_name: ahava-payment-service
+    restart: unless-stopped
+    ports:
+      - "3003:3003"
+    environment:
+      NODE_ENV: development
+      PORT: 3003
+      DATABASE_URL: postgresql://ahava:ahava_dev_pw_local@postgres:5432/ahava_dev
+      REDIS_URL: redis://redis:6379
+      PAYSHAP_ENV: sandbox
+      PAYSHAP_BASE_URL: https://payshap-sandbox.sarb.gov.za/api/v1
+      FEE_WALLET_ID: ""  # Set after first seed run
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  aml-service:
+    build:
+      context: .
+      dockerfile: services/aml-service/Dockerfile.dev
+    container_name: ahava-aml-service
+    restart: unless-stopped
+    ports:
+      - "3005:3005"
+    environment:
+      NODE_ENV: development
+      PORT: 3005
+      DATABASE_URL: postgresql://ahava:ahava_dev_pw_local@postgres:5432/ahava_dev
+      REDIS_URL: redis://redis:6379
+      COMPLY_ADVANTAGE_API_KEY: ""  # Set in secrets/dev/
+      COMPLY_ADVANTAGE_URL: https://api.complyadvantage.com
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  notification-service:
+    build:
+      context: .
+      dockerfile: services/notification-service/Dockerfile.dev
+    container_name: ahava-notification-service
+    restart: unless-stopped
+    ports:
+      - "3006:3006"
+    environment:
+      NODE_ENV: development
+      PORT: 3006
+      DATABASE_URL: postgresql://ahava:ahava_dev_pw_local@postgres:5432/ahava_dev
+      REDIS_URL: redis://redis:6379
+      AT_API_KEY: sandbox
+      AT_USERNAME: sandbox
+      FIREBASE_PROJECT_ID: ahava-ewallet-dev
+      AWS_SES_REGION: af-south-1
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # Bull queue dashboard (dev only)
+  bull-board:
+    image: deadly0/bull-board:latest
+    container_name: ahava-bull-board
+    restart: unless-stopped
+    ports:
+      - "9999:3000"
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    depends_on:
+      - redis
+    profiles: ["dev-tools"]
+
+  # Mailhog — capture emails in dev (no real email sent)
+  mailhog:
+    image: mailhog/mailhog:latest
+    container_name: ahava-mailhog
+    ports:
+      - "1025:1025"  # SMTP
+      - "8025:8025"  # Web UI
+    profiles: ["dev-tools"]
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+
+secrets:
+  jwt_private_key:
+    file: ./secrets/dev/jwt-private.pem
+  jwt_public_key:
+    file: ./secrets/dev/jwt-public.pem
+  db_encryption_key:
+    file: ./secrets/dev/db-encryption-key.txt
+
+networks:
+  default:
+    name: ahava-dev-network
