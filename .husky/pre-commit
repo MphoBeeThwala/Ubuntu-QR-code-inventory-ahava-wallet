@@ -1,0 +1,8 @@
+#!/bin/sh
+. "$(dirname "$0")/_/husky.sh"
+
+# Run lint-staged to format/validate staged files
+npx lint-staged
+
+# Run a quick secret scan on staged changes
+npx gitleaks detect --staged --exit-code 1
