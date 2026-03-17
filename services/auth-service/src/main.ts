@@ -534,7 +534,7 @@ app.post("/auth/device-bind", async (req: Request, res: Response, next: NextFunc
 // ERROR HANDLER
 // ─────────────────────────────────────────────────────────────────
 
-app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
+app.use((err: Error, req: Request, res: Response, _next: NextFunction) => {
   if (err instanceof AhavaError) {
     return res.status(err.statusCode).json(createErrorResponse(err));
   }
@@ -559,6 +559,7 @@ app.listen(PORT, () => {
 
 export default app;
 
+/* eslint-disable @typescript-eslint/no-namespace */
 declare global {
   namespace Express {
     interface Request {
@@ -566,3 +567,4 @@ declare global {
     }
   }
 }
+/* eslint-enable @typescript-eslint/no-namespace */

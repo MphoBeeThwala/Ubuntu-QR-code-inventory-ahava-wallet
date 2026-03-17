@@ -19,7 +19,6 @@ import express, {
   NextFunction,
 } from "express";
 import { v4 as uuidv4 } from "uuid";
-import * as Sentry from "@sentry/node";
 import { AhavaError, AhavaErrorCode, createErrorResponse, createSuccessResponse } from "@ahava/shared-errors";
 
 const app: Express = express();
@@ -115,7 +114,7 @@ app.all("/api/*", async (req: Request, res: Response, next: NextFunction) => {
         ...(req.id && { "X-Request-ID": req.id }),
         "X-Forwarded-For": req.ip || "",
         ...(req.headers.authorization && { Authorization: req.headers.authorization }),
-      } as any,
+      } as Record<string, string>,
       body: req.method !== "GET" && req.method !== "HEAD" ? JSON.stringify(req.body) : undefined,
     });
 
@@ -141,10 +140,10 @@ app.use((req: Request, res: Response) => {
 });
 
 // TODO: Global error handler
-app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
+app.use((err: unknown, req: Request, res: Response, _next: NextFunction) => {
   // If it's already AhavaError, use it directly
   if (err instanceof AhavaError) {
-    (err as any).requestId = req.id;
+    err.requestId = req.id;
     return res.status(err.statusCode).json(createErrorResponse(err));
   }
 
@@ -182,6 +181,7 @@ export default app;
 // EXTEND EXPRESS REQUEST TYPE
 // ─────────────────────────────────────────────────────────────────
 
+/* eslint-disable @typescript-eslint/no-namespace */
 declare global {
   namespace Express {
     interface Request {
@@ -192,3 +192,4 @@ declare global {
     }
   }
 }
+/* eslint-enable @typescript-eslint/no-namespace */
