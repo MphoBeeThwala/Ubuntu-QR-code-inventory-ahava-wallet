@@ -2,6 +2,7 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../core/theme/ahava_theme.dart';
 import '../../features/auth/bloc/auth_bloc.dart';
@@ -83,6 +84,15 @@ class _HomeScreenState extends State<HomeScreen> {
 
                 return const SizedBox.shrink();
               },
+            ),
+            const SizedBox(height: 24),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                icon: const Icon(Icons.send),
+                label: const Text('Send money'),
+                onPressed: () => GoRouter.of(context).go('/payment'),
+              ),
             ),
           ],
         ),

@@ -120,15 +120,17 @@ class PaymentFailure extends PaymentState {
   final String errorCode;
   final String message;
   final bool isRetryable;
+  final PaymentReady? previous;
 
   const PaymentFailure({
     required this.errorCode,
     required this.message,
     required this.isRetryable,
+    this.previous,
   });
 
   @override
-  List<Object?> get props => [errorCode, message];
+  List<Object?> get props => [errorCode, message, previous];
 }
 
 class PaymentQrDecoded extends PaymentState {
@@ -272,12 +274,14 @@ class PaymentBloc extends Bloc<PaymentEvent, PaymentState> {
         errorCode: e.code,
         message: e.userMessage,
         isRetryable: isRetryable,
+        previous: currentState,
       ));
     } catch (e) {
-      emit(const PaymentFailure(
+      emit(PaymentFailure(
         errorCode: 'SYS_002',
         message: 'Network error. Your payment was NOT processed. Please try again.',
         isRetryable: true,
+        previous: currentState,
       ));
     }
   }

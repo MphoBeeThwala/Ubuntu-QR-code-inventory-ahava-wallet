@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import '../../features/auth/bloc/auth_bloc.dart';
 import '../../features/auth/screens/login_screen.dart';
 import '../../features/home/home_screen.dart';
+import '../../features/payments/screens/payment_screen.dart';
 
 /// Provides the router configuration based on auth state.
 class AppRouter {
@@ -22,6 +23,10 @@ class AppRouter {
         GoRoute(
           path: '/home',
           builder: (context, state) => const HomeScreen(),
+        ),
+        GoRoute(
+          path: '/payment',
+          builder: (context, state) => const PaymentScreen(),
         ),
       ],
       redirect: (context, state) {

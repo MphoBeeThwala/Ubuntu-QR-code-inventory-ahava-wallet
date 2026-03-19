@@ -18,6 +18,7 @@ import 'core/security/pin_hasher.dart';
 import 'core/security/pin_store.dart';
 import 'features/auth/bloc/auth_bloc.dart';
 import 'features/wallet/bloc/wallet_bloc.dart';
+import 'features/payments/bloc/payment_bloc.dart';
 import 'features/notifications/bloc/notification_bloc.dart';
 import 'l10n/app_localizations.dart';
 
@@ -95,6 +96,7 @@ class AhavaApp extends StatelessWidget {
       providers: [
         BlocProvider<AuthBloc>(create: (_) => sl<AuthBloc>()..add(const AuthInitialised())),
         BlocProvider<WalletBloc>(create: (_) => sl<WalletBloc>()),
+        BlocProvider<PaymentBloc>(create: (_) => sl<PaymentBloc>()),
         BlocProvider<NotificationBloc>(create: (_) => sl<NotificationBloc>()),
       ],
       child: BlocBuilder<AuthBloc, AuthState>(
