@@ -1,7 +1,12 @@
 import 'package:flutter_bloc/flutter_bloc.dart';
 
+import '../../../core/models/auth_session.dart';
+import '../../../core/repositories/auth_repository.dart';
+
 // Events
-abstract class AuthEvent {}
+abstract class AuthEvent {
+  const AuthEvent();
+}
 
 class LoginRequested extends AuthEvent {
   final String phone;
@@ -13,6 +18,14 @@ class LogoutRequested extends AuthEvent {}
 
 class AuthCheckRequested extends AuthEvent {}
 
+class BiometricReauthRequired extends AuthEvent {
+  const BiometricReauthRequired();
+}
+
+class AuthInitialised extends AuthEvent {
+  const AuthInitialised();
+}
+
 // States
 abstract class AuthState {}
 
@@ -21,9 +34,8 @@ class AuthInitial extends AuthState {}
 class AuthLoading extends AuthState {}
 
 class AuthAuthenticated extends AuthState {
-  final String userId;
-  final String accessToken;
-  AuthAuthenticated({required this.userId, required this.accessToken});
+  final AuthSession session;
+  AuthAuthenticated({required this.session});
 }
 
 class AuthError extends AuthState {
@@ -35,10 +47,31 @@ class AuthUnauthenticated extends AuthState {}
 
 // BLoC
 class AuthBloc extends Bloc<AuthEvent, AuthState> {
-  AuthBloc() : super(AuthInitial()) {
+  final AuthRepository _authRepository;
+
+  AuthBloc({required AuthRepository authRepository})
+      : _authRepository = authRepository,
+        super(AuthInitial()) {
     on<LoginRequested>(_onLoginRequested);
     on<LogoutRequested>(_onLogoutRequested);
     on<AuthCheckRequested>(_onAuthCheckRequested);
+    on<BiometricReauthRequired>(_onBiometricReauthRequired);
+    on<AuthInitialised>(_onAuthInitialised);
+  }
+
+  Future<void> _onBiometricReauthRequired(
+    BiometricReauthRequired event,
+    Emitter<AuthState> emit,
+  ) async {
+    // Placeholder: trigger re-authentication flow (e.g., show biometric modal)
+    emit(AuthUnauthenticated());
+  }
+
+  Future<void> _onAuthInitialised(
+    AuthInitialised event,
+    Emitter<AuthState> emit,
+  ) async {
+    add(AuthCheckRequested());
   }
 
   Future<void> _onLoginRequested(
@@ -47,13 +80,11 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
   ) async {
     emit(AuthLoading());
     try {
-      // TODO: Call API Gateway /auth/login endpoint
-      // String token = await authService.login(event.phone, event.pin);
-      // emit(AuthAuthenticated(userId: '...', accessToken: token));
-      
-      // Mock for now
-      await Future.delayed(const Duration(seconds: 2));
-      emit(AuthAuthenticated(userId: 'user123', accessToken: 'token_mock'));
+      final session = await _authRepository.login(
+        phoneNumber: event.phone,
+        pin: event.pin,
+      );
+      emit(AuthAuthenticated(session: session));
     } catch (e) {
       emit(AuthError(message: e.toString()));
     }
@@ -63,8 +94,9 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
     LogoutRequested event,
     Emitter<AuthState> emit,
   ) async {
+    emit(AuthLoading());
     try {
-      // TODO: Call API Gateway /auth/logout endpoint
+      await _authRepository.logout();
       emit(AuthUnauthenticated());
     } catch (e) {
       emit(AuthError(message: e.toString()));
@@ -75,9 +107,14 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
     AuthCheckRequested event,
     Emitter<AuthState> emit,
   ) async {
+    emit(AuthLoading());
     try {
-      // TODO: Check if token is stored locally and valid
-      emit(AuthUnauthenticated());
+      final session = await _authRepository.restoreSession();
+      if (session != null) {
+        emit(AuthAuthenticated(session: session));
+      } else {
+        emit(AuthUnauthenticated());
+      }
     } catch (e) {
       emit(AuthError(message: e.toString()));
     }

@@ -27,3 +27,11 @@ Thumbs.db
 # IDE
 .vscode/
 .idea/
+
+# Flutter / Dart
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+pubspec.lock
+build/

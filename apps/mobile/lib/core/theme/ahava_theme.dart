@@ -128,8 +128,6 @@ abstract final class AhavaTheme {
             onSecondary: AhavaColors.white,
             surface: AhavaColors.navy800,
             onSurface: AhavaColors.white,
-            background: AhavaColors.navy900,
-            onBackground: AhavaColors.white,
             error: AhavaColors.error600,
             onError: AhavaColors.white,
             outline: AhavaColors.navy600,
@@ -141,8 +139,6 @@ abstract final class AhavaTheme {
             onSecondary: AhavaColors.navy900,
             surface: AhavaColors.white,
             onSurface: AhavaColors.neutral900,
-            background: AhavaColors.neutral050,
-            onBackground: AhavaColors.neutral900,
             error: AhavaColors.error600,
             onError: AhavaColors.white,
             outline: AhavaColors.neutral200,
@@ -169,7 +165,7 @@ abstract final class AhavaTheme {
       scaffoldBackgroundColor: isDark ? AhavaColors.navy900 : AhavaColors.neutral050,
 
       // Cards
-      cardTheme: CardTheme(
+      cardTheme: CardThemeData(
         color: isDark ? AhavaColors.navy800 : AhavaColors.white,
         elevation: 0,
         shape: RoundedRectangleBorder(

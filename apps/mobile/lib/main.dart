@@ -13,6 +13,9 @@ import 'core/router/app_router.dart';
 import 'core/theme/ahava_theme.dart';
 import 'core/di/service_locator.dart';
 import 'core/security/certificate_pinning.dart';
+import 'core/security/lock_screen.dart';
+import 'core/security/pin_hasher.dart';
+import 'core/security/pin_store.dart';
 import 'features/auth/bloc/auth_bloc.dart';
 import 'features/wallet/bloc/wallet_bloc.dart';
 import 'features/notifications/bloc/notification_bloc.dart';
@@ -56,15 +59,31 @@ void main() async {
 
 /// Strip any PII from Sentry events before transmission
 SentryEvent? _sanitiseSentryEvent(SentryEvent event, Hint hint) {
-  // Remove phone numbers, wallet numbers, and amounts from error context
-  return event.copyWith(
-    extra: event.extra?.map((key, value) {
+  // Move legacy `extra` payload (deprecated) into structured `contexts` and
+  // redact any PII fields.
+  final json = event.toJson();
+
+  final rawExtra = json['extra'] as Map<String, dynamic>?;
+  if (rawExtra != null && rawExtra.isNotEmpty) {
+    final sanitizedExtra = <String, dynamic>{};
+    rawExtra.forEach((key, value) {
       if (['phone', 'walletNumber', 'amount', 'balance', 'pin'].contains(key)) {
-        return MapEntry(key, '[REDACTED]');
+        sanitizedExtra[key] = '[REDACTED]';
+      } else {
+        sanitizedExtra[key] = value;
       }
-      return MapEntry(key, value);
-    }),
-  );
+    });
+
+    final contexts = Map<String, dynamic>.from(
+      (json['contexts'] as Map<String, dynamic>?) ?? {},
+    );
+    contexts['extra'] = sanitizedExtra;
+
+    json['contexts'] = contexts;
+    json.remove('extra');
+  }
+
+  return SentryEvent.fromJson(json);
 }
 
 class AhavaApp extends StatelessWidget {
@@ -133,11 +152,15 @@ class _SecurityWrapper extends StatefulWidget {
 class _SecurityWrapperState extends State<_SecurityWrapper>
     with WidgetsBindingObserver {
   DateTime? _lastForegroundAt;
+  bool _locked = false;
+
+  late final PinStore _pinStore;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _pinStore = sl<PinStore>();
   }
 
   @override
@@ -152,9 +175,9 @@ class _SecurityWrapperState extends State<_SecurityWrapper>
       final now = DateTime.now();
       if (_lastForegroundAt != null) {
         final backgroundDuration = now.difference(_lastForegroundAt!);
-        // Require biometric re-auth after 5 minutes in background
+        // Require re-auth after 5 minutes in background
         if (backgroundDuration.inMinutes >= 5) {
-          context.read<AuthBloc>().add(const BiometricReauthRequired());
+          setState(() => _locked = true);
         }
       }
       _lastForegroundAt = now;
@@ -163,8 +186,37 @@ class _SecurityWrapperState extends State<_SecurityWrapper>
     }
   }
 
+  Future<bool> _unlock({String? pin}) async {
+    final storedHash = await _pinStore.getPinHash();
+
+    // If no stored PIN hash exists, allow unlock (e.g., after fresh install).
+    if (storedHash == null) {
+      return true;
+    }
+
+    if (pin == null || pin.isEmpty) {
+      return false;
+    }
+
+    return PinHasher.verify(pin, storedHash);
+  }
+
   @override
   Widget build(BuildContext context) {
-    return widget.child;
+    return Stack(
+      children: [
+        widget.child,
+        if (_locked)
+          LockScreen(
+            onUnlock: ({String? pin}) async {
+              final unlocked = await _unlock(pin: pin);
+              if (unlocked) {
+                setState(() => _locked = false);
+              }
+              return unlocked;
+            },
+          ),
+      ],
+    );
   }
 }

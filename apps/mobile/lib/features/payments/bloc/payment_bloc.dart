@@ -5,11 +5,10 @@
 import 'dart:async';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:equatable/equatable.dart';
-import 'package:uuid/uuid.dart';
 
-import '../../../core/api/ahava_api_client.dart';
 import '../../../core/errors/ahava_error.dart';
-import '../../../packages/shared-types/payment_types.dart';
+import '../../../core/repositories/payment_repository.dart';
+import '../../../shared_types/payment_types.dart';
 
 // ─────────────────────────────────────────────────────────────────
 // EVENTS
@@ -147,8 +146,7 @@ class PaymentQrDecoded extends PaymentState {
 // ─────────────────────────────────────────────────────────────────
 
 class PaymentBloc extends Bloc<PaymentEvent, PaymentState> {
-  final AhavaApiClient _apiClient;
-  static const _uuid = Uuid();
+  final PaymentRepository _paymentRepository;
 
   // Non-retryable error codes — these should not show a "try again" button
   static const _nonRetryableCodes = {
@@ -165,8 +163,8 @@ class PaymentBloc extends Bloc<PaymentEvent, PaymentState> {
     'AML_001', // SANCTIONS_MATCH
   };
 
-  PaymentBloc({required AhavaApiClient apiClient})
-      : _apiClient = apiClient,
+  PaymentBloc({required PaymentRepository paymentRepository})
+      : _paymentRepository = paymentRepository,
         super(const PaymentInitial()) {
     on<PaymentInitiated>(_onInitiated);
     on<PaymentQrScanned>(_onQrScanned);
@@ -178,27 +176,32 @@ class PaymentBloc extends Bloc<PaymentEvent, PaymentState> {
   Future<void> _onInitiated(PaymentInitiated event, Emitter<PaymentState> emit) async {
     try {
       // Resolve recipient details before showing confirmation
-      final recipient = await _apiClient.resolveWallet(event.recipientWalletNumber);
-      if (recipient == null) {
-        emit(const PaymentFailure(
-          errorCode: 'PAY_003',
-          message: 'Recipient wallet not found. Check the wallet number and try again.',
-          isRetryable: false,
-        ));
-        return;
-      }
+      // NOTE: payment service will validate recipient & idempotency.
+      // We still resolve local metadata for display purposes.
+      // In the future, we could call a dedicated endpoint for recipient validation.
+      
+      // For now, continue to allow payment flow even if recipient metadata isn't resolvable.
+      // (The backend will reject invalid recipients.)
 
       // Calculate fee client-side for display (server always recalculates — this is display only)
       final feeCents = _calculateDisplayFee(event.amountCents, event.isFamilyTransfer);
       final totalDebit = event.amountCents + feeCents;
 
-      // Generate idempotency key — UUID v4, generated once per payment intent
-      // If user retries the SAME payment attempt, the same key must be used
-      final idempotencyKey = _uuid.v4();
+      // Resolve recipient display name if possible
+      final recipientWallet = await _paymentRepository.resolveWallet(event.recipientWalletNumber);
+      final recipientName = recipientWallet?.holderName ?? 'Recipient';
+
+      // Generate / reuse idempotency key — persists across retries for the same payment intent
+      final idempotencyKey = await _paymentRepository.getOrCreatePendingIdempotencyKey(
+        receiverWalletNumber: event.recipientWalletNumber,
+        amountCents: event.amountCents,
+        reference: event.reference,
+        isFamilyTransfer: event.isFamilyTransfer,
+      );
 
       emit(PaymentReady(
         recipientWalletNumber: event.recipientWalletNumber,
-        recipientName: recipient.holderName,
+        recipientName: recipientName,
         amountCents: event.amountCents,
         feeCents: feeCents,
         totalDebitCents: totalDebit,
@@ -224,10 +227,10 @@ class PaymentBloc extends Bloc<PaymentEvent, PaymentState> {
   Future<void> _onQrScanned(PaymentQrScanned event, Emitter<PaymentState> emit) async {
     try {
       // Validate and decode QR payload
-      final payload = await _apiClient.validateQrCode(event.qrPayload);
+      final payload = await _paymentRepository.validateQrCode(event.qrPayload);
 
-      // Resolve merchant name
-      final merchant = await _apiClient.resolveWallet(payload.walletNumber);
+      // Resolve merchant name (legacy behavior)
+      final merchant = await _paymentRepository.resolveWallet(payload.walletNumber);
 
       emit(PaymentQrDecoded(
         payload: payload,
@@ -249,23 +252,26 @@ class PaymentBloc extends Bloc<PaymentEvent, PaymentState> {
     emit(const PaymentProcessing());
 
     try {
-      final result = await _apiClient.initiatePayment(
-        InitiatePaymentRequest(
-          idempotencyKey: currentState.idempotencyKey,
-          recipientWalletNumber: currentState.recipientWalletNumber,
-          amountCents: currentState.amountCents,
-          reference: currentState.reference,
-          isFamilyTransfer: currentState.isFamilyTransfer,
-          paymentMethod: 'AHAVA_WALLET',
-        ),
+      final result = await _paymentRepository.initiatePayment(
+        receiverWalletNumber: currentState.recipientWalletNumber,
+        amountCents: currentState.amountCents,
+        idempotencyKey: currentState.idempotencyKey,
+        reference: currentState.reference,
+        isFamilyTransfer: currentState.isFamilyTransfer,
       );
 
+      await _paymentRepository.clearPendingIdempotencyKey();
       emit(PaymentSuccess(result: result));
     } on AhavaError catch (e) {
+      final isRetryable = !_nonRetryableCodes.contains(e.code);
+      if (!isRetryable) {
+        await _paymentRepository.clearPendingIdempotencyKey();
+      }
+
       emit(PaymentFailure(
         errorCode: e.code,
         message: e.userMessage,
-        isRetryable: !_nonRetryableCodes.contains(e.code),
+        isRetryable: isRetryable,
       ));
     } catch (e) {
       emit(const PaymentFailure(
@@ -276,11 +282,13 @@ class PaymentBloc extends Bloc<PaymentEvent, PaymentState> {
     }
   }
 
-  void _onCancelled(PaymentCancelled event, Emitter<PaymentState> emit) {
+  Future<void> _onCancelled(PaymentCancelled event, Emitter<PaymentState> emit) async {
+    await _paymentRepository.clearPendingIdempotencyKey();
     emit(const PaymentInitial());
   }
 
-  void _onReset(PaymentReset event, Emitter<PaymentState> emit) {
+  Future<void> _onReset(PaymentReset event, Emitter<PaymentState> emit) async {
+    await _paymentRepository.clearPendingIdempotencyKey();
     emit(const PaymentInitial());
   }
 

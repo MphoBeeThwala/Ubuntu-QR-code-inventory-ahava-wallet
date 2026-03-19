@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+
+import '../../../core/theme/ahava_theme.dart';
 import '../bloc/auth_bloc.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -23,6 +25,8 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
     return Scaffold(
       body: SafeArea(
         child: SingleChildScrollView(
@@ -30,19 +34,18 @@ class _LoginScreenState extends State<LoginScreen> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              // Logo / Branding
               const SizedBox(height: 60),
               Text(
                 'Ahava',
-                style: Theme.of(context).textTheme.headlineLarge?.copyWith(
+                style: theme.textTheme.headlineLarge?.copyWith(
                   fontWeight: FontWeight.bold,
-                  color: Colors.green.shade700,
+                  color: AhavaColors.gold500,
                 ),
               ),
               const SizedBox(height: 12),
               Text(
-                'South African Digital Wallet',
-                style: Theme.of(context).textTheme.bodyMedium,
+                'South African digital wallet',
+                style: theme.textTheme.bodyMedium,
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 60),
@@ -51,37 +54,43 @@ class _LoginScreenState extends State<LoginScreen> {
               TextField(
                 controller: _phoneController,
                 decoration: InputDecoration(
-                  hintText: 'Phone Number (+27...)',
+                  hintText: 'Phone number (+27...)',
                   prefixIcon: const Icon(Icons.phone),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
                 ),
                 keyboardType: TextInputType.phone,
               ),
-              const SizedBox(height: 20),
+              const SizedBox(height: 16),
 
               // PIN Input
               TextField(
                 controller: _pinController,
                 obscureText: !_showPin,
                 decoration: InputDecoration(
-                  hintText: 'Enter 4-digit PIN',
+                  hintText: '4-digit PIN',
                   prefixIcon: const Icon(Icons.lock),
                   suffixIcon: IconButton(
-                    icon: Icon(_showPin ? Icons.visibility_off : Icons.visibility),
+                    icon: Icon(
+                      _showPin ? Icons.visibility_off : Icons.visibility,
+                    ),
                     onPressed: () => setState(() => _showPin = !_showPin),
-                  ),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
                   ),
                 ),
                 keyboardType: TextInputType.number,
               ),
-              const SizedBox(height: 30),
+              const SizedBox(height: 28),
 
               // Login Button
-              BlocBuilder<AuthBloc, AuthState>(
+              BlocConsumer<AuthBloc, AuthState>(
+                listener: (context, state) {
+                  if (state is AuthError) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(state.message),
+                        backgroundColor: AhavaColors.error600,
+                      ),
+                    );
+                  }
+                },
                 builder: (context, state) {
                   return SizedBox(
                     width: double.infinity,
@@ -89,52 +98,29 @@ class _LoginScreenState extends State<LoginScreen> {
                       onPressed: state is AuthLoading
                           ? null
                           : () {
-                        context.read<AuthBloc>().add(
-                          LoginRequested(
-                            phone: _phoneController.text,
-                            pin: _pinController.text,
-                          ),
-                        );
-                      },
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.green.shade700,
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      ),
+                              context.read<AuthBloc>().add(
+                                    LoginRequested(
+                                      phone: _phoneController.text,
+                                      pin: _pinController.text,
+                                    ),
+                                  );
+                            },
                       child: state is AuthLoading
-                          ? const CircularProgressIndicator(color: Colors.white)
-                          : const Text('Login', style: TextStyle(color: Colors.white)),
+                          ? const SizedBox(
+                              height: 20,
+                              width: 20,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                valueColor: AlwaysStoppedAnimation(Colors.white),
+                              ),
+                            )
+                          : const Text('Login'),
                     ),
                   );
                 },
               ),
 
-              // Error Message
-              BlocBuilder<AuthBloc, AuthState>(
-                builder: (context, state) {
-                  if (state is AuthError) {
-                    return Padding(
-                      padding: const EdgeInsets.only(top: 20),
-                      child: Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: Colors.red.shade100,
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Text(
-                          state.message,
-                          style: TextStyle(color: Colors.red.shade800),
-                        ),
-                      ),
-                    );
-                  }
-                  return const SizedBox.shrink();
-                },
-              ),
-
-              const SizedBox(height: 30),
+              const SizedBox(height: 20),
 
               // Register Link
               Row(
@@ -143,13 +129,12 @@ class _LoginScreenState extends State<LoginScreen> {
                   const Text("Don't have an account? "),
                   GestureDetector(
                     onTap: () {
-                      // Navigate to registration screen
-                      // context.go('/register');
+                      // TODO: Navigate to registration screen
                     },
                     child: Text(
                       'Sign up',
-                      style: TextStyle(
-                        color: Colors.green.shade700,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: AhavaColors.gold500,
                         fontWeight: FontWeight.bold,
                       ),
                     ),

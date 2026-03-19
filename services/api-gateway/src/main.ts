@@ -95,31 +95,50 @@ app.get("/health", (req: Request, res: Response) => {
 // app.use('/payments', paymentRoutes);
 // app.use('/kyc', kycRoutes);
 
-// TODO: Proxy routes to internal services
-// Example proxy middleware:
-app.all("/api/*", async (req: Request, res: Response, next: NextFunction) => {
+// Proxy routes to internal services
+const SERVICE_URLS = {
+  auth: process.env.AUTH_SERVICE_URL || "http://auth-service:6001",
+  wallets: process.env.WALLET_SERVICE_URL || "http://wallet-service:6002",
+  payments: process.env.PAYMENT_SERVICE_URL || "http://payment-service:3003",
+  kyc: process.env.KYC_SERVICE_URL || "http://kyc-service:6004",
+  notifications: process.env.NOTIFICATION_SERVICE_URL || "http://notification-service:6005",
+};
+
+function serviceBaseUrlForPath(path: string): string | null {
+  if (path.startsWith("/wallets")) return SERVICE_URLS.wallets;
+  if (path.startsWith("/payments")) return SERVICE_URLS.payments;
+  if (path.startsWith("/auth")) return SERVICE_URLS.auth;
+  if (path.startsWith("/kyc")) return SERVICE_URLS.kyc;
+  if (path.startsWith("/notifications")) return SERVICE_URLS.notifications;
+  return null;
+}
+
+async function proxyRequest(serviceBaseUrl: string, req: Request, res: Response) {
+  const query = req.url.includes('?') ? req.url.substring(req.url.indexOf('?')) : '';
+  const forwardUrl = `${serviceBaseUrl}${req.path}${query}`;
+
+  const response = await fetch(forwardUrl, {
+    method: req.method,
+    headers: {
+      "Content-Type": "application/json",
+      ...(req.id && { "X-Request-ID": req.id }),
+      "X-Forwarded-For": req.ip || "",
+      ...(req.headers.authorization && { Authorization: req.headers.authorization }),
+      ...(req.headers['x-device-id'] ? { "X-Device-Id": req.headers['x-device-id'] as string } : {}),
+    } as Record<string, string>,
+    body: req.method !== "GET" && req.method !== "HEAD" ? JSON.stringify(req.body) : undefined,
+  });
+
+  const bodyText = await response.text();
+  res.status(response.status).send(bodyText);
+}
+
+app.all("*", async (req: Request, res: Response, next: NextFunction) => {
+  const baseUrl = serviceBaseUrlForPath(req.path);
+  if (!baseUrl) return next();
+
   try {
-    // TODO: Route to appropriate internal service based on path
-    // POST /api/auth/register → http://localhost:6001/auth/register
-    // GET /api/wallets/:id → http://localhost:6002/wallets/:id
-    // POST /api/payments → http://localhost:6003/payments
-    // etc.
-
-    const forwardUrl = `http://auth-service:6001${req.path}`;
-
-    const response = await fetch(forwardUrl, {
-      method: req.method,
-      headers: {
-        "Content-Type": "application/json",
-        ...(req.id && { "X-Request-ID": req.id }),
-        "X-Forwarded-For": req.ip || "",
-        ...(req.headers.authorization && { Authorization: req.headers.authorization }),
-      } as Record<string, string>,
-      body: req.method !== "GET" && req.method !== "HEAD" ? JSON.stringify(req.body) : undefined,
-    });
-
-    const data = await response.json();
-    res.status(response.status).json(data);
+    await proxyRequest(baseUrl, req, res);
   } catch (error) {
     next(error);
   }

@@ -71,6 +71,50 @@ app.get("/wallets/:walletId", async (req: Request, res: Response, next: NextFunc
   }
 });
 
+// GET /wallets/lookup?walletNumber=AHV-xxxx-xxxx
+app.get("/wallets/lookup", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const walletNumber = req.query.walletNumber as string;
+
+    if (!walletNumber) {
+      throw new AhavaError(
+        AhavaErrorCode.VAL_MISSING_REQUIRED_FIELD,
+        "Missing required fields",
+        { requestId: req.id }
+      );
+    }
+
+    const wallet = await prisma.wallet.findUnique({
+      where: { walletNumber },
+      include: {
+        user: {
+          select: { fullName: true },
+        },
+      },
+    });
+
+    if (!wallet || wallet.isDeleted) {
+      throw new AhavaError(
+        AhavaErrorCode.WAL_NOT_FOUND,
+        "Wallet not found",
+        { requestId: req.id }
+      );
+    }
+
+    res.json(
+      createSuccessResponse({
+        wallet: {
+          id: wallet.id,
+          walletNumber: wallet.walletNumber,
+          holderName: wallet.user?.fullName ?? wallet.walletNumber,
+        },
+      })
+    );
+  } catch (error) {
+    next(error);
+  }
+});
+
 // GET /wallets/:walletId/transactions - Get transaction history
 app.get("/wallets/:walletId/transactions", async (req: Request, res: Response, next: NextFunction) => {
   try {
