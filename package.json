@@ -23,6 +23,7 @@
     "docker:up": "docker-compose up -d",
     "docker:down": "docker-compose down",
     "docker:reset": "docker-compose down -v && docker-compose up -d",
+    "smoke:payment": "node scripts/smoke-payment.js",
     "secrets:validate": "node scripts/validate-secrets.js",
     "audit:deps": "npm audit --audit-level=high"
   },
