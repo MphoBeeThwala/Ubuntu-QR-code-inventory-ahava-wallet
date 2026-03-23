@@ -7,6 +7,9 @@ import '../../features/auth/bloc/auth_bloc.dart';
 import '../../features/auth/screens/login_screen.dart';
 import '../../features/home/home_screen.dart';
 import '../../features/payments/screens/payment_screen.dart';
+import '../../features/wallet/screens/transaction_history_screen.dart';
+import '../../features/wallet/screens/qr_scan_screen.dart';
+import '../../features/settings/settings_screen.dart';
 
 /// Provides the router configuration based on auth state.
 class AppRouter {
@@ -28,14 +31,26 @@ class AppRouter {
           path: '/payment',
           builder: (context, state) => const PaymentScreen(),
         ),
+        GoRoute(
+          path: '/history',
+          builder: (context, state) => const TransactionHistoryScreen(),
+        ),
+        GoRoute(
+          path: '/scan',
+          builder: (context, state) => const QrScanScreen(),
+        ),
+        GoRoute(
+          path: '/settings',
+          builder: (context, state) => const SettingsScreen(),
+        ),
       ],
       redirect: (context, state) {
-        final goingToLogin = state.uri.toString() == '/login';
+        final path = state.uri.toString();
+        final goingToLogin = path == '/login';
         if (loggedIn && goingToLogin) return '/home';
         if (!loggedIn && !goingToLogin) return '/login';
         return null;
       },
     );
   }
-
 }

@@ -4,6 +4,7 @@
 import '../api/ahava_api_client.dart';
 import '../cache/offline_cache.dart';
 import '../models/wallet_balance.dart';
+import '../models/transaction.dart';
 
 class WalletRepository {
   final AhavaApiClient _apiClient;
@@ -33,5 +34,22 @@ class WalletRepository {
       }
       rethrow;
     }
+  }
+
+  Future<List<WalletTransaction>> getTransactionHistory(
+    String walletId, {
+    int limit = 20,
+    int offset = 0,
+  }) async {
+    final response = await _apiClient.get(
+      '/wallets/$walletId/transactions',
+      queryParameters: {'limit': limit, 'offset': offset},
+    );
+    final data = response['data'] as Map<String, dynamic>;
+    final list = data['transactions'] as List<dynamic>;
+    return list
+        .cast<Map<String, dynamic>>()
+        .map(WalletTransaction.fromJson)
+        .toList();
   }
 }
