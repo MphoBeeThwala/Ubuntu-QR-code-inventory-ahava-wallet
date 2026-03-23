@@ -64,6 +64,7 @@ export enum AhavaErrorCode {
   PAY_ALREADY_REVERSED = "PAY_ALREADY_REVERSED",
   PAY_TIMEOUT = "PAY_TIMEOUT",
   PAY_FAILED = "PAY_FAILED",
+  PAY_SELF_TRANSFER = "PAY_SELF_TRANSFER",
 
   // QR (QR_xxx)
   QR_NOT_FOUND = "QR_NOT_FOUND",
@@ -209,6 +210,7 @@ export const ERROR_CODE_TO_HTTP_STATUS: Record<AhavaErrorCode, number> = {
   [AhavaErrorCode.PAY_ALREADY_REVERSED]: 409,
   [AhavaErrorCode.PAY_TIMEOUT]: 504,
   [AhavaErrorCode.PAY_FAILED]: 402,
+  [AhavaErrorCode.PAY_SELF_TRANSFER]: 400,
 
   [AhavaErrorCode.QR_NOT_FOUND]: 404,
   [AhavaErrorCode.QR_EXPIRED]: 410,
@@ -302,12 +304,13 @@ export class AhavaError extends Error {
       statusCode?: number;
       requestId?: string;
       details?: Record<string, unknown>;
-    }
+    },
   ) {
     super(message);
     this.name = "AhavaError";
     this.code = code;
-    this.statusCode = options?.statusCode ?? ERROR_CODE_TO_HTTP_STATUS[code] ?? 500;
+    this.statusCode =
+      options?.statusCode ?? ERROR_CODE_TO_HTTP_STATUS[code] ?? 500;
     this.requestId = options?.requestId;
     this.timestamp = new Date();
     this.details = options?.details;
@@ -362,12 +365,17 @@ export interface AhavaErrorResponse {
 /**
  * Generic API response
  */
-export type AhavaResponse<T = unknown> = AhavaSuccessResponse<T> | AhavaErrorResponse;
+export type AhavaResponse<T = unknown> =
+  | AhavaSuccessResponse<T>
+  | AhavaErrorResponse;
 
 /**
  * Utility to create success responses
  */
-export function createSuccessResponse<T>(data: T, requestId?: string): AhavaSuccessResponse<T> {
+export function createSuccessResponse<T>(
+  data: T,
+  requestId?: string,
+): AhavaSuccessResponse<T> {
   return {
     success: true,
     data,

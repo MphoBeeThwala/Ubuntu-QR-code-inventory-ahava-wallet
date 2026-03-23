@@ -449,6 +449,334 @@ app.post(
   },
 );
 
+// ─────────────────────────────────────────────────────────────────
+// QR CODE ROUTES
+// ─────────────────────────────────────────────────────────────────
+
+// POST /wallets/:walletId/qr — generate a static or dynamic QR code
+app.post(
+  "/wallets/:walletId/qr",
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { walletId } = req.params;
+      const {
+        qrType = "STATIC",
+        amountCents,
+        description,
+        ttlMinutes = 10,
+      } = req.body;
+
+      const wallet = await prisma.wallet.findUnique({
+        where: { id: walletId, isDeleted: false },
+        select: { id: true, walletNumber: true, status: true },
+      });
+
+      if (!wallet) {
+        throw new AhavaError(AhavaErrorCode.WAL_NOT_FOUND, "Wallet not found", {
+          requestId: req.id,
+        });
+      }
+
+      if (wallet.status !== "ACTIVE") {
+        throw new AhavaError(
+          AhavaErrorCode.WAL_WALLET_SUSPENDED,
+          "Wallet is not active",
+          { requestId: req.id },
+        );
+      }
+
+      if (qrType === "DYNAMIC" && (!amountCents || amountCents <= 0)) {
+        throw new AhavaError(
+          AhavaErrorCode.PAY_INVALID_AMOUNT,
+          "amountCents is required and must be positive for DYNAMIC QR",
+          { requestId: req.id },
+        );
+      }
+
+      const payload = JSON.stringify({
+        walletId: wallet.id,
+        walletNumber: wallet.walletNumber,
+        qrType,
+        ...(amountCents && { amountCents }),
+        ...(description && { description }),
+        nonce: uuidv4(),
+      });
+
+      const crypto = await import("crypto");
+      const qrHash = crypto.createHash("sha256").update(payload).digest("hex");
+
+      const expiresAt =
+        qrType === "STATIC"
+          ? null
+          : new Date(Date.now() + ttlMinutes * 60 * 1000);
+
+      const qr = await prisma.paymentQrCode.create({
+        data: {
+          walletId: wallet.id,
+          qrType,
+          qrPayload: payload,
+          qrHash,
+          amountCents: amountCents ? BigInt(amountCents) : null,
+          currency: "ZAR",
+          description: description || null,
+          expiresAt,
+          maxUsage: qrType === "STATIC" ? null : 1,
+        },
+      });
+
+      res.status(201).json(
+        createSuccessResponse({
+          qrId: qr.id,
+          qrHash: qr.qrHash,
+          qrType: qr.qrType,
+          qrPayload: qr.qrPayload,
+          amountCents: qr.amountCents ? Number(qr.amountCents) : null,
+          expiresAt: qr.expiresAt?.toISOString() ?? null,
+          deepLink: `ahava://pay?qr=${qr.qrHash}`,
+        }),
+      );
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+// GET /qr/:qrHash — look up a QR code for display / pre-flight check
+app.get(
+  "/qr/:qrHash",
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { qrHash } = req.params;
+
+      const qr = await prisma.paymentQrCode.findFirst({
+        where: { qrHash, isActive: true },
+        include: {
+          wallet: { select: { walletNumber: true, status: true } },
+        },
+      });
+
+      if (!qr) {
+        throw new AhavaError(
+          AhavaErrorCode.QR_NOT_FOUND,
+          "QR code not found or inactive",
+          { requestId: req.id },
+        );
+      }
+
+      if (qr.expiresAt && qr.expiresAt < new Date()) {
+        throw new AhavaError(AhavaErrorCode.QR_EXPIRED, "QR code has expired", {
+          requestId: req.id,
+        });
+      }
+
+      if (qr.maxUsage !== null && qr.usageCount >= qr.maxUsage) {
+        throw new AhavaError(
+          AhavaErrorCode.QR_MAX_USAGE_REACHED,
+          "QR code has already been used",
+          { requestId: req.id },
+        );
+      }
+
+      res.json(
+        createSuccessResponse({
+          qrId: qr.id,
+          qrType: qr.qrType,
+          walletNumber: qr.wallet.walletNumber,
+          amountCents: qr.amountCents ? Number(qr.amountCents) : null,
+          description: qr.description,
+          expiresAt: qr.expiresAt?.toISOString() ?? null,
+          usageCount: qr.usageCount,
+        }),
+      );
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+// POST /qr/:qrHash/pay — pay via QR code (debit sender, credit QR wallet)
+app.post(
+  "/qr/:qrHash/pay",
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { qrHash } = req.params;
+      const { senderWalletId, amountCents, idempotencyKey } = req.body;
+
+      if (!senderWalletId || !amountCents || !idempotencyKey) {
+        throw new AhavaError(
+          AhavaErrorCode.VAL_MISSING_REQUIRED_FIELD,
+          "senderWalletId, amountCents, and idempotencyKey are required",
+          { requestId: req.id },
+        );
+      }
+
+      if (amountCents <= 0) {
+        throw new AhavaError(
+          AhavaErrorCode.PAY_INVALID_AMOUNT,
+          "amountCents must be positive",
+          { requestId: req.id },
+        );
+      }
+
+      const qr = await prisma.paymentQrCode.findFirst({
+        where: { qrHash, isActive: true },
+        include: {
+          wallet: true,
+        },
+      });
+
+      if (!qr) {
+        throw new AhavaError(
+          AhavaErrorCode.QR_NOT_FOUND,
+          "QR code not found or inactive",
+          { requestId: req.id },
+        );
+      }
+
+      if (qr.expiresAt && qr.expiresAt < new Date()) {
+        throw new AhavaError(AhavaErrorCode.QR_EXPIRED, "QR code has expired", {
+          requestId: req.id,
+        });
+      }
+
+      if (qr.maxUsage !== null && qr.usageCount >= qr.maxUsage) {
+        throw new AhavaError(
+          AhavaErrorCode.QR_MAX_USAGE_REACHED,
+          "QR code has already been used",
+          { requestId: req.id },
+        );
+      }
+
+      // For dynamic QR, enforce locked amount
+      const payAmount =
+        qr.qrType === "DYNAMIC" && qr.amountCents
+          ? Number(qr.amountCents)
+          : amountCents;
+
+      if (qr.qrType === "DYNAMIC" && qr.amountCents) {
+        if (amountCents !== Number(qr.amountCents)) {
+          throw new AhavaError(
+            AhavaErrorCode.PAY_INVALID_AMOUNT,
+            `Dynamic QR requires exact amount of ${Number(qr.amountCents)} cents`,
+            { requestId: req.id },
+          );
+        }
+      }
+
+      const senderWallet = await prisma.wallet.findUnique({
+        where: { id: senderWalletId, isDeleted: false },
+      });
+
+      if (!senderWallet) {
+        throw new AhavaError(
+          AhavaErrorCode.WAL_NOT_FOUND,
+          "Sender wallet not found",
+          { requestId: req.id },
+        );
+      }
+
+      if (senderWallet.status === "SUSPENDED") {
+        throw new AhavaError(
+          AhavaErrorCode.WAL_WALLET_SUSPENDED,
+          "Sender wallet is suspended",
+          { requestId: req.id },
+        );
+      }
+
+      if (senderWallet.status === "FROZEN") {
+        throw new AhavaError(
+          AhavaErrorCode.WAL_WALLET_FROZEN,
+          "Sender wallet is frozen",
+          { requestId: req.id },
+        );
+      }
+
+      if (Number(senderWallet.balance) < payAmount) {
+        throw new AhavaError(
+          AhavaErrorCode.WAL_INSUFFICIENT_BALANCE,
+          "Insufficient balance",
+          { requestId: req.id },
+        );
+      }
+
+      if (senderWalletId === qr.walletId) {
+        throw new AhavaError(
+          AhavaErrorCode.PAY_SELF_TRANSFER,
+          "Cannot pay yourself",
+          { requestId: req.id },
+        );
+      }
+
+      const receiverWallet = qr.wallet;
+
+      const [, , debitTxn] = await prisma.$transaction([
+        prisma.wallet.update({
+          where: { id: senderWalletId },
+          data: { balance: { decrement: payAmount } },
+        }),
+        prisma.wallet.update({
+          where: { id: qr.walletId },
+          data: { balance: { increment: payAmount } },
+        }),
+        prisma.walletTransaction.create({
+          data: {
+            walletId: senderWalletId,
+            transactionType: "DEBIT",
+            paymentMethod: "UBUNTUPAY_WALLET",
+            amount: payAmount,
+            feeAmount: 0,
+            netAmount: payAmount,
+            balanceBefore: senderWallet.balance,
+            balanceAfter: BigInt(Number(senderWallet.balance) - payAmount),
+            status: "COMPLETED",
+            description:
+              qr.description || `QR payment to ${receiverWallet.walletNumber}`,
+            counterpartyWalletId: qr.walletId,
+            paymentQrId: qr.id,
+            idempotencyKey: `qr-debit-${idempotencyKey}`,
+          },
+        }),
+        prisma.walletTransaction.create({
+          data: {
+            walletId: qr.walletId,
+            transactionType: "CREDIT",
+            paymentMethod: "UBUNTUPAY_WALLET",
+            amount: payAmount,
+            feeAmount: 0,
+            netAmount: payAmount,
+            balanceBefore: receiverWallet.balance,
+            balanceAfter: BigInt(Number(receiverWallet.balance) + payAmount),
+            status: "COMPLETED",
+            description: qr.description || `QR payment received`,
+            counterpartyWalletId: senderWalletId,
+            paymentQrId: qr.id,
+            idempotencyKey: `qr-credit-${idempotencyKey}`,
+          },
+        }),
+        prisma.paymentQrCode.update({
+          where: { id: qr.id },
+          data: {
+            usageCount: { increment: 1 },
+            usedAt: new Date(),
+            isActive: qr.maxUsage === 1 ? false : true,
+          },
+        }),
+      ]);
+
+      res.status(201).json(
+        createSuccessResponse({
+          transactionId: debitTxn.id,
+          amountCents: payAmount,
+          receiverWalletNumber: receiverWallet.walletNumber,
+          qrType: qr.qrType,
+        }),
+      );
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
 // Error handler
 app.use((err: Error, req: Request, res: Response, _next: NextFunction) => {
   if (err instanceof AhavaError) {

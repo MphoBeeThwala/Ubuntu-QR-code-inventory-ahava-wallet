@@ -13,10 +13,17 @@ const mockPrisma = {
   },
   walletTransaction: {
     findMany: jest.fn(),
+    create: jest.fn(),
   },
   auditLog: {
     create: jest.fn(),
   },
+  paymentQrCode: {
+    create: jest.fn(),
+    findFirst: jest.fn(),
+    update: jest.fn(),
+  },
+  $transaction: jest.fn(),
 };
 
 jest.mock("@prisma/client", () => ({
@@ -314,5 +321,247 @@ describe("POST /wallets/:walletId/freeze", () => {
         data: expect.objectContaining({ status: "FROZEN" }),
       }),
     );
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────
+const WALLET_ID = "wallet-uuid-1";
+const QR_HASH = "abc123def456";
+
+function makeQr(overrides = {}) {
+  return {
+    id: "qr-001",
+    walletId: WALLET_ID,
+    qrType: "STATIC",
+    qrPayload: '{"walletId":"wallet-uuid-1"}',
+    qrHash: QR_HASH,
+    amountCents: null,
+    currency: "ZAR",
+    description: null,
+    expiresAt: null,
+    usedAt: null,
+    usageCount: 0,
+    maxUsage: null,
+    isActive: true,
+    createdAt: new Date(),
+    wallet: makeWallet(),
+    ...overrides,
+  };
+}
+
+describe("POST /wallets/:walletId/qr", () => {
+  it("generates a static QR code and returns 201", async () => {
+    mockPrisma.wallet.findUnique.mockResolvedValue(makeWallet());
+    const qr = makeQr();
+    mockPrisma.paymentQrCode.create.mockResolvedValue(qr);
+
+    const res = await request(app)
+      .post(`/wallets/${WALLET_ID}/qr`)
+      .send({ qrType: "STATIC" });
+
+    expect(res.status).toBe(201);
+    expect(res.body.data.qrId).toBe("qr-001");
+    expect(res.body.data.qrType).toBe("STATIC");
+    expect(res.body.data.deepLink).toContain("ahava://pay?qr=");
+  });
+
+  it("generates a dynamic QR code with locked amount", async () => {
+    mockPrisma.wallet.findUnique.mockResolvedValue(makeWallet());
+    const qr = makeQr({
+      qrType: "DYNAMIC",
+      amountCents: BigInt(5000),
+      expiresAt: new Date(Date.now() + 600000),
+      maxUsage: 1,
+    });
+    mockPrisma.paymentQrCode.create.mockResolvedValue(qr);
+
+    const res = await request(app)
+      .post(`/wallets/${WALLET_ID}/qr`)
+      .send({ qrType: "DYNAMIC", amountCents: 5000 });
+
+    expect(res.status).toBe(201);
+    expect(res.body.data.amountCents).toBe(5000);
+    expect(res.body.data.expiresAt).not.toBeNull();
+  });
+
+  it("returns 400 when DYNAMIC QR has no amountCents", async () => {
+    mockPrisma.wallet.findUnique.mockResolvedValue(makeWallet());
+
+    const res = await request(app)
+      .post(`/wallets/${WALLET_ID}/qr`)
+      .send({ qrType: "DYNAMIC" });
+
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 404 when wallet not found", async () => {
+    mockPrisma.wallet.findUnique.mockResolvedValue(null);
+
+    const res = await request(app)
+      .post(`/wallets/${WALLET_ID}/qr`)
+      .send({ qrType: "STATIC" });
+
+    expect(res.status).toBe(404);
+  });
+
+  it("returns 403 when wallet is suspended", async () => {
+    mockPrisma.wallet.findUnique.mockResolvedValue(
+      makeWallet({ status: "SUSPENDED" }),
+    );
+
+    const res = await request(app)
+      .post(`/wallets/${WALLET_ID}/qr`)
+      .send({ qrType: "STATIC" });
+
+    expect(res.status).toBe(403);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────
+describe("GET /qr/:qrHash", () => {
+  it("returns QR details for a valid static QR", async () => {
+    mockPrisma.paymentQrCode.findFirst.mockResolvedValue(
+      makeQr({
+        wallet: { walletNumber: "AHV-ABC1-DEF2-GHI3", status: "ACTIVE" },
+      }),
+    );
+
+    const res = await request(app).get(`/qr/${QR_HASH}`);
+    expect(res.status).toBe(200);
+    expect(res.body.data.qrType).toBe("STATIC");
+    expect(res.body.data.walletNumber).toBe("AHV-ABC1-DEF2-GHI3");
+    expect(res.body.data.amountCents).toBeNull();
+  });
+
+  it("returns 404 when QR not found", async () => {
+    mockPrisma.paymentQrCode.findFirst.mockResolvedValue(null);
+    const res = await request(app).get("/qr/nonexistent");
+    expect(res.status).toBe(404);
+  });
+
+  it("returns 410 when QR is expired", async () => {
+    mockPrisma.paymentQrCode.findFirst.mockResolvedValue(
+      makeQr({ expiresAt: new Date(Date.now() - 1000) }),
+    );
+    const res = await request(app).get(`/qr/${QR_HASH}`);
+    expect(res.status).toBe(410);
+  });
+
+  it("returns 400 when dynamic QR already used", async () => {
+    mockPrisma.paymentQrCode.findFirst.mockResolvedValue(
+      makeQr({ maxUsage: 1, usageCount: 1 }),
+    );
+    const res = await request(app).get(`/qr/${QR_HASH}`);
+    expect(res.status).toBe(400);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────
+describe("POST /qr/:qrHash/pay", () => {
+  const SENDER_ID = "sender-wallet-001";
+  const senderWallet = {
+    ...makeWallet({ id: SENDER_ID, balance: BigInt(100000) }),
+  };
+  const debitTxn = { id: "debit-txn-001" };
+
+  beforeEach(() => {
+    mockPrisma.paymentQrCode.findFirst.mockResolvedValue(
+      makeQr({ wallet: makeWallet() }),
+    );
+    mockPrisma.wallet.findUnique.mockResolvedValue(senderWallet);
+    mockPrisma.$transaction.mockResolvedValue([{}, {}, debitTxn, {}, {}]);
+  });
+
+  it("debits sender and credits QR wallet on success", async () => {
+    const res = await request(app).post(`/qr/${QR_HASH}/pay`).send({
+      senderWalletId: SENDER_ID,
+      amountCents: 5000,
+      idempotencyKey: "idem-001",
+    });
+
+    expect(res.status).toBe(201);
+    expect(res.body.data.transactionId).toBe("debit-txn-001");
+    expect(res.body.data.amountCents).toBe(5000);
+    expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns 400 when required fields are missing", async () => {
+    const res = await request(app)
+      .post(`/qr/${QR_HASH}/pay`)
+      .send({ senderWalletId: SENDER_ID });
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 404 when QR not found", async () => {
+    mockPrisma.paymentQrCode.findFirst.mockResolvedValue(null);
+    const res = await request(app)
+      .post(`/qr/${QR_HASH}/pay`)
+      .send({
+        senderWalletId: SENDER_ID,
+        amountCents: 5000,
+        idempotencyKey: "ik-1",
+      });
+    expect(res.status).toBe(404);
+  });
+
+  it("returns 410 when QR expired", async () => {
+    mockPrisma.paymentQrCode.findFirst.mockResolvedValue(
+      makeQr({ expiresAt: new Date(Date.now() - 1000), wallet: makeWallet() }),
+    );
+    const res = await request(app)
+      .post(`/qr/${QR_HASH}/pay`)
+      .send({
+        senderWalletId: SENDER_ID,
+        amountCents: 5000,
+        idempotencyKey: "ik-1",
+      });
+    expect(res.status).toBe(410);
+  });
+
+  it("returns 402 when sender has insufficient balance", async () => {
+    mockPrisma.wallet.findUnique.mockResolvedValue(
+      makeWallet({ id: SENDER_ID, balance: BigInt(100) }),
+    );
+    const res = await request(app)
+      .post(`/qr/${QR_HASH}/pay`)
+      .send({
+        senderWalletId: SENDER_ID,
+        amountCents: 5000,
+        idempotencyKey: "ik-1",
+      });
+    expect(res.status).toBe(402);
+  });
+
+  it("returns 400 for self-payment", async () => {
+    mockPrisma.paymentQrCode.findFirst.mockResolvedValue(
+      makeQr({ walletId: SENDER_ID, wallet: makeWallet({ id: SENDER_ID }) }),
+    );
+    const res = await request(app)
+      .post(`/qr/${QR_HASH}/pay`)
+      .send({
+        senderWalletId: SENDER_ID,
+        amountCents: 5000,
+        idempotencyKey: "ik-1",
+      });
+    expect(res.status).toBe(400);
+  });
+
+  it("enforces dynamic QR locked amount", async () => {
+    mockPrisma.paymentQrCode.findFirst.mockResolvedValue(
+      makeQr({
+        qrType: "DYNAMIC",
+        amountCents: BigInt(3000),
+        wallet: makeWallet(),
+      }),
+    );
+    const res = await request(app)
+      .post(`/qr/${QR_HASH}/pay`)
+      .send({
+        senderWalletId: SENDER_ID,
+        amountCents: 9999,
+        idempotencyKey: "ik-1",
+      });
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe("PAY_INVALID_AMOUNT");
   });
 });

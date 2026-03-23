@@ -108,6 +108,7 @@ function serviceBaseUrlForPath(path: string): string | null {
   if (path.startsWith("/kyc")) return SERVICE_URLS.kyc;
   if (path.startsWith("/notifications")) return SERVICE_URLS.notifications;
   if (path.startsWith("/agents")) return SERVICE_URLS.agents;
+  if (path.startsWith("/qr")) return SERVICE_URLS.wallets;
   return null;
 }
 
