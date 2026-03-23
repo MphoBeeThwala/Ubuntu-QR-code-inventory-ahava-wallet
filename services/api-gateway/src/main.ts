@@ -98,6 +98,7 @@ const SERVICE_URLS = {
   kyc: process.env.KYC_SERVICE_URL || "http://localhost:6004",
   notifications:
     process.env.NOTIFICATION_SERVICE_URL || "http://localhost:6005",
+  agents: process.env.AGENT_SERVICE_URL || "http://localhost:6009",
 };
 
 function serviceBaseUrlForPath(path: string): string | null {
@@ -106,6 +107,7 @@ function serviceBaseUrlForPath(path: string): string | null {
   if (path.startsWith("/auth")) return SERVICE_URLS.auth;
   if (path.startsWith("/kyc")) return SERVICE_URLS.kyc;
   if (path.startsWith("/notifications")) return SERVICE_URLS.notifications;
+  if (path.startsWith("/agents")) return SERVICE_URLS.agents;
   return null;
 }
 
