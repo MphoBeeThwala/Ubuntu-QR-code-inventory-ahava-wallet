@@ -320,7 +320,7 @@ describe("POST /payments — successful payment", () => {
     await request(app).post("/payments").send(payload);
 
     expect(mockQueueAdd).toHaveBeenCalledWith(
-      expect.stringContaining("payments:created"),
+      expect.stringContaining("payments_created"),
       expect.objectContaining({
         walletId: SENDER_ID,
         amountCents: payload.amountCents,
