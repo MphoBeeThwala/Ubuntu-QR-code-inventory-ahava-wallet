@@ -92,12 +92,12 @@ app.get("/health", (req: Request, res: Response) => {
 
 // Proxy routes to internal services
 const SERVICE_URLS = {
-  auth: process.env.AUTH_SERVICE_URL || "http://auth-service:6001",
-  wallets: process.env.WALLET_SERVICE_URL || "http://wallet-service:6002",
-  payments: process.env.PAYMENT_SERVICE_URL || "http://payment-service:6003",
-  kyc: process.env.KYC_SERVICE_URL || "http://kyc-service:6004",
+  auth: process.env.AUTH_SERVICE_URL || "http://localhost:6001",
+  wallets: process.env.WALLET_SERVICE_URL || "http://localhost:6002",
+  payments: process.env.PAYMENT_SERVICE_URL || "http://localhost:6003",
+  kyc: process.env.KYC_SERVICE_URL || "http://localhost:6004",
   notifications:
-    process.env.NOTIFICATION_SERVICE_URL || "http://notification-service:6005",
+    process.env.NOTIFICATION_SERVICE_URL || "http://localhost:6005",
 };
 
 function serviceBaseUrlForPath(path: string): string | null {
