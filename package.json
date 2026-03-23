@@ -10,7 +10,7 @@
   ],
   "scripts": {
     "prepare": "husky install",
-    "dev": "turbo run dev",
+    "dev": "turbo run dev --concurrency=15",
     "build": "turbo run build",
     "test": "turbo run test",
     "test:coverage": "turbo run test:coverage",
