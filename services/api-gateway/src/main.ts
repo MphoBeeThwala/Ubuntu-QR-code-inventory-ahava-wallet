@@ -12,14 +12,20 @@
  * - Device fingerprinting + certificate pinning validation
  */
 
-import express, {
-  Express,
-  Request,
-  Response,
-  NextFunction,
-} from "express";
+import express, { Express, Request, Response, NextFunction } from "express";
 import { v4 as uuidv4 } from "uuid";
-import { AhavaError, AhavaErrorCode, createErrorResponse, createSuccessResponse } from "@ahava/shared-errors";
+import {
+  AhavaError,
+  AhavaErrorCode,
+  createErrorResponse,
+  createSuccessResponse,
+} from "@ahava/shared-errors";
+import { jwtAuthMiddleware, loadPublicKey } from "./middleware/auth.middleware";
+import {
+  generalRateLimiter,
+  authRateLimiter,
+  paymentRateLimiter,
+} from "./middleware/rate-limit.middleware";
 
 const app: Express = express();
 const PORT = process.env.PORT || 6000;
@@ -31,43 +37,32 @@ const PORT = process.env.PORT || 6000;
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Request ID tracking
+// Request ID tracking (must be first)
 app.use((req: Request, res: Response, next: NextFunction) => {
   req.id = uuidv4();
   res.setHeader("X-Request-ID", req.id);
   next();
 });
 
-// TODO: Initialize Sentry error tracking
-// Sentry.init({
-//   dsn: process.env.SENTRY_DSN,
-//   environment: process.env.NODE_ENV,
-// });
-// app.use(Sentry.Handlers.requestHandler());
+// Device fingerprinting — populate req.deviceFingerprint for rate-limit key
+app.use((req: Request, _res: Response, next: NextFunction) => {
+  const deviceId = (req.headers["x-device-id"] as string) || "";
+  req.deviceId = deviceId;
+  req.deviceFingerprint = deviceId || req.ip || "unknown";
+  next();
+});
 
-// TODO: Initialize Datadog APM
-// const tracer = require('dd-trace').init();
+// General rate limiter — 100 req/min per device (all routes)
+app.use(generalRateLimiter);
 
-// TODO: Add device fingerprinting middleware
-// app.use((req, res, next) => {
-//   const deviceId = req.headers['x-device-id'] as string;
-//   const userAgent = req.headers['user-agent'] || '';
-//   const ipAddress = req.ip || '';
-//   req.deviceFingerprint = generateDeviceFingerprint(userAgent, ipAddress, deviceId);
-//   next();
-// });
+// Stricter limiters on specific paths
+app.use("/auth/login", authRateLimiter);
+app.use("/auth/device-bind", authRateLimiter);
+app.use("/payments", paymentRateLimiter);
 
-// TODO: Add rate limiting middleware
-// const rateLimiter = createRateLimiter({
-//   max: 100, // 100 requests per windowMs
-//   windowMs: 60 * 1000, // 1 minute
-//   keyGenerator: (req) => req.deviceFingerprint || req.ip,
-// });
-// app.use(rateLimiter);
-
-// Stricter rate limit for auth endpoints
-// TODO: app.post('/auth/login', createRateLimiter({ max: 5, windowMs: 15 * 60 * 1000 }), ...);
-// TODO: app.post('/payments', createRateLimiter({ max: 10, windowMs: 60 * 1000 }), ...);
+// JWT verification — rejects requests without a valid Bearer token
+// (public paths /health, /auth/register, /auth/login, /auth/refresh are exempt)
+app.use(jwtAuthMiddleware);
 
 // ─────────────────────────────────────────────────────────────────
 // ROUTES
@@ -81,7 +76,7 @@ app.get("/health", (req: Request, res: Response) => {
       timestamp: new Date().toISOString(),
       uptime: process.uptime(),
       service: "api-gateway",
-    })
+    }),
   );
 });
 
@@ -101,7 +96,8 @@ const SERVICE_URLS = {
   wallets: process.env.WALLET_SERVICE_URL || "http://wallet-service:6002",
   payments: process.env.PAYMENT_SERVICE_URL || "http://payment-service:3003",
   kyc: process.env.KYC_SERVICE_URL || "http://kyc-service:6004",
-  notifications: process.env.NOTIFICATION_SERVICE_URL || "http://notification-service:6005",
+  notifications:
+    process.env.NOTIFICATION_SERVICE_URL || "http://notification-service:6005",
 };
 
 function serviceBaseUrlForPath(path: string): string | null {
@@ -113,8 +109,14 @@ function serviceBaseUrlForPath(path: string): string | null {
   return null;
 }
 
-async function proxyRequest(serviceBaseUrl: string, req: Request, res: Response) {
-  const query = req.url.includes('?') ? req.url.substring(req.url.indexOf('?')) : '';
+async function proxyRequest(
+  serviceBaseUrl: string,
+  req: Request,
+  res: Response,
+) {
+  const query = req.url.includes("?")
+    ? req.url.substring(req.url.indexOf("?"))
+    : "";
   const forwardUrl = `${serviceBaseUrl}${req.path}${query}`;
 
   const response = await fetch(forwardUrl, {
@@ -123,10 +125,17 @@ async function proxyRequest(serviceBaseUrl: string, req: Request, res: Response)
       "Content-Type": "application/json",
       ...(req.id && { "X-Request-ID": req.id }),
       "X-Forwarded-For": req.ip || "",
-      ...(req.headers.authorization && { Authorization: req.headers.authorization }),
-      ...(req.headers['x-device-id'] ? { "X-Device-Id": req.headers['x-device-id'] as string } : {}),
+      ...(req.headers.authorization && {
+        Authorization: req.headers.authorization,
+      }),
+      ...(req.headers["x-device-id"]
+        ? { "X-Device-Id": req.headers["x-device-id"] as string }
+        : {}),
     } as Record<string, string>,
-    body: req.method !== "GET" && req.method !== "HEAD" ? JSON.stringify(req.body) : undefined,
+    body:
+      req.method !== "GET" && req.method !== "HEAD"
+        ? JSON.stringify(req.body)
+        : undefined,
   });
 
   const bodyText = await response.text();
@@ -153,7 +162,7 @@ app.use((req: Request, res: Response) => {
   const error = new AhavaError(
     AhavaErrorCode.INTERNAL_NOT_IMPLEMENTED,
     `Route not found: ${req.method} ${req.path}`,
-    { requestId: req.id }
+    { requestId: req.id },
   );
   res.status(error.statusCode).json(createErrorResponse(error));
 });
@@ -162,7 +171,6 @@ app.use((req: Request, res: Response) => {
 app.use((err: unknown, req: Request, res: Response, _next: NextFunction) => {
   // If it's already AhavaError, use it directly
   if (err instanceof AhavaError) {
-    err.requestId = req.id;
     return res.status(err.statusCode).json(createErrorResponse(err));
   }
 
@@ -176,7 +184,7 @@ app.use((err: unknown, req: Request, res: Response, _next: NextFunction) => {
     {
       requestId: req.id,
       statusCode: 500,
-    }
+    },
   );
 
   res.status(500).json(createErrorResponse(error));
@@ -186,13 +194,20 @@ app.use((err: unknown, req: Request, res: Response, _next: NextFunction) => {
 // SERVER STARTUP
 // ─────────────────────────────────────────────────────────────────
 
-app.listen(PORT, () => {
-  console.log(`✅ API Gateway listening on port ${PORT}`);
-  console.log(`📍 Environment: ${process.env.NODE_ENV || "dev"}`);
-  console.log(
-    `🏥 Health check: http://localhost:${PORT}/health`
-  );
-});
+if (require.main === module) {
+  loadPublicKey()
+    .then(() => {
+      app.listen(PORT, () => {
+        console.log(`✅ API Gateway listening on port ${PORT}`);
+        console.log(`📍 Environment: ${process.env.NODE_ENV || "dev"}`);
+        console.log(`🏥 Health check: http://localhost:${PORT}/health`);
+      });
+    })
+    .catch((err) => {
+      console.error("Failed to start API Gateway:", err);
+      process.exit(1);
+    });
+}
 
 export default app;
 

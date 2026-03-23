@@ -1,9 +1,9 @@
 # infrastructure/terraform/redis.tf
 # ElastiCache Redis for Ahava (BullMQ, cache, sessions)
 
-resource "aws_elasticache_subnet_group" "main" {
+resource "aws_elasticache_subnet_group" "redis" {
   name       = "ahava-${var.environment}-redis-subnet"
-  subnet_ids = aws_subnet.private[*].id
+  subnet_ids = local.private_subnets
 
   tags = {
     Name = "ahava-${var.environment}-redis-subnet-group"
@@ -13,13 +13,13 @@ resource "aws_elasticache_subnet_group" "main" {
 resource "aws_security_group" "redis" {
   name        = "ahava-${var.environment}-redis-sg"
   description = "Security group for Redis"
-  vpc_id      = aws_vpc.main.id
+  vpc_id      = local.vpc_id
 
   ingress {
     from_port   = 6379
     to_port     = 6379
     protocol    = "tcp"
-    cidr_blocks = [var.vpc_cidr_block]
+    cidr_blocks = [local.vpc_cidr_block]
   }
 
   egress {
@@ -34,49 +34,8 @@ resource "aws_security_group" "redis" {
   }
 }
 
-resource "aws_elasticache_replication_group" "main" {
-  replication_group_description = "Ahava Redis cluster for BullMQ and caching"
-  engine                        = "redis"
-  engine_version                = "7.1"
-  node_type                     = var.redis_node_type
-  num_cache_clusters            = var.redis_num_cache_clusters
-  parameter_group_name          = aws_elasticache_parameter_group.main.name
-  port                          = 6379
-  subnet_group_name             = aws_elasticache_subnet_group.main.name
-  security_group_ids            = [aws_security_group.redis.id]
-  automatic_failover_enabled    = var.environment != "dev"
-  multi_az_enabled              = var.environment == "prod"
-  at_rest_encryption_enabled    = true
-  transit_encryption_enabled    = true
-  transit_encryption_mode       = "preferred"
-  auth_token                    = random_password.redis.result
-  apply_immediately             = var.environment == "dev"
-
-  log_delivery_configuration {
-    destination      = aws_cloudwatch_log_group.redis_slow_log.name
-    destination_type = "cloudwatch-logs"
-    log_format       = "json"
-    log_type         = "slow-log"
-    enabled          = true
-  }
-
-  log_delivery_configuration {
-    destination      = aws_cloudwatch_log_group.redis_engine_log.name
-    destination_type = "cloudwatch-logs"
-    log_format       = "json"
-    log_type         = "engine-log"
-    enabled          = true
-  }
-
-  tags = {
-    Name = "ahava-${var.environment}-redis-cluster"
-  }
-
-  depends_on = [
-    aws_cloudwatch_log_group.redis_slow_log,
-    aws_cloudwatch_log_group.redis_engine_log,
-  ]
-}
+# aws_elasticache_replication_group is defined in main.tf as aws_elasticache_replication_group.redis
+# to avoid duplicate resources. This file provides supporting resources only.
 
 # Custom parameter group
 resource "aws_elasticache_parameter_group" "main" {
@@ -139,10 +98,8 @@ resource "aws_cloudwatch_log_group" "redis_engine_log" {
 }
 
 # Outputs
-output "redis_endpoint" {
-  value = aws_elasticache_replication_group.main.configuration_endpoint_address
-}
-
-output "redis_primary_endpoint" {
-  value = aws_elasticache_replication_group.main.primary_endpoint_address
+output "redis_primary_endpoint_address" {
+  description = "Redis primary endpoint (used by services for write operations)"
+  value       = aws_elasticache_replication_group.redis.primary_endpoint_address
+  sensitive   = true
 }

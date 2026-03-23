@@ -14,6 +14,10 @@ terraform {
       source  = "hashicorp/kubernetes"
       version = "~> 2.27"
     }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.6"
+    }
   }
 
   backend "s3" {
@@ -40,24 +44,6 @@ provider "aws" {
 }
 
 # ─────────────────────────────────────────────────────────────────
-# VARIABLES
-# ─────────────────────────────────────────────────────────────────
-
-variable "environment" {
-  type        = string
-  description = "Deployment environment: staging | production"
-  validation {
-    condition     = contains(["staging", "production"], var.environment)
-    error_message = "Environment must be staging or production"
-  }
-}
-
-variable "vpc_cidr" {
-  type    = string
-  default = "10.0.0.0/16"
-}
-
-# ─────────────────────────────────────────────────────────────────
 # VPC — Network isolation
 # ─────────────────────────────────────────────────────────────────
 
@@ -66,24 +52,24 @@ module "vpc" {
   version = "~> 5.5"
 
   name = "ahava-${var.environment}-vpc"
-  cidr = var.vpc_cidr
+  cidr = var.vpc_cidr_block
 
   azs = ["af-south-1a", "af-south-1b", "af-south-1c"]
 
   # Public subnets — ALB only
-  public_subnets = ["10.0.1.0/24", "10.0.2.0/24", "10.0.3.0/24"]
+  public_subnets = var.public_subnet_cidrs
 
   # Private subnets — EKS nodes, RDS, ElastiCache
-  private_subnets  = ["10.0.11.0/24", "10.0.12.0/24", "10.0.13.0/24"]
+  private_subnets = var.private_subnet_cidrs
 
   # Database subnets — RDS only, no NAT
-  database_subnets                   = ["10.0.21.0/24", "10.0.22.0/24", "10.0.23.0/24"]
+  database_subnets = var.database_subnet_cidrs
   create_database_subnet_group       = true
   create_database_subnet_route_table = true
 
   enable_nat_gateway     = true
   single_nat_gateway     = var.environment == "staging"
-  one_nat_gateway_per_az = var.environment == "production"
+  one_nat_gateway_per_az = var.environment == "prod"
 
   enable_dns_hostnames = true
   enable_dns_support   = true
@@ -115,22 +101,22 @@ resource "aws_db_instance" "postgres" {
   identifier        = "ahava-${var.environment}-postgres"
   engine            = "postgres"
   engine_version    = "16.2"
-  instance_class    = var.environment == "production" ? "db.r6g.xlarge" : "db.t3.medium"
-  allocated_storage = var.environment == "production" ? 200 : 50
-  max_allocated_storage = var.environment == "production" ? 1000 : 100
+  instance_class    = var.rds_instance_class
+  allocated_storage = var.environment == "prod" ? 200 : 50
+  max_allocated_storage = var.environment == "prod" ? 1000 : 100
 
   db_name  = "ahava"
   username = "ahava_admin"
-  password = data.aws_secretsmanager_secret_version.db_password.secret_string
+  password = random_password.db_master.result
 
   # Multi-AZ for production high availability
-  multi_az = var.environment == "production"
+  multi_az = var.environment == "prod"
 
   # Storage encryption (POPIA + SARB requirement)
   storage_encrypted = true
   kms_key_id        = aws_kms_key.ahava_data.arn
   storage_type      = "gp3"
-  iops              = var.environment == "production" ? 3000 : null
+  iops              = var.environment == "prod" ? 3000 : null
 
   db_subnet_group_name   = module.vpc.database_subnet_group
   vpc_security_group_ids = [aws_security_group.rds.id]
@@ -141,7 +127,7 @@ resource "aws_db_instance" "postgres" {
   maintenance_window        = "sun:04:00-sun:06:00"
   delete_automated_backups  = false
   skip_final_snapshot       = false
-  final_snapshot_identifier = "ahava-${var.environment}-final-${formatdate("YYYY-MM-DD", timestamp())}"
+  final_snapshot_identifier = var.environment == "prod" ? "ahava-prod-final-${formatdate("YYYY-MM-DD", timestamp())}" : "ahava-${var.environment}-final-${formatdate("YYYY-MM-DD", timestamp())}"
 
   # Performance insights
   performance_insights_enabled          = true
@@ -215,8 +201,8 @@ resource "aws_elasticache_replication_group" "redis" {
   replication_group_id = "ahava-${var.environment}-redis"
   description          = "Ahava eWallet Redis — sessions, queues, rate limiting, idempotency"
 
-  node_type            = var.environment == "production" ? "cache.r6g.large" : "cache.t3.small"
-  num_cache_clusters   = var.environment == "production" ? 3 : 1
+  node_type          = var.redis_node_type
+  num_cache_clusters = var.redis_num_cache_clusters
   engine_version       = "7.2"
   port                 = 6379
 
@@ -229,11 +215,11 @@ resource "aws_elasticache_replication_group" "redis" {
   kms_key_id                 = aws_kms_key.ahava_data.arn
 
   # Auth token
-  auth_token = data.aws_secretsmanager_secret_version.redis_auth_token.secret_string
+  auth_token = random_password.redis.result
 
   # Automatic failover for production
-  automatic_failover_enabled = var.environment == "production"
-  multi_az_enabled           = var.environment == "production"
+  automatic_failover_enabled = var.environment == "prod"
+  multi_az_enabled           = var.environment == "prod"
 
   maintenance_window       = "sun:04:00-sun:06:00"
   snapshot_retention_limit = 7
@@ -309,7 +295,8 @@ resource "aws_s3_bucket_lifecycle_configuration" "kyc_documents" {
 }
 
 resource "aws_s3_bucket" "audit_logs" {
-  bucket = "ahava-${var.environment}-audit-logs"
+  bucket              = "ahava-${var.environment}-audit-logs"
+  object_lock_enabled = true
 
   tags = {
     DataClass  = "Audit-Immutable"
@@ -378,10 +365,10 @@ module "eks" {
   eks_managed_node_groups = {
     services = {
       name           = "ahava-${var.environment}-services"
-      instance_types = [var.environment == "production" ? "c6i.xlarge" : "c6i.large"]
-      min_size       = var.environment == "production" ? 3 : 1
-      max_size       = var.environment == "production" ? 20 : 5
-      desired_size   = var.environment == "production" ? 3 : 2
+      instance_types = [var.eks_instance_type]
+      min_size       = var.eks_min_size
+      max_size       = var.eks_max_size
+      desired_size   = var.eks_desired_size
 
       labels = {
         role = "services"

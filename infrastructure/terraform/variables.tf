@@ -33,6 +33,12 @@ variable "private_subnet_cidrs" {
   default     = ["10.0.11.0/24", "10.0.12.0/24", "10.0.13.0/24"]
 }
 
+variable "database_subnet_cidrs" {
+  description = "Database subnet CIDR blocks (RDS only, isolated from NAT)"
+  type        = list(string)
+  default     = ["10.0.21.0/24", "10.0.22.0/24", "10.0.23.0/24"]
+}
+
 # RDS Variables
 variable "rds_instance_class" {
   description = "RDS instance class"

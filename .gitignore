@@ -14,6 +14,10 @@ dist/
 
 # Secrets (do NOT commit private keys or credentials)
 secrets/
+*.pem
+*.key
+*.p12
+*.pfx
 
 # Logs
 npm-debug.log*
@@ -27,6 +31,7 @@ Thumbs.db
 # IDE
 .vscode/
 .idea/
+.windsurf/
 
 # Flutter / Dart
 .dart_tool/
@@ -35,3 +40,22 @@ Thumbs.db
 .packages
 pubspec.lock
 build/
+
+# Test coverage (generated artefacts — not source)
+coverage/
+lcov.info
+*.lcov
+
+# Terraform
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.backup
+*.tfstate.*.backup
+terraform.tfvars
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+tfplan
+crash.log

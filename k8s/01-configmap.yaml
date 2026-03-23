@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ahava-config
+  namespace: ahava
+  labels:
+    app.kubernetes.io/part-of: ahava-ewallet
+data:
+  NODE_ENV: "production"
+  AWS_REGION: "af-south-1"
+  REDIS_HOST: "ahava-redis.internal"
+  REDIS_PORT: "6379"
+  # Service-to-service discovery (internal cluster DNS)
+  AUTH_SERVICE_URL: "http://auth-service:3001"
+  WALLET_SERVICE_URL: "http://wallet-service:3002"
+  PAYMENT_SERVICE_URL: "http://payment-service:3003"
+  KYC_SERVICE_URL: "http://kyc-service:3004"
+  NOTIFICATION_SERVICE_URL: "http://notification-service:3005"
+  REPORTING_SERVICE_URL: "http://reporting-service:3006"
+  AML_SERVICE_URL: "http://aml-service:3007"
+  USSD_SERVICE_URL: "http://ussd-service:3008"

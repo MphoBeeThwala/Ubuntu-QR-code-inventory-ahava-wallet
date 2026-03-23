@@ -1,239 +1,91 @@
-name: Build & Deploy Ahava Services
+# .github/workflows/deploy.yml
+# Manual Terraform infrastructure deployment workflow.
+# Application CI/CD (build, test, Docker push, k8s rollout) lives in ci-cd.yml.
+# This workflow is for provisioning or updating AWS infrastructure via Terraform.
+
+name: Terraform Infrastructure Deploy
 
 on:
-  push:
-    branches: [main, staging, develop]
-  pull_request:
-    branches: [main, staging]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target environment"
+        required: true
+        type: choice
+        options: [dev, staging, prod]
+      action:
+        description: "Terraform action"
+        required: true
+        type: choice
+        options: [plan, apply, destroy]
+        default: plan
 
 env:
   AWS_REGION: af-south-1
-  ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+  TF_DIR: infrastructure/terraform
+
+permissions:
+  id-token: write
+  contents: read
 
 jobs:
-  test:
-    name: Test
+  terraform:
+    name: "Terraform ${{ inputs.action }} (${{ inputs.environment }})"
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
+    environment: ${{ inputs.environment }}
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-
-      - name: Install dependencies
-        run: npm install
-
-      - name: Run tests
-        run: npm run test
-
-      - name: Check coverage
-        run: npm run test:coverage
-
-  build:
-    name: Build & Push
-    runs-on: ubuntu-latest
-    needs: test
-    if: github.event_name == 'push'
-    
-    strategy:
-      matrix:
-        service:
-          - api-gateway
-          - auth-service
-          - wallet-service
-          - payment-service
-          - kyc-service
-          - notification-service
-          - reporting-service
-          - aml-service
+    defaults:
+      run:
+        working-directory: ${{ env.TF_DIR }}
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Configure AWS credentials
+      - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          role-to-assume: ${{ secrets.AWS_TERRAFORM_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Login to ECR
-        id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v2
-
-      - name: Build image
-        working-directory: services/${{ matrix.service }}
-        run: |
-          npm run build
-          docker build -t $ECR_REGISTRY/ahava-${{ matrix.service }}:${{ github.sha }} \
-            -t $ECR_REGISTRY/ahava-${{ matrix.service }}:latest .
-
-      - name: Push image to ECR
-        run: |
-          docker push $ECR_REGISTRY/ahava-${{ matrix.service }}:${{ github.sha }}
-          docker push $ECR_REGISTRY/ahava-${{ matrix.service }}:latest
-
-      - name: Update image in deployment manifest
-        run: |
-          sed -i "s|IMAGE_TAG|${{ github.sha }}|g" infrastructure/k8s/${{ matrix.service }}-deployment.yaml
-
-  build-apps:
-    name: Build Frontend Apps
-    runs-on: ubuntu-latest
-    needs: test
-
-    strategy:
-      matrix:
-        app: [pwa, mobile, ussd]
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
         with:
-          node-version: '20'
-          cache: 'npm'
+          terraform_version: "~> 1.7"
 
-      - name: Setup Flutter (mobile)
-        if: matrix.app == 'mobile'
-        uses: subosito/flutter-action@v2
-        with:
-          flutter-version: '3.19.0'
-
-      - name: Build ${{ matrix.app }}
-        working-directory: apps/${{ matrix.app }}
+      - name: Terraform Init
         run: |
-          if [ "${{ matrix.app }}" = "mobile" ]; then
-            flutter pub get
-            flutter build apk --release
-          elif [ "${{ matrix.app }}" = "pwa" ]; then
-            npm install
-            npm run build
-          else
-            npm install
-            npm run build
-          fi
+          terraform init \
+            -backend-config="key=${{ inputs.environment }}/terraform.tfstate"
 
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v3
-        with:
-          name: ${{ matrix.app }}-build
-          path: apps/${{ matrix.app }}/build/
+      - name: Terraform Validate
+        run: terraform validate
 
-  deploy-dev:
-    name: Deploy to Dev
-    runs-on: ubuntu-latest
-    needs: [build, build-apps]
-    if: github.ref == 'refs/heads/develop' && github.event_name == 'push'
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Update kubeconfig
+      - name: Terraform Plan
+        id: plan
         run: |
-          aws eks update-kubeconfig --name ahava-dev --region ${{ env.AWS_REGION }}
+          terraform plan \
+            -var-file="${{ inputs.environment }}.tfvars" \
+            -out=tfplan \
+            -detailed-exitcode
+        continue-on-error: true
 
-      - name: Deploy services
+      - name: Post plan summary
+        run: terraform show -no-color tfplan | head -200
+
+      - name: Terraform Apply
+        if: inputs.action == 'apply' && steps.plan.outputs.exitcode != '1'
         run: |
-          kubectl apply -f infrastructure/k8s/
-          kubectl rollout status deployment/api-gateway -n ahava-dev
+          terraform apply -auto-approve tfplan
 
-      - name: Health check
+      - name: Terraform Destroy
+        if: inputs.action == 'destroy' && inputs.environment != 'prod'
         run: |
-          kubectl run -it --rm health-check \
-            --image=curlimages/curl:latest \
-            --restart=Never \
-            -- curl http://api-gateway:3000/health
+          terraform destroy \
+            -var-file="${{ inputs.environment }}.tfvars" \
+            -auto-approve
 
-  deploy-staging:
-    name: Deploy to Staging
-    runs-on: ubuntu-latest
-    needs: [build, build-apps]
-    if: github.ref == 'refs/heads/staging' && github.event_name == 'push'
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Update kubeconfig
+      - name: Guard — destroy blocked on prod
+        if: inputs.action == 'destroy' && inputs.environment == 'prod'
         run: |
-          aws eks update-kubeconfig --name ahava-staging --region ${{ env.AWS_REGION }}
-
-      - name: Deploy services
-        run: |
-          kubectl apply -f infrastructure/k8s/
-          kubectl rollout status deployment/api-gateway -n ahava-staging
-
-      - name: Smoke tests
-        run: |
-          # Run basic smoke tests
-          npm run test:smoke
-
-  deploy-prod:
-    name: Deploy to Production
-    runs-on: ubuntu-latest
-    needs: [build, build-apps]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    environment:
-      name: production
-      url: https://app.ahava.co.za
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Update kubeconfig
-        run: |
-          aws eks update-kubeconfig --name ahava-prod --region ${{ env.AWS_REGION }}
-
-      - name: Deploy services with blue-green strategy
-        run: |
-          # Deploy to green environment
-          kubectl apply -f infrastructure/k8s/ --selector=environment=green
-          kubectl rollout status deployment/api-gateway -n ahava-prod
-
-          # Run smoke tests
-          npm run test:smoke
-
-          # Switch traffic to green
-          kubectl patch service api-gateway -n ahava-prod \
-            -p '{"spec":{"selector":{"environment":"green"}}}'
-
-          # Monitor for 5 minutes before marking success
-          sleep 300
-
-      - name: Notify deployment
-        if: success()
-        run: |
-          echo "Production deployment successful"
-          # TODO: Send Slack/email notification
-
-      - name: Rollback on failure
-        if: failure()
-        run: |
-          kubectl patch service api-gateway -n ahava-prod \
-            -p '{"spec":{"selector":{"environment":"blue"}}}'
-          echo "Rolled back to previous version"
+          echo "::error::Destroy is blocked on the prod environment. Use AWS Console with MFA."
+          exit 1

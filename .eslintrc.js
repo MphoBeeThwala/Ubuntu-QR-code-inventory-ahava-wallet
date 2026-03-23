@@ -18,7 +18,7 @@ module.exports = {
   rules: {
     // Enforce strict TypeScript practices
     '@typescript-eslint/no-explicit-any': 'warn',
-    '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
+    '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
     // '@typescript-eslint/strict-boolean-expressions' requires parserOptions.project (tsconfig)
     // and can be enabled once a shared root tsconfig is in place.
     '@typescript-eslint/strict-boolean-expressions': 'off',

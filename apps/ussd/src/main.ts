@@ -1,278 +1,368 @@
 // apps/ussd/src/main.ts
-// Ahava USSD CLI — Feature phone interface (Africa's Talking gateway)
-// Stateless USSD flow for unstructured supplementary service data
-// Supports: login, check balance, send money, request money
+// Ahava USSD Gateway — Africa's Talking feature-phone interface
+// Stateless USSD flow: balance, send money, mini-statement, profile
 
-import express from 'express';
-import type { Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
-import * as crypto from 'crypto';
+import express from "express";
+import type { Request, Response } from "express";
+import bodyParser from "body-parser";
+import { PrismaClient, Prisma } from "@prisma/client";
+import { v4 as uuidv4 } from "uuid";
+import { createSuccessResponse } from "@ahava/shared-errors";
+import { hashForLookup } from "@ahava/shared-crypto";
+
+// ─────────────────────────────────────────────────────────────────
+// SETUP
+// ─────────────────────────────────────────────────────────────────
 
 const app = express();
 const prisma = new PrismaClient();
+const PORT = process.env.PORT || 3008;
 
-app.use(express.urlencoded({ extended: false }));
+// Africa's Talking sends form-encoded POST
+app.use(bodyParser.urlencoded({ extended: false }));
+app.use(express.json());
 
-interface UssdRequest {
-  sessionId: string;
-  phoneNumber: string;
-  text: string;
-  serviceCode: string;
+// ─────────────────────────────────────────────────────────────────
+// HELPERS
+// ─────────────────────────────────────────────────────────────────
+
+/** Normalise +27XXXXXXXXX or 27XXXXXXXXX → 0XXXXXXXXX */
+function normalisePhone(raw: string): string {
+  const cleaned = raw.replace(/\s+/g, "");
+  if (cleaned.startsWith("+27")) return "0" + cleaned.slice(3);
+  if (cleaned.startsWith("27") && cleaned.length === 11)
+    return "0" + cleaned.slice(2);
+  return cleaned;
 }
 
-// USSD Menu States
-const MENU = {
-  MAIN: `
-CON Ahava Wallet
+/** Format BigInt cents → "R 1 234.56" */
+function fmtRand(cents: bigint | number): string {
+  const rands = Number(cents) / 100;
+  return (
+    "R" +
+    rands.toLocaleString("en-ZA", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })
+  );
+}
+
+/** Look up a user + active wallet by phone number (using hash — never raw PII in query) */
+async function findByPhone(phone: string) {
+  const hash = hashForLookup(normalisePhone(phone));
+  return prisma.user.findFirst({
+    where: { phoneNumberHash: hash, isDeleted: false },
+    include: {
+      wallets: {
+        where: { isDeleted: false, status: "ACTIVE" },
+        orderBy: { createdAt: "asc" },
+        take: 1,
+      },
+    },
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────
+// MENUS
+// ─────────────────────────────────────────────────────────────────
+
+const MAIN_MENU = `CON Ahava Wallet
 1. Check Balance
 2. Send Money
-3. Request Money
+3. Mini Statement
 4. My Profile
 5. Help
-  `,
-  
-  SEND_MONEY_PHONE: `
-CON Enter recipient phone number
-(include country code, e.g. 27823456789)
-  `,
-  
-  SEND_MONEY_AMOUNT: `
-CON Enter amount to send (in Rands, e.g. 50 for R50)
-  `,
-  
-  SEND_MONEY_PIN: `
-CON Enter your 4-digit PIN
-  `,
+0. Exit`;
 
-  SEND_MONEY_CONFIRM: (phone: string, amount: number) => `
-CON Confirm payment
-To: ${phone}
-Amount: R${(amount / 100).toFixed(2)}
-1. Confirm
-2. Cancel
-  `,
+const HELP_MSG = `END Ahava Wallet Help
+- Min transfer: R1.00
+- Fee: 0.5% (min R0.25)
+- Tier 0 daily limit: R500
+- Upgrade KYC at www.ahava.co.za
+Support: support@ahava.co.za`;
 
-  REQUEST_MONEY_PHONE: `
-CON Enter phone number to request from
-  `,
+// ─────────────────────────────────────────────────────────────────
+// HANDLERS
+// ─────────────────────────────────────────────────────────────────
 
-  REQUEST_MONEY_AMOUNT: `
-CON Enter amount to request (in Rands)
-  `,
-
-  HELP: `
-END Ahava Wallet Help
-- Minimum transaction: R1
-- Maximum per day (TIER_0): R500
-- Maximum per month (TIER_0): R2000
-- Upgrade KYC for higher limits
-Contact support@ahava.co.za
-  `,
-};
-
-// Parse USSD input: extract current choice from user input
-function parseUssdInput(text: string): string {
-  return text.trim().split('*').pop() || '';
+async function handleBalance(phoneNumber: string): Promise<string> {
+  const user = await findByPhone(phoneNumber);
+  if (!user || user.wallets.length === 0) {
+    return "END No Ahava account found.\nRegister at www.ahava.co.za";
+  }
+  const wallet = user.wallets[0];
+  return `END Your Ahava Balance\n${fmtRand(wallet.balanceCents)}\nKYC: ${user.kycTier}\nDial *384# for menu`;
 }
 
-// Main USSD Handler
-app.post('/ussd', async (req: Request, res: Response) => {
-  const { sessionId, phoneNumber, text, serviceCode } = req.body as UssdRequest;
+async function handleMiniStatement(phoneNumber: string): Promise<string> {
+  const user = await findByPhone(phoneNumber);
+  if (!user || user.wallets.length === 0) {
+    return "END No Ahava account found.";
+  }
+  const txns = await prisma.walletTransaction.findMany({
+    where: { walletId: user.wallets[0].id, isDeleted: false },
+    orderBy: { createdAt: "desc" },
+    take: 5,
+    select: { type: true, amountCents: true, createdAt: true },
+  });
+  if (txns.length === 0) return "END No transactions yet.";
+  const lines = txns.map((t) => {
+    const sign = t.type === "DEBIT" ? "-" : "+";
+    const date = t.createdAt.toLocaleDateString("en-ZA", {
+      day: "2-digit",
+      month: "short",
+    });
+    return `${date} ${sign}${fmtRand(t.amountCents)}`;
+  });
+  return `END Last ${txns.length} transactions:\n${lines.join("\n")}`;
+}
 
-  console.log(`[USSD] Session: ${sessionId}, Phone: ${phoneNumber}, Text: ${text}`);
+async function handleProfile(phoneNumber: string): Promise<string> {
+  const user = await findByPhone(phoneNumber);
+  if (!user) return "END No Ahava account found.\nRegister at www.ahava.co.za";
+  const maskedPhone = normalisePhone(phoneNumber).replace(
+    /(\d{3})\d{4}(\d{4})/,
+    "$1****$2",
+  );
+  return `END My Profile\nPhone: ${maskedPhone}\nKYC Tier: ${user.kycTier}\nStatus: ${user.isDeleted ? "Closed" : "Active"}\nManage: www.ahava.co.za`;
+}
+
+/** Atomic payment — full double-entry with row locking */
+async function executePayment(
+  senderPhone: string,
+  recipientPhone: string,
+  amountCents: number,
+): Promise<string> {
+  const [sender, recipient] = await Promise.all([
+    findByPhone(senderPhone),
+    findByPhone(recipientPhone),
+  ]);
+
+  if (!sender || sender.wallets.length === 0)
+    return "END Your Ahava account was not found.";
+  if (!recipient || recipient.wallets.length === 0)
+    return `END ${normalisePhone(recipientPhone)} has no Ahava wallet.`;
+
+  const sw = sender.wallets[0];
+  const rw = recipient.wallets[0];
+
+  if (sw.status !== "ACTIVE")
+    return "END Your wallet is suspended. Contact support.";
+  if (rw.status !== "ACTIVE") return "END Recipient wallet is inactive.";
+
+  const feeCents = Math.max(25, Math.round(amountCents * 0.005));
+  const totalDebit = amountCents + feeCents;
+
+  if (sw.balanceCents < BigInt(totalDebit)) {
+    return (
+      `END Insufficient balance.\nRequired: ${fmtRand(totalDebit)} (incl. fee)\n` +
+      `Available: ${fmtRand(sw.balanceCents)}`
+    );
+  }
+
+  const idempotencyKey = `ussd:${sw.id}:${rw.id}:${amountCents}:${uuidv4()}`;
 
   try {
-    // Split text by * to understand flow: *1*2*100*1234*1
-    const steps = text.split('*').filter(Boolean);
-    const currentChoice = steps[steps.length - 1];
+    const result = await prisma.$transaction(
+      async (tx) => {
+        // Lock in deterministic UUID order to prevent deadlocks
+        const [firstId, secondId] =
+          sw.id < rw.id ? [sw.id, rw.id] : [rw.id, sw.id];
 
-    // Route based on step count + choice
-    if (steps.length === 0) {
-      // Initial menu
-      return res.send(MENU.MAIN);
-    }
+        await tx.$queryRaw`
+          SELECT id FROM "Wallet"
+          WHERE id IN (${firstId}::uuid, ${secondId}::uuid)
+          ORDER BY id
+          FOR UPDATE`;
 
-    if (steps.length === 1) {
-      // Main menu choice
-      if (currentChoice === '1') {
-        // Check Balance
-        return handleCheckBalance(phoneNumber, res);
-      } else if (currentChoice === '2') {
-        // Send Money — ask for recipient
-        return res.send(MENU.SEND_MONEY_PHONE);
-      } else if (currentChoice === '3') {
-        // Request Money — ask for requester
-        return res.send(MENU.REQUEST_MONEY_PHONE);
-      } else if (currentChoice === '4') {
-        // My Profile
-        return handleProfile(phoneNumber, res);
-      } else if (currentChoice === '5') {
-        // Help
-        return res.send(MENU.HELP);
-      } else {
-        return res.send(`CON Invalid choice. ${MENU.MAIN}`);
-      }
-    }
+        const lockedSw = await tx.wallet.findUnique({
+          where: { id: sw.id },
+          select: { balanceCents: true },
+        });
+        if (!lockedSw || lockedSw.balanceCents < BigInt(totalDebit)) {
+          throw new Error("INSUFFICIENT_BALANCE");
+        }
 
-    if (steps.length === 2 && steps[0] === '2') {
-      // Send Money flow — got phone, ask for amount
-      const recipientPhone = currentChoice;
-      return res.send(MENU.SEND_MONEY_AMOUNT);
-    }
-
-    if (steps.length === 3 && steps[0] === '2') {
-      // Send Money — got amount, ask for PIN
-      const recipientPhone = steps[1];
-      const amount = parseInt(currentChoice) * 100; // Convert to cents
-      
-      if (isNaN(amount) || amount <= 0) {
-        return res.send(`CON Invalid amount. ${MENU.SEND_MONEY_AMOUNT}`);
-      }
-
-      // Check if user has sufficient balance
-      try {
-        const user = await prisma.user.findUnique({
-          where: { phoneNumber },
-          include: { wallets: true },
+        const lockedRw = await tx.wallet.findUnique({
+          where: { id: rw.id },
+          select: { balanceCents: true },
         });
 
-        if (!user) {
-          return res.send('END User not found. Please register first at www.ahava.co.za');
-        }
+        const swBefore = lockedSw.balanceCents;
+        const swAfter = swBefore - BigInt(totalDebit);
+        const rwBefore = lockedRw!.balanceCents;
+        const rwAfter = rwBefore + BigInt(amountCents);
 
-        const balanceCents = Number(user.wallets?.[0]?.balance || 0);
-        if (balanceCents < amount) {
-          return res.send(`END Insufficient balance. Current: R${(balanceCents / 100).toFixed(2)}`);
-        }
-      } catch (error) {
-        console.error(`[USSD] Balance check failed: ${error}`);
-        return res.send('END Service error. Try again later.');
-      }
+        await tx.walletTransaction.create({
+          data: {
+            walletId: sw.id,
+            type: "DEBIT",
+            amountCents,
+            balanceBefore: swBefore,
+            balanceAfter: swAfter,
+            idempotencyKey,
+            description: `USSD send to ${normalisePhone(recipientPhone)}`,
+            channel: "USSD",
+            status: "COMPLETED",
+          },
+        });
+        await tx.walletTransaction.create({
+          data: {
+            walletId: rw.id,
+            type: "CREDIT",
+            amountCents,
+            balanceBefore: rwBefore,
+            balanceAfter: rwAfter,
+            idempotencyKey: `${idempotencyKey}:credit`,
+            description: `USSD receive from ${normalisePhone(senderPhone)}`,
+            channel: "USSD",
+            status: "COMPLETED",
+          },
+        });
+        await tx.wallet.update({
+          where: { id: sw.id },
+          data: { balanceCents: swAfter },
+        });
+        await tx.wallet.update({
+          where: { id: rw.id },
+          data: { balanceCents: rwAfter },
+        });
 
-      return res.send(MENU.SEND_MONEY_PIN);
-    }
+        return swAfter;
+      },
+      {
+        timeout: 10000,
+        isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+      },
+    );
 
-    if (steps.length === 4 && steps[0] === '2') {
-      // Send Money — got PIN, show confirmation
-      const recipientPhone = steps[1];
-      const amount = parseInt(steps[2]) * 100;
-      const pin = currentChoice;
-
-      // Validate PIN (mock for now)
-      if (pin.length !== 4 || !/^\d+$/.test(pin)) {
-        return res.send('CON Invalid PIN format (4 digits)');
-      }
-
-      return res.send(MENU.SEND_MONEY_CONFIRM(recipientPhone, amount));
-    }
-
-    if (steps.length === 5 && steps[0] === '2') {
-      // Send Money — confirmation (1=confirm, 2=cancel)
-      const recipientPhone = steps[1];
-      const amountCents = parseInt(steps[2]) * 100;
-
-      if (currentChoice === '1') {
-        // Process payment
-        try {
-          // TODO: Call backend /payments endpoint
-          // const response = await fetch('http://payment-service:3003/payments', {
-          //   method: 'POST',
-          //   headers: { 'Content-Type': 'application/json' },
-          //   body: JSON.stringify({
-          //     senderPhone: phoneNumber,
-          //     recipientPhone,
-          //     amountCents,
-          //     description: 'USSD transfer',
-          //   }),
-          // });
-          
-          return res.send(`END Payment successful!
-Sent R${(amountCents / 100).toFixed(2)} to ${recipientPhone}`);
-        } catch (error) {
-          console.error(`[USSD] Payment failed: ${error}`);
-          return res.send('END Payment failed. Try again later.');
-        }
-      } else {
-        return res.send('END Payment cancelled.');
-      }
-    }
-
-    // Request Money flow (similar pattern)
-    if (steps.length === 2 && steps[0] === '3') {
-      return res.send(MENU.REQUEST_MONEY_AMOUNT);
-    }
-
-    if (steps.length === 3 && steps[0] === '3') {
-      const requesterPhone = steps[1];
-      const amount = parseInt(currentChoice) * 100;
-      
-      // TODO: Send notification to requesterPhone asking to send money
-      return res.send(`END Money request sent to ${requesterPhone}
-Amount: R${(amount / 100).toFixed(2)}`);
-    }
-
-    return res.send(`CON ${MENU.MAIN}`);
-  } catch (error) {
-    console.error(`[USSD] Error: ${error}`);
-    res.send('END Service error. Please try again later.');
-  }
-});
-
-async function handleCheckBalance(phoneNumber: string, res: Response) {
-  try {
-    const user = await prisma.user.findUnique({
-      where: { phoneNumber },
-      include: { wallets: true },
-    });
-
-    if (!user) {
-      return res.send('END User not found. Register at www.ahava.co.za');
-    }
-
-    const balance = Number(user.wallets?.[0]?.balance || 0);
-    const kycTier = user.kycTier || 'TIER_0';
-
-    return res.send(`END Your Balance
-Current: R${(balance / 100).toFixed(2)}
-KYC Tier: ${kycTier}
-Limit: R500/day
-
-Menu: dial *483# again`);
-  } catch (error) {
-    console.error(`[USSD] Balance check error: ${error}`);
-    res.send('END Service error. Try again later.');
+    return (
+      `END Payment Successful!\nSent ${fmtRand(amountCents)} to ${normalisePhone(recipientPhone)}\n` +
+      `Fee: ${fmtRand(feeCents)}\nNew balance: ${fmtRand(result)}`
+    );
+  } catch (err) {
+    if (err instanceof Error && err.message === "INSUFFICIENT_BALANCE")
+      return "END Insufficient balance. Payment failed.";
+    console.error("[USSD] payment error:", err);
+    return "END Payment failed due to a system error.\nPlease try again or contact support.";
   }
 }
 
-async function handleProfile(phoneNumber: string, res: Response) {
-  try {
-    const user = await prisma.user.findUnique({
-      where: { phoneNumber },
-    });
+// ─────────────────────────────────────────────────────────────────
+// STATE MACHINE
+// ─────────────────────────────────────────────────────────────────
 
-    if (!user) {
-      return res.send('END User not found. Register at www.ahava.co.za');
+async function handleUssd(phoneNumber: string, text: string): Promise<string> {
+  const steps = text
+    ? text
+        .split("*")
+        .map((s) => s.trim())
+        .filter(Boolean)
+    : [];
+
+  if (steps.length === 0) return MAIN_MENU;
+
+  const [top, ...rest] = steps;
+
+  if (top === "0") return "END Thank you for using Ahava Wallet.";
+  if (top === "1") return handleBalance(phoneNumber);
+  if (top === "3") return handleMiniStatement(phoneNumber);
+  if (top === "4") return handleProfile(phoneNumber);
+  if (top === "5") return HELP_MSG;
+
+  // ── Send Money flow ────────────────────────────────────────────
+  if (top === "2") {
+    if (rest.length === 0) {
+      return "CON Send Money\nEnter recipient phone number\n(e.g. 0731234567):";
     }
 
-    return res.send(`END My Profile
-Phone: ${user.phoneNumber}
-Name: ${user.fullName || 'Not set'}
-ID: ${user.idNumber?.slice(-4) || 'Not verified'}
-Created: ${new Date(user.createdAt).toLocaleDateString()}
+    const recipientPhone = rest[0];
 
-Update: www.ahava.co.za`);
-  } catch (error) {
-    console.error(`[USSD] Profile fetch error: ${error}`);
-    res.send('END Service error. Try again later.');
+    if (rest.length === 1) {
+      const recipient = await findByPhone(recipientPhone);
+      if (!recipient) {
+        return `END Recipient ${normalisePhone(recipientPhone)} not found.\nCheck the number and try again.`;
+      }
+      return `CON Send to ${normalisePhone(recipientPhone)}\nEnter amount in Rands\n(e.g. 50 for R50.00):`;
+    }
+
+    const amountRands = parseFloat(rest[1]);
+    if (isNaN(amountRands) || amountRands < 1) {
+      return "END Invalid amount. Minimum is R1.00.\nPlease try again.";
+    }
+    const amountCents = Math.round(amountRands * 100);
+    const feeCents = Math.max(25, Math.round(amountCents * 0.005));
+
+    if (rest.length === 2) {
+      return (
+        `CON Confirm Payment\n` +
+        `To: ${normalisePhone(recipientPhone)}\n` +
+        `Amount: ${fmtRand(amountCents)}\n` +
+        `Fee: ${fmtRand(feeCents)}\n` +
+        `Total: ${fmtRand(amountCents + feeCents)}\n\n` +
+        `1. Confirm\n2. Cancel`
+      );
+    }
+
+    if (rest.length === 3) {
+      if (rest[2] === "2") return "END Payment cancelled.";
+      if (rest[2] !== "1") return "END Invalid selection. Payment cancelled.";
+      return executePayment(phoneNumber, recipientPhone, amountCents);
+    }
+
+    return "END Session expired. Dial *384# to start again.";
   }
+
+  return `CON Invalid choice.\n${MAIN_MENU}`;
 }
 
-// Health check
-app.get('/health', (req: Request, res: Response) => {
-  res.json({ status: 'ok', service: 'ussd-service' });
+// ─────────────────────────────────────────────────────────────────
+// ROUTES
+// ─────────────────────────────────────────────────────────────────
+
+app.get("/health", (_req: Request, res: Response) => {
+  res.json(createSuccessResponse({ status: "ok", service: "ussd-service" }));
 });
 
-const PORT = process.env.PORT || 3008;
-app.listen(PORT, () => {
-  console.log(`[USSD Service] listening on port ${PORT}`);
+app.post("/ussd", async (req: Request, res: Response) => {
+  const { sessionId, phoneNumber, text } = req.body as {
+    sessionId: string;
+    phoneNumber: string;
+    text: string;
+    serviceCode: string;
+  };
+
+  console.log(
+    `[USSD] session=${sessionId} phone=${normalisePhone(phoneNumber)} text="${text}"`,
+  );
+
+  if (!sessionId || !phoneNumber) {
+    res.set("Content-Type", "text/plain");
+    return res.send("END Service temporarily unavailable.");
+  }
+
+  try {
+    const response = await handleUssd(phoneNumber, text || "");
+    res.set("Content-Type", "text/plain");
+    res.send(response);
+  } catch (err) {
+    console.error(`[USSD] unhandled error [session=${sessionId}]:`, err);
+    res.set("Content-Type", "text/plain");
+    res.send("END A system error occurred. Please try again.");
+  }
 });
+
+// ─────────────────────────────────────────────────────────────────
+// SERVER STARTUP
+// ─────────────────────────────────────────────────────────────────
+
+if (require.main === module) {
+  app.listen(PORT, () => {
+    console.log(`✅ USSD Service listening on port ${PORT}`);
+    console.log(
+      `📞 Africa's Talking callback: POST http://localhost:${PORT}/ussd`,
+    );
+  });
+}
+
+export default app;

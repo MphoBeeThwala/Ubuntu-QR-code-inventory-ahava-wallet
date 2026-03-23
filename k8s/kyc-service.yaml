@@ -1,0 +1,80 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kyc-service
+  namespace: ahava
+  labels:
+    app: kyc-service
+    app.kubernetes.io/part-of: ahava-ewallet
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: kyc-service
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: kyc-service
+    spec:
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: kyc-service
+          image: ${AWS_ACCOUNT_ID}.dkr.ecr.af-south-1.amazonaws.com/ahava/kyc-service:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 3004
+              name: http
+          envFrom:
+            - configMapRef:
+                name: ahava-config
+            - secretRef:
+                name: ahava-secrets
+          env:
+            - name: PORT
+              value: "3004"
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3004
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3004
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kyc-service
+  namespace: ahava
+  labels:
+    app: kyc-service
+spec:
+  type: ClusterIP
+  selector:
+    app: kyc-service
+  ports:
+    - name: http
+      port: 3004
+      targetPort: 3004

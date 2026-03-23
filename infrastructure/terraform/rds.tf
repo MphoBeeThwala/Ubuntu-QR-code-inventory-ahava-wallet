@@ -1,25 +1,20 @@
 # infrastructure/terraform/rds.tf
-# RDS PostgreSQL 16 with TimescaleDB for Ahava
+# Complementary RDS resources: security group, subnet group, IAM, KMS, CW alarms.
+# The actual aws_db_instance is defined in main.tf to avoid duplicate resources.
 
-resource "aws_db_subnet_group" "main" {
-  name       = "ahava-${var.environment}-db-subnet"
-  subnet_ids = aws_subnet.private[*].id
-
-  tags = {
-    Name = "ahava-${var.environment}-db-subnet-group"
-  }
-}
+# aws_db_subnet_group is created by the VPC module (create_database_subnet_group=true)
+# and referenced in main.tf via module.vpc.database_subnet_group.
 
 resource "aws_security_group" "rds" {
   name        = "ahava-${var.environment}-rds-sg"
   description = "Security group for RDS"
-  vpc_id      = aws_vpc.main.id
+  vpc_id      = local.vpc_id
 
   ingress {
     from_port   = 5432
     to_port     = 5432
     protocol    = "tcp"
-    cidr_blocks = [var.vpc_cidr_block]
+    cidr_blocks = [local.vpc_cidr_block]
   }
 
   egress {
@@ -34,50 +29,11 @@ resource "aws_security_group" "rds" {
   }
 }
 
-resource "aws_rds_cluster" "main" {
-  cluster_identifier              = "ahava-${var.environment}-db"
-  engine                          = "aurora-postgresql"
-  engine_version                  = "16.1"
-  database_name                   = "ahava_db"
-  master_username                 = "postgres"
-  master_password                 = random_password.db_master.result
-  db_subnet_group_name            = aws_db_subnet_group.main.name
-  vpc_security_group_ids          = [aws_security_group.rds.id]
-  backup_retention_period         = 30
-  preferred_backup_window         = "03:00-04:00"
-  skip_final_snapshot             = var.environment != "prod"
-  final_snapshot_identifier       = var.environment == "prod" ? "ahava-prod-final-snapshot-${formatdate("YYYY-MM-DD-hhmm", timestamp())}" : ""
-  enable_cloudwatch_logs_exports  = ["postgresql"]
-  enabled_cloudwatch_logs_exports = ["postgresql"]
-  storage_encrypted               = true
-  kms_key_id                      = aws_kms_key.rds.arn
-  
-  tags = {
-    Name = "ahava-${var.environment}-aurora-cluster"
-  }
-}
-
-resource "aws_rds_cluster_instance" "main" {
-  count              = var.environment == "prod" ? 3 : 1
-  identifier         = "ahava-${var.environment}-db-${count.index + 1}"
-  cluster_identifier = aws_rds_cluster.main.id
-  instance_class     = var.rds_instance_class
-  engine              = aws_rds_cluster.main.engine
-  engine_version      = aws_rds_cluster.main.engine_version
-
-  performance_insights_enabled = true
-  monitoring_interval          = 60
-  monitoring_role_arn          = aws_iam_role.rds_monitoring.arn
-
-  tags = {
-    Name = "ahava-${var.environment}-db-instance-${count.index + 1}"
-  }
-}
-
-# Database password (stored in Secrets Manager)
+# RDS master password — also used by main.tf's aws_db_instance.postgres
 resource "random_password" "db_master" {
-  length  = 32
-  special = true
+  length           = 32
+  special          = true
+  override_special = "!#$%&*()-_=+[]{}<>:?"
 }
 
 resource "aws_secretsmanager_secret" "db_master_password" {
@@ -127,33 +83,5 @@ resource "aws_kms_alias" "rds" {
   target_key_id = aws_kms_key.rds.key_id
 }
 
-# CloudWatch Alarms for RDS
-resource "aws_cloudwatch_metric_alarm" "rds_cpu" {
-  alarm_name          = "ahava-${var.environment}-rds-high-cpu"
-  comparison_operator = "GreaterThanThreshold"
-  evaluation_periods  = "2"
-  metric_name         = "CPUUtilization"
-  namespace           = "AWS/Aurora"
-  period              = "300"
-  statistic           = "Average"
-  threshold           = "80"
-  alarm_description   = "Alarm when RDS CPU exceeds 80%"
-  dimensions = {
-    DBClusterIdentifier = aws_rds_cluster.main.cluster_identifier
-  }
-}
-
-resource "aws_cloudwatch_metric_alarm" "rds_connections" {
-  alarm_name          = "ahava-${var.environment}-rds-max-connections"
-  comparison_operator = "GreaterThanThreshold"
-  evaluation_periods  = "1"
-  metric_name         = "DatabaseConnections"
-  namespace           = "AWS/Aurora"
-  period              = "300"
-  statistic           = "Average"
-  threshold           = "500"
-  alarm_description   = "Alarm when RDS connections exceed 500"
-  dimensions = {
-    DBClusterIdentifier = aws_rds_cluster.main.cluster_identifier
-  }
-}
+# CloudWatch alarms for RDS CPU and connections are defined in main.tf
+# to avoid duplicate resource names.

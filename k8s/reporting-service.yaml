@@ -1,0 +1,80 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: reporting-service
+  namespace: ahava
+  labels:
+    app: reporting-service
+    app.kubernetes.io/part-of: ahava-ewallet
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: reporting-service
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: reporting-service
+    spec:
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: reporting-service
+          image: ${AWS_ACCOUNT_ID}.dkr.ecr.af-south-1.amazonaws.com/ahava/reporting-service:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 3006
+              name: http
+          envFrom:
+            - configMapRef:
+                name: ahava-config
+            - secretRef:
+                name: ahava-secrets
+          env:
+            - name: PORT
+              value: "3006"
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "256Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3006
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3006
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: reporting-service
+  namespace: ahava
+  labels:
+    app: reporting-service
+spec:
+  type: ClusterIP
+  selector:
+    app: reporting-service
+  ports:
+    - name: http
+      port: 3006
+      targetPort: 3006

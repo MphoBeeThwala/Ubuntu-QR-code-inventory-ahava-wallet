@@ -1,0 +1,196 @@
+---
+# k8s/datadog-agent.yaml
+# Datadog DaemonSet for APM tracing, infrastructure metrics, and log collection.
+# Requires DD_API_KEY in ahava-secrets (set via External Secrets Operator).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: datadog-agent
+  namespace: ahava
+  labels:
+    app: datadog-agent
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: datadog-agent
+rules:
+  - apiGroups: [""]
+    resources:
+      - nodes
+      - pods
+      - services
+      - endpoints
+      - events
+      - namespaces
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "replicasets", "daemonsets", "statefulsets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["autoscaling"]
+    resources: ["horizontalpodautoscalers"]
+    verbs: ["list", "watch"]
+  - nonResourceURLs: ["/metrics", "/healthz"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: datadog-agent
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: datadog-agent
+subjects:
+  - kind: ServiceAccount
+    name: datadog-agent
+    namespace: ahava
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: datadog-agent
+  namespace: ahava
+  labels:
+    app: datadog-agent
+    app.kubernetes.io/part-of: ahava-ewallet
+spec:
+  selector:
+    matchLabels:
+      app: datadog-agent
+  template:
+    metadata:
+      labels:
+        app: datadog-agent
+      annotations:
+        ad.datadoghq.com/datadog-agent.logs: '[{"source":"datadog-agent","service":"datadog-agent"}]'
+    spec:
+      serviceAccountName: datadog-agent
+      hostPID: true
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      containers:
+        - name: datadog-agent
+          image: gcr.io/datadoghq/agent:7
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8125
+              name: dogstatsdport
+              protocol: UDP
+            - containerPort: 8126
+              name: traceport
+              protocol: TCP
+          env:
+            - name: DD_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: ahava-secrets
+                  key: DATADOG_API_KEY
+            - name: DD_SITE
+              value: "datadoghq.eu"
+            - name: DD_ENV
+              valueFrom:
+                configMapKeyRef:
+                  name: ahava-config
+                  key: NODE_ENV
+            - name: DD_SERVICE
+              value: "ahava-ewallet"
+            - name: KUBERNETES
+              value: "yes"
+            - name: DD_KUBERNETES_KUBELET_HOST
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.hostIP
+            - name: DD_APM_ENABLED
+              value: "true"
+            - name: DD_APM_NON_LOCAL_TRAFFIC
+              value: "true"
+            - name: DD_LOGS_ENABLED
+              value: "true"
+            - name: DD_LOGS_CONFIG_CONTAINER_COLLECT_ALL
+              value: "true"
+            - name: DD_CONTAINER_EXCLUDE_LOGS
+              value: "name:datadog-agent"
+            - name: DD_PROCESS_AGENT_ENABLED
+              value: "true"
+            - name: DD_DOGSTATSD_NON_LOCAL_TRAFFIC
+              value: "true"
+            - name: DD_COLLECT_KUBERNETES_EVENTS
+              value: "true"
+            - name: DD_LEADER_ELECTION
+              value: "true"
+            - name: DD_HEALTH_PORT
+              value: "5555"
+            - name: DD_TAGS
+              value: "project:ahava-ewallet region:af-south-1 compliance:popia-fica-sarb"
+          volumeMounts:
+            - name: dockersocket
+              mountPath: /var/run/docker.sock
+            - name: procdir
+              mountPath: /host/proc
+              readOnly: true
+            - name: cgroups
+              mountPath: /host/sys/fs/cgroup
+              readOnly: true
+            - name: pointdir
+              mountPath: /opt/datadog-agent/run
+            - name: logpodpath
+              mountPath: /var/log/pods
+              readOnly: true
+            - name: logcontainerpath
+              mountPath: /var/lib/docker/containers
+              readOnly: true
+          livenessProbe:
+            httpGet:
+              path: /live
+              port: 5555
+            initialDelaySeconds: 15
+            periodSeconds: 15
+            successThreshold: 1
+            failureThreshold: 6
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 5555
+            initialDelaySeconds: 15
+            periodSeconds: 15
+            successThreshold: 1
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          securityContext:
+            runAsUser: 0
+      volumes:
+        - name: dockersocket
+          hostPath:
+            path: /var/run/docker.sock
+        - name: procdir
+          hostPath:
+            path: /proc
+        - name: cgroups
+          hostPath:
+            path: /sys/fs/cgroup
+        - name: pointdir
+          hostPath:
+            path: /opt/datadog-agent/run
+            type: DirectoryOrCreate
+        - name: logpodpath
+          hostPath:
+            path: /var/log/pods
+        - name: logcontainerpath
+          hostPath:
+            path: /var/lib/docker/containers
+      tolerations:
+        - key: node-role.kubernetes.io/control-plane
+          effect: NoSchedule
+        - key: node-role.kubernetes.io/master
+          effect: NoSchedule
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1

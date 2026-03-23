@@ -1,15 +1,42 @@
-FROM node:20-alpine
+# ─── Stage 1: Builder ────────────────────────────────────────────
+FROM node:20-alpine AS builder
 WORKDIR /app
 
-# Install dependencies
-COPY package*.json ./
-RUN npm ci --only=production
+RUN apk add --no-cache python3 make g++
 
-# Copy built code
-COPY dist ./dist
+COPY package.json package-lock.json turbo.json ./
+COPY packages/shared-errors/package.json  packages/shared-errors/
+COPY packages/shared-crypto/package.json  packages/shared-crypto/
+COPY packages/shared-events/package.json  packages/shared-events/
+COPY packages/shared-types/package.json   packages/shared-types/
+COPY services/kyc-service/package.json    services/kyc-service/
 
+RUN npm ci
+
+COPY prisma/ prisma/
+RUN npx prisma generate
+
+COPY packages/ packages/
+COPY services/kyc-service/src/        services/kyc-service/src/
+COPY services/kyc-service/tsconfig.json services/kyc-service/
+
+RUN npm run build --workspace=services/kyc-service
+
+# ─── Stage 2: Runner ─────────────────────────────────────────────
+FROM node:20-alpine AS runner
+WORKDIR /app
+
+RUN addgroup -g 1001 -S ahava && adduser -S ahava -u 1001 -G ahava
+
+COPY --from=builder --chown=ahava:ahava /app/node_modules             ./node_modules
+COPY --from=builder --chown=ahava:ahava /app/services/kyc-service/dist ./dist
+COPY --from=builder --chown=ahava:ahava /app/services/kyc-service/package.json ./
+
+USER ahava
+ENV NODE_ENV=production
 EXPOSE 3004
+
 HEALTHCHECK --interval=30s --timeout=3s --start-period=40s --retries=3 \
   CMD wget --no-verbose --tries=1 --spider http://localhost:3004/health || exit 1
 
-CMD ["npm", "start"]
+CMD ["node", "dist/main.js"]
