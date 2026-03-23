@@ -8,6 +8,7 @@ const withPWA = require('next-pwa')({
 
 const nextConfig = {
   reactStrictMode: true,
+  allowedDevOrigins: ['127.0.0.1', 'localhost'],
   env: {
     NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:6000',
   },
