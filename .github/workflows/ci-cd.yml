@@ -257,6 +257,8 @@ jobs:
           - notification-service
           - aml-service
           - reporting-service
+          - ussd-service
+          - agent-service
 
     steps:
       - uses: actions/checkout@v4
@@ -337,7 +339,7 @@ jobs:
 
       - name: Deploy all services (rolling update)
         run: |
-          for SERVICE in api-gateway auth-service wallet-service payment-service kyc-service notification-service aml-service reporting-service; do
+          for SERVICE in api-gateway auth-service wallet-service payment-service kyc-service notification-service aml-service reporting-service ussd-service agent-service; do
             kubectl set image deployment/$SERVICE \
               $SERVICE=${{ env.ECR_REGISTRY }}/ahava-$SERVICE:${{ github.sha }} \
               -n ahava-staging
@@ -345,7 +347,7 @@ jobs:
 
       - name: Wait for rollout
         run: |
-          for SERVICE in api-gateway auth-service wallet-service payment-service kyc-service notification-service aml-service reporting-service; do
+          for SERVICE in api-gateway auth-service wallet-service payment-service kyc-service notification-service aml-service reporting-service ussd-service agent-service; do
             kubectl rollout status deployment/$SERVICE -n ahava-staging --timeout=300s
           done
 
@@ -394,14 +396,14 @@ jobs:
       - name: Blue/green deployment
         run: |
           # Update image tags on green deployments
-          for SERVICE in api-gateway auth-service wallet-service payment-service kyc-service notification-service aml-service reporting-service; do
+          for SERVICE in api-gateway auth-service wallet-service payment-service kyc-service notification-service aml-service reporting-service ussd-service agent-service; do
             kubectl set image deployment/$SERVICE-green \
               $SERVICE=${{ env.ECR_REGISTRY }}/ahava-$SERVICE:${{ github.sha }} \
               -n ahava-prod
           done
 
           # Wait for green to be healthy
-          for SERVICE in api-gateway auth-service wallet-service payment-service kyc-service notification-service aml-service reporting-service; do
+          for SERVICE in api-gateway auth-service wallet-service payment-service kyc-service notification-service aml-service reporting-service ussd-service agent-service; do
             kubectl rollout status deployment/$SERVICE-green -n ahava-prod --timeout=600s
           done
 
