@@ -2,8 +2,8 @@
 // Shared API client for all frontend apps
 // Handles: JWT auth, error handling, idempotency, retries
 
-import axios, { AxiosInstance, AxiosRequestConfig } from 'axios';
-import { v4 as uuidv4 } from 'uuid';
+import axios, { AxiosInstance } from "axios";
+import { v4 as uuidv4 } from "uuid";
 
 interface ApiResponse<T = any> {
   success: boolean;
@@ -20,7 +20,7 @@ class AhavaApiClient {
   private accessToken: string | null = null;
   private refreshToken: string | null = null;
 
-  constructor(baseURL: string = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000') {
+  constructor(baseURL: string = "/api") {
     this.client = axios.create({
       baseURL,
       timeout: 10000,
@@ -31,8 +31,8 @@ class AhavaApiClient {
       if (this.accessToken) {
         config.headers.Authorization = `Bearer ${this.accessToken}`;
       }
-      config.headers['X-Idempotency-Key'] = uuidv4();
-      config.headers['X-Device-ID'] = this.getDeviceId();
+      config.headers["X-Idempotency-Key"] = uuidv4();
+      config.headers["X-Device-ID"] = this.getDeviceId();
       return config;
     });
 
@@ -53,28 +53,34 @@ class AhavaApiClient {
           }
         }
         return Promise.reject(error);
-      }
+      },
     );
   }
 
   // Auth Methods
-  async login(phone: string, pin: string): Promise<ApiResponse<{ accessToken: string; refreshToken: string }>> {
-    const response = await this.client.post('/auth/login', { phone, pin });
+  async login(
+    phone: string,
+    pin: string,
+  ): Promise<ApiResponse<{ accessToken: string; refreshToken: string }>> {
+    const response = await this.client.post("/auth/login", { phone, pin });
     const { data } = response.data;
     this.accessToken = data.accessToken;
     this.refreshToken = data.refreshToken;
     return response.data;
   }
 
-  async register(phone: string, pin: string): Promise<ApiResponse<{ userId: string; accessToken: string }>> {
-    const response = await this.client.post('/auth/register', { phone, pin });
+  async register(
+    phone: string,
+    pin: string,
+  ): Promise<ApiResponse<{ userId: string; accessToken: string }>> {
+    const response = await this.client.post("/auth/register", { phone, pin });
     const { data } = response.data;
     this.accessToken = data.accessToken;
     return response.data;
   }
 
   async refresh(): Promise<ApiResponse> {
-    const response = await this.client.post('/auth/refresh', {
+    const response = await this.client.post("/auth/refresh", {
       refreshToken: this.refreshToken,
     });
     const { data } = response.data;
@@ -85,17 +91,23 @@ class AhavaApiClient {
   logout() {
     this.accessToken = null;
     this.refreshToken = null;
-    localStorage.removeItem('accessToken');
-    localStorage.removeItem('refreshToken');
+    localStorage.removeItem("accessToken");
+    localStorage.removeItem("refreshToken");
   }
 
   // Wallet Methods
-  async getBalance(walletId: string): Promise<ApiResponse<{ balanceCents: number; pendingCents: number }>> {
+  async getBalance(
+    walletId: string,
+  ): Promise<ApiResponse<{ balanceCents: number; pendingCents: number }>> {
     const response = await this.client.get(`/wallet/${walletId}/balance`);
     return response.data;
   }
 
-  async getTransactionHistory(walletId: string, limit = 20, offset = 0): Promise<ApiResponse> {
+  async getTransactionHistory(
+    walletId: string,
+    limit = 20,
+    offset = 0,
+  ): Promise<ApiResponse> {
     const response = await this.client.get(`/wallet/${walletId}/transactions`, {
       params: { limit, offset },
     });
@@ -106,9 +118,9 @@ class AhavaApiClient {
   async sendPayment(
     recipientPhone: string,
     amountCents: number,
-    description?: string
+    description?: string,
   ): Promise<ApiResponse<{ transactionId: string }>> {
-    const response = await this.client.post('/payments', {
+    const response = await this.client.post("/payments", {
       recipientPhone,
       amountCents,
       description,
@@ -122,20 +134,23 @@ class AhavaApiClient {
     return response.data;
   }
 
-  async uploadKycDocument(file: File, documentType: string): Promise<ApiResponse> {
+  async uploadKycDocument(
+    file: File,
+    documentType: string,
+  ): Promise<ApiResponse> {
     const formData = new FormData();
-    formData.append('file', file);
-    formData.append('documentType', documentType);
-    const response = await this.client.post('/kyc/document/upload', formData);
+    formData.append("file", file);
+    formData.append("documentType", documentType);
+    const response = await this.client.post("/kyc/document/upload", formData);
     return response.data;
   }
 
   // Helper Methods
   private getDeviceId(): string {
-    let deviceId = localStorage.getItem('deviceId');
+    let deviceId = localStorage.getItem("deviceId");
     if (!deviceId) {
       deviceId = uuidv4();
-      localStorage.setItem('deviceId', deviceId);
+      localStorage.setItem("deviceId", deviceId);
     }
     return deviceId;
   }
