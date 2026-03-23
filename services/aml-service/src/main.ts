@@ -21,7 +21,7 @@ import { MlroNotifier } from "./mlro.notifier";
 
 const app = express();
 const prisma = new PrismaClient();
-const PORT = process.env.PORT || 3007;
+const PORT = process.env.PORT || 6007;
 
 const redisConnection = {
   host: process.env.REDIS_HOST || "localhost",

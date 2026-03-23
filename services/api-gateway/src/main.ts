@@ -94,7 +94,7 @@ app.get("/health", (req: Request, res: Response) => {
 const SERVICE_URLS = {
   auth: process.env.AUTH_SERVICE_URL || "http://auth-service:6001",
   wallets: process.env.WALLET_SERVICE_URL || "http://wallet-service:6002",
-  payments: process.env.PAYMENT_SERVICE_URL || "http://payment-service:3003",
+  payments: process.env.PAYMENT_SERVICE_URL || "http://payment-service:6003",
   kyc: process.env.KYC_SERVICE_URL || "http://kyc-service:6004",
   notifications:
     process.env.NOTIFICATION_SERVICE_URL || "http://notification-service:6005",

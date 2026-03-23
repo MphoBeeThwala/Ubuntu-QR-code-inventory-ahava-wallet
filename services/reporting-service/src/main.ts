@@ -10,7 +10,7 @@ import {
 
 const app = express();
 const prisma = new PrismaClient();
-const PORT = process.env.PORT || 3006;
+const PORT = process.env.PORT || 6006;
 
 app.use(express.json());
 app.use((req: Request, res: Response, next: NextFunction) => {

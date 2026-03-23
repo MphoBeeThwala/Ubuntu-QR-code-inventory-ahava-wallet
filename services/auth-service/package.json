@@ -5,7 +5,7 @@
   "description": "Auth Service - User authentication & device management",
   "main": "dist/main.js",
   "scripts": {
-    "dev": "ts-node src/main.ts",
+    "dev": "node --env-file=../../.env --require ts-node/register src/main.ts",
     "build": "tsc",
     "start": "node dist/main.js",
     "test": "jest",

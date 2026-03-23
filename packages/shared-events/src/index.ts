@@ -124,7 +124,13 @@ export interface AmlFlagRaisedEvent {
   userId?: string;
   walletId?: string;
   transactionId?: string;
-  flagType: "VELOCITY" | "ROUND_TRIP" | "STRUCTURING" | "SANCTIONS_MATCH" | "GEO_ANOMALY" | "PEP_FLAG";
+  flagType:
+    | "VELOCITY"
+    | "ROUND_TRIP"
+    | "STRUCTURING"
+    | "SANCTIONS_MATCH"
+    | "GEO_ANOMALY"
+    | "PEP_FLAG";
   severity: "INFO" | "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
   riskScore: number;
   description: string;
@@ -188,7 +194,13 @@ export interface WalletCreatedEvent {
   walletId: string;
   userId: string;
   walletNumber: string;
-  walletType: "PERSONAL" | "YOUTH" | "MERCHANT" | "AGENT" | "ESCROW" | "FEE_POOL";
+  walletType:
+    | "PERSONAL"
+    | "YOUTH"
+    | "MERCHANT"
+    | "AGENT"
+    | "ESCROW"
+    | "FEE_POOL";
   kycTier: "TIER_0" | "TIER_1" | "TIER_2" | "MERCHANT";
   createdAt: string;
 }
@@ -233,7 +245,11 @@ export interface WalletLimitChangedEvent {
 
 export interface ReportingDataCollectedEvent {
   reportId: string;
-  reportType: "VAT" | "SARB_COMPLIANCE" | "RECONCILIATION" | "TRANSACTION_EXPORT";
+  reportType:
+    | "VAT"
+    | "SARB_COMPLIANCE"
+    | "RECONCILIATION"
+    | "TRANSACTION_EXPORT";
   dataCollectionStartedAt: string;
   dataCollectionCompletedAt: string;
   recordCount: number;
@@ -257,37 +273,37 @@ export interface VatStatementGeneratedEvent {
 
 export const QUEUE_NAMES = {
   // Payment processing
-  PAYMENTS_CREATED: "payments:created",
-  PAYMENTS_COMPLETED: "payments:completed",
-  PAYMENTS_FAILED: "payments:failed",
-  PAYMENTS_REVERSED: "payments:reversed",
+  PAYMENTS_CREATED: "payments_created",
+  PAYMENTS_COMPLETED: "payments_completed",
+  PAYMENTS_FAILED: "payments_failed",
+  PAYMENTS_REVERSED: "payments_reversed",
 
   // KYC processing
-  KYC_PROGRESSED: "kyc:progressed",
-  KYC_DOCUMENT_UPLOADED: "kyc:document:uploaded",
-  KYC_DOCUMENT_VERIFIED: "kyc:document:verified",
-  KYC_DOCUMENT_REJECTED: "kyc:document:rejected",
+  KYC_PROGRESSED: "kyc_progressed",
+  KYC_DOCUMENT_UPLOADED: "kyc_document_uploaded",
+  KYC_DOCUMENT_VERIFIED: "kyc_document_verified",
+  KYC_DOCUMENT_REJECTED: "kyc_document_rejected",
 
   // AML screening
-  TRANSACTION_SCREENED_FOR_AML: "aml:transaction:screened",
-  AML_FLAG_RAISED: "aml:flag:raised",
-  SANCTIONS_SCREENING_MATCH: "aml:sanctions:match",
-  STR_FILED: "aml:str:filed",
+  TRANSACTION_SCREENED_FOR_AML: "aml_transaction_screened",
+  AML_FLAG_RAISED: "aml_flag_raised",
+  SANCTIONS_SCREENING_MATCH: "aml_sanctions_match",
+  STR_FILED: "aml_str_filed",
 
   // Notifications
-  NOTIFICATION_QUEUED: "notifications:queued",
-  NOTIFICATION_SENT: "notifications:sent",
-  NOTIFICATION_FAILED: "notifications:failed",
+  NOTIFICATION_QUEUED: "notifications_queued",
+  NOTIFICATION_SENT: "notifications_sent",
+  NOTIFICATION_FAILED: "notifications_failed",
 
   // Wallet management
-  WALLET_CREATED: "wallet:created",
-  WALLET_SUSPENDED: "wallet:suspended",
-  WALLET_FROZEN: "wallet:frozen",
-  WALLET_LIMIT_CHANGED: "wallet:limit:changed",
+  WALLET_CREATED: "wallet_created",
+  WALLET_SUSPENDED: "wallet_suspended",
+  WALLET_FROZEN: "wallet_frozen",
+  WALLET_LIMIT_CHANGED: "wallet_limit_changed",
 
   // Reporting
-  REPORTING_DATA_COLLECTED: "reporting:data:collected",
-  VAT_STATEMENT_GENERATED: "reporting:vat:statement:generated",
+  REPORTING_DATA_COLLECTED: "reporting_data_collected",
+  VAT_STATEMENT_GENERATED: "reporting_vat_statement_generated",
 } as const;
 
 // ─────────────────────────────────────────────────────────────────
@@ -345,22 +361,52 @@ export type AhavaEvent =
   | { type: typeof QUEUE_NAMES.PAYMENTS_FAILED; data: PaymentFailedEvent }
   | { type: typeof QUEUE_NAMES.PAYMENTS_REVERSED; data: PaymentReversedEvent }
   | { type: typeof QUEUE_NAMES.KYC_PROGRESSED; data: UserKycProgressedEvent }
-  | { type: typeof QUEUE_NAMES.KYC_DOCUMENT_UPLOADED; data: KycDocumentUploadedEvent }
-  | { type: typeof QUEUE_NAMES.KYC_DOCUMENT_VERIFIED; data: KycDocumentVerifiedEvent }
-  | { type: typeof QUEUE_NAMES.KYC_DOCUMENT_REJECTED; data: KycDocumentRejectedEvent }
-  | { type: typeof QUEUE_NAMES.TRANSACTION_SCREENED_FOR_AML; data: TransactionScreenedForAmlEvent }
+  | {
+      type: typeof QUEUE_NAMES.KYC_DOCUMENT_UPLOADED;
+      data: KycDocumentUploadedEvent;
+    }
+  | {
+      type: typeof QUEUE_NAMES.KYC_DOCUMENT_VERIFIED;
+      data: KycDocumentVerifiedEvent;
+    }
+  | {
+      type: typeof QUEUE_NAMES.KYC_DOCUMENT_REJECTED;
+      data: KycDocumentRejectedEvent;
+    }
+  | {
+      type: typeof QUEUE_NAMES.TRANSACTION_SCREENED_FOR_AML;
+      data: TransactionScreenedForAmlEvent;
+    }
   | { type: typeof QUEUE_NAMES.AML_FLAG_RAISED; data: AmlFlagRaisedEvent }
-  | { type: typeof QUEUE_NAMES.SANCTIONS_SCREENING_MATCH; data: SanctionsScreeningMatchEvent }
+  | {
+      type: typeof QUEUE_NAMES.SANCTIONS_SCREENING_MATCH;
+      data: SanctionsScreeningMatchEvent;
+    }
   | { type: typeof QUEUE_NAMES.STR_FILED; data: StrFiledEvent }
-  | { type: typeof QUEUE_NAMES.NOTIFICATION_QUEUED; data: NotificationQueuedEvent }
+  | {
+      type: typeof QUEUE_NAMES.NOTIFICATION_QUEUED;
+      data: NotificationQueuedEvent;
+    }
   | { type: typeof QUEUE_NAMES.NOTIFICATION_SENT; data: NotificationSentEvent }
-  | { type: typeof QUEUE_NAMES.NOTIFICATION_FAILED; data: NotificationFailedEvent }
+  | {
+      type: typeof QUEUE_NAMES.NOTIFICATION_FAILED;
+      data: NotificationFailedEvent;
+    }
   | { type: typeof QUEUE_NAMES.WALLET_CREATED; data: WalletCreatedEvent }
   | { type: typeof QUEUE_NAMES.WALLET_SUSPENDED; data: WalletSuspendedEvent }
   | { type: typeof QUEUE_NAMES.WALLET_FROZEN; data: WalletFrozenEvent }
-  | { type: typeof QUEUE_NAMES.WALLET_LIMIT_CHANGED; data: WalletLimitChangedEvent }
-  | { type: typeof QUEUE_NAMES.REPORTING_DATA_COLLECTED; data: ReportingDataCollectedEvent }
-  | { type: typeof QUEUE_NAMES.VAT_STATEMENT_GENERATED; data: VatStatementGeneratedEvent };
+  | {
+      type: typeof QUEUE_NAMES.WALLET_LIMIT_CHANGED;
+      data: WalletLimitChangedEvent;
+    }
+  | {
+      type: typeof QUEUE_NAMES.REPORTING_DATA_COLLECTED;
+      data: ReportingDataCollectedEvent;
+    }
+  | {
+      type: typeof QUEUE_NAMES.VAT_STATEMENT_GENERATED;
+      data: VatStatementGeneratedEvent;
+    };
 
 export default {
   QUEUE_NAMES,

@@ -9,8 +9,8 @@
     "clean": "rm -rf dist",
     "typecheck": "tsc --noEmit"
   },
-  "dependencies": {},
   "devDependencies": {
+    "dotenv": "^17.3.1",
     "typescript": "^5.4.0"
   }
 }

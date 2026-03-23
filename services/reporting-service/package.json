@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "ts-node src/main.ts",
+    "dev": "node --env-file=../../.env --require ts-node/register src/main.ts",
     "build": "tsc",
     "start": "node dist/main.js",
     "test": "jest",

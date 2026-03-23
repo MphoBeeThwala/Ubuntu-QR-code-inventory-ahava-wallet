@@ -12,7 +12,7 @@ import { QUEUE_NAMES } from "@ahava/shared-events";
 
 const app = express();
 const prisma = new PrismaClient();
-const PORT = process.env.PORT || 3002;
+const PORT = process.env.PORT || 6002;
 
 const redisConnection = {
   host: process.env.REDIS_HOST || "localhost",

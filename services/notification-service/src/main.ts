@@ -9,15 +9,16 @@ import {
 } from "@ahava/shared-errors";
 import { Queue, Worker, Job } from "bullmq";
 import * as admin from "firebase-admin";
-import AfricasTalking from "africastalking";
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const AfricasTalking = require("africastalking");
 import { SESClient, SendEmailCommand } from "@aws-sdk/client-ses";
 
 // ─────────────────────────────────────────────────────────────────
 // CONSTANTS
 // ─────────────────────────────────────────────────────────────────
 
-const QUEUE_NAME = "notifications:dispatch";
-const PORT = process.env.PORT || 3005;
+const QUEUE_NAME = "notifications_dispatch";
+const PORT = process.env.PORT || 6005;
 
 // ─────────────────────────────────────────────────────────────────
 // CLIENTS (lazily initialised — only when credentials present)
@@ -181,7 +182,8 @@ async function processNotification(job: Job<DispatchJobData>): Promise<void> {
       where: { id: notificationId },
       data: {
         status: "FAILED",
-        error:
+        failedAt: new Date(),
+        failureReason:
           dispatchError instanceof Error
             ? dispatchError.message
             : String(dispatchError),
@@ -299,14 +301,12 @@ app.post(
       );
       await queue.close();
 
-      res
-        .status(201)
-        .json(
-          createSuccessResponse({
-            notificationId: notification.id,
-            status: "PENDING",
-          }),
-        );
+      res.status(201).json(
+        createSuccessResponse({
+          notificationId: notification.id,
+          status: "PENDING",
+        }),
+      );
     } catch (error) {
       next(error);
     }
