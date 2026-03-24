@@ -40,8 +40,8 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen>
         title: const Text('Transactions'),
         bottom: TabBar(
           controller: _tabController,
-          indicatorColor: AhavaColors.green600,
-          labelColor: AhavaColors.green600,
+          indicatorColor: AhavaColors.success600,
+          labelColor: AhavaColors.success600,
           unselectedLabelColor: Colors.grey[500],
           tabs: const [
             Tab(text: 'All'),

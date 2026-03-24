@@ -119,7 +119,7 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
         title: const Text('Ahava Wallet', style: TextStyle(fontSize: 16)),
         titlePadding: const EdgeInsets.only(left: 20, bottom: 12),
-        collapseMode: CollapseMode.fade,
+        collapseMode: CollapseMode.parallax,
       ),
     );
   }
