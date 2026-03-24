@@ -9,6 +9,7 @@ import {
 } from "@ahava/shared-errors";
 import { Queue } from "bullmq";
 import { QUEUE_NAMES } from "@ahava/shared-events";
+import { sendSms, txSentMessage, txReceivedMessage } from "./sms";
 
 const app = express();
 const prisma = new PrismaClient();
@@ -771,6 +772,51 @@ app.post(
           qrType: qr.qrType,
         }),
       );
+
+      // Fire-and-forget SMS notifications — never blocks the response
+      const newSenderBalance = Number(senderWallet.balance) - payAmount;
+      const newReceiverBalance = Number(receiverWallet.balance) + payAmount;
+
+      // Look up phone numbers (stored as base64 in DB)
+      const [senderUser, receiverUser] = await Promise.all([
+        prisma.user.findUnique({
+          where: { id: senderWallet.userId },
+          select: { phoneNumber: true },
+        }),
+        prisma.user.findUnique({
+          where: { id: receiverWallet.userId },
+          select: { phoneNumber: true },
+        }),
+      ]);
+
+      if (senderUser) {
+        const senderPhone = Buffer.from(
+          senderUser.phoneNumber,
+          "base64",
+        ).toString("utf-8");
+        void sendSms(
+          senderPhone,
+          txSentMessage(
+            payAmount,
+            receiverWallet.walletNumber,
+            newSenderBalance,
+          ),
+        );
+      }
+      if (receiverUser) {
+        const receiverPhone = Buffer.from(
+          receiverUser.phoneNumber,
+          "base64",
+        ).toString("utf-8");
+        void sendSms(
+          receiverPhone,
+          txReceivedMessage(
+            payAmount,
+            senderWallet.walletNumber,
+            newReceiverBalance,
+          ),
+        );
+      }
     } catch (error) {
       next(error);
     }
