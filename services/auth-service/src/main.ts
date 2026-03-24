@@ -294,16 +294,12 @@ app.post(
         );
       }
 
-      // Reset failed attempts + bind device on first login if not already bound
+      // Reset failed attempts on successful login
       await prisma.user.update({
         where: { id: user.id },
         data: {
           failedPinAttempts: 0,
           pinLockedUntil: null,
-          ...(!user.primaryDeviceId && {
-            primaryDeviceId: deviceId,
-            deviceBoundAt: new Date(),
-          }),
         },
       });
 
