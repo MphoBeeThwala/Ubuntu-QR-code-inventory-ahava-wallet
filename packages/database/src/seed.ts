@@ -50,7 +50,7 @@ async function main() {
   // 1. Tier 0 user — Unverified (basic phone + selfie)
   const tier0User = await prisma.user.upsert({
     where: { phoneNumberHash: hash("+27611234567") },
-    update: { primaryDeviceId: "seed-device-nomsa" },
+    update: { primaryDeviceId: null, deviceBoundAt: null },
     create: {
       phoneNumber: Buffer.from("+27611234567").toString("base64"), // Simulated encryption
       phoneNumberHash: hash("+27611234567"),
@@ -59,8 +59,6 @@ async function main() {
       kycTier: KycTier.TIER_0,
       kycStatus: "VERIFIED",
       preferredLanguage: "zu",
-      primaryDeviceId: "seed-device-nomsa",
-      deviceBoundAt: new Date(),
       pinHash,
       pinChangedAt: new Date(),
       popiConsentAt: new Date(Date.now() - 7 * 24 * 3600 * 1000),
@@ -72,7 +70,7 @@ async function main() {
   // 2. Tier 1 user — Verified SA ID
   const tier1User = await prisma.user.upsert({
     where: { phoneNumberHash: hash("+27722345678") },
-    update: { primaryDeviceId: "seed-device-gwede" },
+    update: { primaryDeviceId: null, deviceBoundAt: null },
     create: {
       phoneNumber: Buffer.from("+27722345678").toString("base64"),
       phoneNumberHash: hash("+27722345678"),
@@ -83,8 +81,6 @@ async function main() {
       idNumberHash: hash("8001015009087"),
       idType: "SA_ID_CARD",
       preferredLanguage: "en",
-      primaryDeviceId: "seed-device-gwede",
-      deviceBoundAt: new Date(),
       pinHash,
       pinChangedAt: new Date(),
       popiConsentAt: new Date(Date.now() - 30 * 24 * 3600 * 1000),
@@ -96,7 +92,7 @@ async function main() {
   // 3. Tier 2 merchant — Mama Thandi's Shop
   const merchantUser = await prisma.user.upsert({
     where: { phoneNumberHash: hash("+27833456789") },
-    update: { primaryDeviceId: "seed-device-thandi" },
+    update: { primaryDeviceId: null, deviceBoundAt: null },
     create: {
       phoneNumber: Buffer.from("+27833456789").toString("base64"),
       phoneNumberHash: hash("+27833456789"),
@@ -107,8 +103,6 @@ async function main() {
       idNumberHash: hash("7503155009087"),
       idType: "SA_ID_CARD",
       preferredLanguage: "zu",
-      primaryDeviceId: "seed-device-thandi",
-      deviceBoundAt: new Date(),
       pinHash,
       pinChangedAt: new Date(),
       popiConsentAt: new Date(Date.now() - 90 * 24 * 3600 * 1000),
@@ -120,7 +114,7 @@ async function main() {
   // 4. Youth user — minor account
   const youthUser = await prisma.user.upsert({
     where: { phoneNumberHash: hash("+27611111111") },
-    update: { primaryDeviceId: "seed-device-sipho" },
+    update: { primaryDeviceId: null, deviceBoundAt: null },
     create: {
       phoneNumber: Buffer.from("+27611111111").toString("base64"),
       phoneNumberHash: hash("+27611111111"),
@@ -131,8 +125,6 @@ async function main() {
       isMinor: true,
       guardianUserId: tier1User.id,
       preferredLanguage: "en",
-      primaryDeviceId: "seed-device-sipho",
-      deviceBoundAt: new Date(),
       pinHash,
       pinChangedAt: new Date(),
       popiConsentAt: new Date(),
@@ -144,7 +136,7 @@ async function main() {
   // 5. Tumi — the sender in the demo scenario
   const tumiUser = await prisma.user.upsert({
     where: { phoneNumberHash: hash("+27799999999") },
-    update: { primaryDeviceId: "seed-device-tumi" },
+    update: { primaryDeviceId: null, deviceBoundAt: null },
     create: {
       phoneNumber: Buffer.from("+27799999999").toString("base64"),
       phoneNumberHash: hash("+27799999999"),
@@ -153,8 +145,6 @@ async function main() {
       kycTier: KycTier.TIER_1,
       kycStatus: "VERIFIED",
       preferredLanguage: "st",
-      primaryDeviceId: "seed-device-tumi",
-      deviceBoundAt: new Date(),
       pinHash,
       pinChangedAt: new Date(),
       popiConsentAt: new Date(),
@@ -436,19 +426,22 @@ async function main() {
   console.log("\n🎉 Seed complete!\n");
   console.log("Test accounts (all PIN: 1234):");
   console.log(
-    `  Nomsa (Tier 0)       +27611234567   ${nnomsaWallet.walletNumber}   deviceId: seed-device-nomsa`,
+    `  Nomsa (Tier 0)       +27611234567   ${nnomsaWallet.walletNumber}   PIN: 1234`,
   );
   console.log(
-    `  Gwede (Tier 1)       +27722345678   ${gwwdeWallet.walletNumber}   deviceId: seed-device-gwede`,
+    `  Gwede (Tier 1)       +27722345678   ${gwwdeWallet.walletNumber}   PIN: 1234`,
   );
   console.log(
-    `  Mama Thandi (Merch)  +27833456789   ${thaandiWallet.walletNumber}   deviceId: seed-device-thandi`,
+    `  Mama Thandi (Merch)  +27833456789   ${thaandiWallet.walletNumber}   PIN: 1234`,
   );
   console.log(
-    `  Tumi (Tier 1)        +27799999999   ${tuumiWallet.walletNumber}   deviceId: seed-device-tumi`,
+    `  Tumi (Tier 1)        +27799999999   ${tuumiWallet.walletNumber}   PIN: 1234`,
   );
   console.log(
-    `  Sipho (Youth)        +27611111111   ${siphoWallet.walletNumber}   deviceId: seed-device-sipho`,
+    `  Sipho (Youth)        +27611111111   ${siphoWallet.walletNumber}   PIN: 1234`,
+  );
+  console.log(
+    "  (No device binding — first login from any device auto-binds it)",
   );
 }
 
