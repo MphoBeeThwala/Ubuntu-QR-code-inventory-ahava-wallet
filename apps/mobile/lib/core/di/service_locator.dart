@@ -9,6 +9,7 @@ import '../device/device_id_service.dart';
 import '../repositories/auth_repository.dart';
 import '../repositories/payment_repository.dart';
 import '../repositories/wallet_repository.dart';
+import '../repositories/qr_repository.dart';
 import '../security/pin_store.dart';
 import '../storage/token_storage.dart';
 import '../../features/auth/bloc/auth_bloc.dart';
@@ -50,6 +51,10 @@ Future<void> setupServiceLocator() async {
       tokenStorage: sl<TokenStorage>(),
       cache: sl<OfflineCache>(),
     ),
+  );
+
+  sl.registerLazySingleton<QrRepository>(
+    () => QrRepository(apiClient: sl<AhavaApiClient>()),
   );
 
   // Feature blocs
