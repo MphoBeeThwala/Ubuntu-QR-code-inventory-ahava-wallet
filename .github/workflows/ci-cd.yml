@@ -170,6 +170,13 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Build shared packages
+        run: |
+          npm run build --workspace=packages/shared-errors
+          npm run build --workspace=packages/shared-crypto || true
+          npm run build --workspace=packages/shared-events || true
+          npm run build --workspace=packages/shared-types || true
+
       - name: Generate test RSA keypair
         run: |
           openssl genrsa -out test-private.pem 2048
