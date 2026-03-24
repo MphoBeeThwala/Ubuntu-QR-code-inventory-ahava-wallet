@@ -136,7 +136,9 @@ export default function DashboardPage() {
               <span
                 className={`text-xs font-semibold px-2 py-0.5 rounded-full ${kycTierColor[balance.kycTier] ?? "bg-white/20 text-white"}`}
               >
-                {balance.kycTier.replace("KYC_TIER_", "Tier ")}
+                {balance.kycTier === "MERCHANT"
+                  ? "Merchant"
+                  : balance.kycTier.replace("TIER_", "Tier ")}
               </span>
             )}
             <button
