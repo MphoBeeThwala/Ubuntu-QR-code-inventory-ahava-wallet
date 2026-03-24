@@ -45,8 +45,22 @@ export default function LoginPage() {
       } else {
         setError(res.error?.message || "Login failed");
       }
-    } catch {
-      setError("Unable to connect. Please check your network and try again.");
+    } catch (err: unknown) {
+      const axiosErr = err as {
+        response?: { status?: number; data?: { error?: { message?: string } } };
+      };
+      const status = axiosErr?.response?.status;
+      const apiMsg = axiosErr?.response?.data?.error?.message;
+      if (status === 429) {
+        setError(
+          apiMsg ||
+            "Too many login attempts. Please wait 15 minutes and try again.",
+        );
+      } else if (status) {
+        setError(apiMsg || `Login failed (${status})`);
+      } else {
+        setError("Unable to connect. Please check your network and try again.");
+      }
     } finally {
       setLoading(false);
     }

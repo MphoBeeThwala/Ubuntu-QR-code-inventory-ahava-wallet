@@ -69,11 +69,12 @@ export const generalRateLimiter = createLimiter({
 
 /**
  * Auth limiter for login and device-bind.
- * 5 attempts per 15 minutes — prevents PIN brute-force.
+ * 5 attempts per 15 minutes in production — prevents PIN brute-force.
+ * 100 attempts in development/test to avoid blocking repeated logins.
  */
 export const authRateLimiter = createLimiter({
   windowMs: 15 * 60 * 1000,
-  max: 5,
+  max: process.env.NODE_ENV === "production" ? 5 : 100,
   message: "Too many authentication attempts",
 });
 
