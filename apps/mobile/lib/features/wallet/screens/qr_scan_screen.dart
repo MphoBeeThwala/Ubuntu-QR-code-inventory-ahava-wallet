@@ -15,7 +15,7 @@ import '../../../core/storage/token_storage.dart';
 import '../../../core/theme/ahava_theme.dart';
 
 class QrScanScreen extends StatefulWidget {
-  const QrScanScreen({Key? key}) : super(key: key);
+  const QrScanScreen({super.key});
 
   @override
   State<QrScanScreen> createState() => _QrScanScreenState();
@@ -278,9 +278,9 @@ class _QrScanScreenState extends State<QrScanScreen>
                   onPressed: _requestPermission,
                   child: const Text('Grant permission'),
                 ),
-                TextButton(
+                const TextButton(
                   onPressed: openAppSettings,
-                  child: const Text('Open settings'),
+                  child: Text('Open settings'),
                 ),
               ],
             ),
@@ -521,7 +521,7 @@ class _ConfirmPaymentSheetState extends State<_ConfirmPaymentSheet> {
                 Container(
                   width: 40,
                   height: 40,
-                  decoration: BoxDecoration(
+                  decoration: const BoxDecoration(
                     color: AhavaColors.gold100,
                     shape: BoxShape.circle,
                   ),

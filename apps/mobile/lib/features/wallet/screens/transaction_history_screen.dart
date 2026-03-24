@@ -9,7 +9,7 @@ import '../bloc/wallet_bloc.dart';
 import '../../../core/theme/ahava_theme.dart';
 
 class TransactionHistoryScreen extends StatefulWidget {
-  const TransactionHistoryScreen({Key? key}) : super(key: key);
+  const TransactionHistoryScreen({super.key});
 
   @override
   State<TransactionHistoryScreen> createState() => _TransactionHistoryScreenState();

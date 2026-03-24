@@ -121,7 +121,7 @@ abstract final class AhavaTheme {
     final isDark = brightness == Brightness.dark;
 
     final colorScheme = isDark
-        ? ColorScheme.dark(
+        ? const ColorScheme.dark(
             primary: AhavaColors.gold500,
             onPrimary: AhavaColors.navy900,
             secondary: AhavaColors.navy600,
@@ -132,7 +132,7 @@ abstract final class AhavaTheme {
             onError: AhavaColors.white,
             outline: AhavaColors.navy600,
           )
-        : ColorScheme.light(
+        : const ColorScheme.light(
             primary: AhavaColors.navy900,
             onPrimary: AhavaColors.white,
             secondary: AhavaColors.gold500,

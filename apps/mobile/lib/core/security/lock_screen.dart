@@ -9,7 +9,7 @@ typedef UnlockCallback = Future<bool> Function({String? pin});
 class LockScreen extends StatefulWidget {
   final UnlockCallback onUnlock;
 
-  const LockScreen({Key? key, required this.onUnlock}) : super(key: key);
+  const LockScreen({super.key, required this.onUnlock});
 
   @override
   State<LockScreen> createState() => _LockScreenState();
@@ -74,7 +74,7 @@ class _LockScreenState extends State<LockScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor.withOpacity(0.95),
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor.withValues(alpha: 0.95),
       body: Center(
         child: Padding(
           padding: const EdgeInsets.all(24),

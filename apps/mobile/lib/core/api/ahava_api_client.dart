@@ -25,8 +25,8 @@ class AhavaApiClient {
   AhavaApiClient({String? baseUrl})
       : _dio = Dio(BaseOptions(
           baseUrl: baseUrl ?? AppConfig.apiBaseUrl,
-          connectTimeout: Duration(seconds: AppConfig.requestTimeoutSeconds),
-          receiveTimeout: Duration(seconds: AppConfig.requestTimeoutSeconds),
+          connectTimeout: const Duration(seconds: AppConfig.requestTimeoutSeconds),
+          receiveTimeout: const Duration(seconds: AppConfig.requestTimeoutSeconds),
           headers: {
             'Content-Type': 'application/json',
           },

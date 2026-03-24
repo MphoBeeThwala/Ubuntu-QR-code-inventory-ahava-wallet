@@ -10,7 +10,7 @@ import '../../features/auth/bloc/auth_bloc.dart';
 import '../../features/wallet/bloc/wallet_bloc.dart';
 
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({Key? key}) : super(key: key);
+  const HomeScreen({super.key});
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -149,7 +149,7 @@ class _HomeScreenState extends State<HomeScreen> {
               borderRadius: BorderRadius.circular(20),
               boxShadow: [
                 BoxShadow(
-                  color: AhavaColors.navy900.withOpacity(0.3),
+                  color: AhavaColors.navy900.withValues(alpha: 0.3),
                   blurRadius: 12,
                   offset: const Offset(0, 4),
                 ),
@@ -205,10 +205,10 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 ],
                 const SizedBox(height: 16),
-                Row(
+                const Row(
                   children: [
                     _WalletChip(icon: Icons.shield_outlined, label: 'Secured'),
-                    const SizedBox(width: 8),
+                    SizedBox(width: 8),
                     _WalletChip(icon: Icons.account_balance_outlined, label: 'ZAR'),
                   ],
                 ),
@@ -318,9 +318,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _buildBottomNav() {
     return Container(
-      decoration: BoxDecoration(
+      decoration: const BoxDecoration(
         color: Colors.white,
-        boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 8, offset: const Offset(0, -1))],
+        boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 8, offset: Offset(0, -1))],
       ),
       child: SafeArea(
         child: SizedBox(
@@ -429,7 +429,7 @@ class _QuickActionButton extends StatelessWidget {
             decoration: BoxDecoration(
               color: color,
               borderRadius: BorderRadius.circular(18),
-              boxShadow: [BoxShadow(color: color.withOpacity(0.3), blurRadius: 8, offset: const Offset(0, 3))],
+              boxShadow: [BoxShadow(color: color.withValues(alpha: 0.3), blurRadius: 8, offset: const Offset(0, 3))],
             ),
             child: Icon(icon, color: Colors.white, size: 24),
           ),
@@ -457,7 +457,7 @@ class _TransactionRow extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(14),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 4)],
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 4)],
       ),
       child: Row(
         children: [

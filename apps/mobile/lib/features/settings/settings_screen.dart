@@ -11,7 +11,7 @@ import '../../core/theme/ahava_theme.dart';
 import '../auth/bloc/auth_bloc.dart';
 
 class SettingsScreen extends StatefulWidget {
-  const SettingsScreen({Key? key}) : super(key: key);
+  const SettingsScreen({super.key});
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -68,7 +68,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Widget build(BuildContext context) {
     final authState = context.read<AuthBloc>().state;
     final maskedPhone = authState is AuthAuthenticated
-        ? authState.session.userId.substring(0, 4) + '****'
+        ? '${authState.session.userId.substring(0, 4)}****'
         : '—';
 
     return Scaffold(
@@ -79,7 +79,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           : ListView(
               children: [
                 // Account section
-                _SectionHeader('Account'),
+                const _SectionHeader('Account'),
                 _SettingsTile(
                   icon: Icons.person_outline,
                   title: 'Profile',
@@ -99,17 +99,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
 
                 // Security section
-                _SectionHeader('Security'),
+                const _SectionHeader('Security'),
                 if (_biometricAvailable)
                   SwitchListTile(
                     secondary: Container(
                       width: 40,
                       height: 40,
                       decoration: BoxDecoration(
-                        color: AhavaColors.success600.withOpacity(0.1),
+                        color: AhavaColors.success600.withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(10),
                       ),
-                      child: Icon(Icons.fingerprint, color: AhavaColors.success600),
+                      child: const Icon(Icons.fingerprint, color: AhavaColors.success600),
                     ),
                     title: const Text(
                       'Biometric login',
@@ -118,7 +118,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     subtitle: const Text('Use Face ID or fingerprint to sign in'),
                     value: _biometricEnabled,
                     onChanged: _toggleBiometric,
-                    activeColor: AhavaColors.success600,
+                    activeThumbColor: AhavaColors.success600,
                   ),
                 _SettingsTile(
                   icon: Icons.devices_outlined,
@@ -128,7 +128,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
 
                 // Notifications section
-                _SectionHeader('Notifications'),
+                const _SectionHeader('Notifications'),
                 _SettingsTile(
                   icon: Icons.notifications_outlined,
                   title: 'Push notifications',
@@ -137,7 +137,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
 
                 // Support section
-                _SectionHeader('Support'),
+                const _SectionHeader('Support'),
                 _SettingsTile(
                   icon: Icons.help_outline,
                   title: 'Help centre',
@@ -156,7 +156,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
 
                 // App info
-                _SectionHeader('App'),
+                const _SectionHeader('App'),
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                   child: Row(
@@ -249,7 +249,7 @@ class _SettingsTile extends StatelessWidget {
         width: 40,
         height: 40,
         decoration: BoxDecoration(
-          color: AhavaColors.success600.withOpacity(0.1),
+          color: AhavaColors.success600.withValues(alpha: 0.1),
           borderRadius: BorderRadius.circular(10),
         ),
         child: Icon(icon, color: AhavaColors.success600, size: 20),

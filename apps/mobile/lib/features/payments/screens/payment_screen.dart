@@ -7,7 +7,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import '../bloc/payment_bloc.dart';
 
 class PaymentScreen extends StatefulWidget {
-  const PaymentScreen({Key? key}) : super(key: key);
+  const PaymentScreen({super.key});
 
   @override
   State<PaymentScreen> createState() => _PaymentScreenState();
@@ -51,7 +51,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
 }
 
 class PaymentEntryView extends StatefulWidget {
-  const PaymentEntryView({Key? key}) : super(key: key);
+  const PaymentEntryView({super.key});
 
   @override
   State<PaymentEntryView> createState() => _PaymentEntryViewState();

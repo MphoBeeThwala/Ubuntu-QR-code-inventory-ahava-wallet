@@ -12,7 +12,7 @@ import '../../../core/storage/token_storage.dart';
 import '../../../core/theme/ahava_theme.dart';
 
 class MyQrScreen extends StatefulWidget {
-  const MyQrScreen({Key? key}) : super(key: key);
+  const MyQrScreen({super.key});
 
   @override
   State<MyQrScreen> createState() => _MyQrScreenState();
@@ -138,7 +138,7 @@ class _MyQrScreenState extends State<MyQrScreen> {
           Text(
             'Others scan this to pay you',
             style: TextStyle(
-              color: Colors.white.withOpacity(0.6),
+              color: Colors.white.withValues(alpha: 0.6),
               fontSize: 14,
             ),
           ),
@@ -152,7 +152,7 @@ class _MyQrScreenState extends State<MyQrScreen> {
               borderRadius: BorderRadius.circular(24),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withOpacity(0.4),
+                  color: Colors.black.withValues(alpha: 0.4),
                   blurRadius: 30,
                   offset: const Offset(0, 10),
                 ),
@@ -203,7 +203,7 @@ class _MyQrScreenState extends State<MyQrScreen> {
                     _walletNumber!,
                     style: TextStyle(
                       fontSize: 12,
-                      color: AhavaColors.navy900.withOpacity(0.45),
+                      color: AhavaColors.navy900.withValues(alpha: 0.45),
                       fontFamily: 'monospace',
                       letterSpacing: 1,
                     ),
@@ -219,7 +219,7 @@ class _MyQrScreenState extends State<MyQrScreen> {
             'Share your QR code with anyone to receive instant payments',
             textAlign: TextAlign.center,
             style: TextStyle(
-              color: Colors.white.withOpacity(0.45),
+              color: Colors.white.withValues(alpha: 0.45),
               fontSize: 13,
             ),
           ),
@@ -258,7 +258,7 @@ class _MyQrScreenState extends State<MyQrScreen> {
               label: const Text('Scan to Pay'),
               style: OutlinedButton.styleFrom(
                 foregroundColor: Colors.white,
-                side: BorderSide(color: Colors.white.withOpacity(0.2)),
+                side: BorderSide(color: Colors.white.withValues(alpha: 0.2)),
                 padding: const EdgeInsets.symmetric(vertical: 16),
                 shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(14)),

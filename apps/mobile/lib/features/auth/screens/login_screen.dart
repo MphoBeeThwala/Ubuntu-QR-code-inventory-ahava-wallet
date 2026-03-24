@@ -5,7 +5,7 @@ import '../../../core/theme/ahava_theme.dart';
 import '../bloc/auth_bloc.dart';
 
 class LoginScreen extends StatefulWidget {
-  const LoginScreen({Key? key}) : super(key: key);
+  const LoginScreen({super.key});
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
@@ -53,9 +53,9 @@ class _LoginScreenState extends State<LoginScreen> {
               // Phone Input
               TextField(
                 controller: _phoneController,
-                decoration: InputDecoration(
+                decoration: const InputDecoration(
                   hintText: 'Phone number (+27...)',
-                  prefixIcon: const Icon(Icons.phone),
+                  prefixIcon: Icon(Icons.phone),
                 ),
                 keyboardType: TextInputType.phone,
               ),
