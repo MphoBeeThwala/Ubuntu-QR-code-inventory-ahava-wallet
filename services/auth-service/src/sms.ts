@@ -8,7 +8,7 @@ import AfricasTalking from "africastalking";
 
 const username = process.env.AT_USERNAME;
 const apiKey = process.env.AT_API_KEY;
-const senderId = process.env.AT_SENDER_ID || "AHAVA";
+const senderId = process.env.AT_SENDER_ID || "AFRICASTALKING";
 
 let smsClient: ReturnType<typeof AfricasTalking>["SMS"] | null = null;
 
@@ -29,9 +29,18 @@ export async function sendSms(to: string, message: string): Promise<void> {
   const normalised = to.startsWith("+") ? to : `+${to}`;
 
   try {
-    await smsClient.send({ to: [normalised], message, from: senderId });
+    // AT API allows omitting `from`; only include it when a sender ID is configured
+    const opts = senderId
+      ? { to: [normalised], message, from: senderId }
+      : ({ to: [normalised], message } as Parameters<typeof smsClient.send>[0]);
+    const result = await smsClient.send(opts);
+    console.log("[sms] Sent to", normalised, JSON.stringify(result));
   } catch (err) {
-    console.error("[sms] Failed to send SMS to", normalised, err);
+    console.error(
+      "[sms] Failed to send SMS to",
+      normalised,
+      JSON.stringify(err),
+    );
   }
 }
 

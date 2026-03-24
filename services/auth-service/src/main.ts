@@ -189,6 +189,7 @@ app.post(
       });
 
       // Send welcome SMS (fire-and-forget — never blocks registration)
+      // phoneNumber here is the raw value from req.body (already decoded)
       void sendSms(phoneNumber, welcomeMessage(walletNumber));
 
       res.status(201).json(
@@ -345,8 +346,11 @@ app.post(
       });
 
       // Login alert SMS (fire-and-forget)
+      const loginPhone = Buffer.from(user.phoneNumber, "base64").toString(
+        "utf-8",
+      );
       void sendSms(
-        user.phoneNumber,
+        loginPhone,
         loginAlertMessage(
           new Date().toLocaleString("en-ZA", {
             timeZone: "Africa/Johannesburg",
