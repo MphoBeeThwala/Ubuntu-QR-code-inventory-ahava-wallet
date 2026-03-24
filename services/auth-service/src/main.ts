@@ -84,9 +84,14 @@ app.post(
         );
       }
 
-      // Check if user already exists
+      // Check if user already exists (look up by hash — phoneNumber field may be encrypted)
+      const phoneNumberHash = crypto
+        .createHash("sha256")
+        .update(phoneNumber.trim().toLowerCase())
+        .digest("hex");
+
       const existingUser = await prisma.user.findUnique({
-        where: { phoneNumber },
+        where: { phoneNumberHash },
       });
 
       if (existingUser) {
@@ -99,12 +104,6 @@ app.post(
 
       // Hash PIN using Argon2id
       const pinHash = await hashPin(pin);
-
-      // Generate phone number hash for lookups (SHA-256)
-      const phoneNumberHash = crypto
-        .createHash("sha256")
-        .update(phoneNumber)
-        .digest("hex");
 
       // Create user
       const user = await prisma.user.create({
@@ -237,9 +236,14 @@ app.post(
         );
       }
 
-      // Find user
+      // Find user by hash (phoneNumber field may be encrypted in DB)
+      const phoneNumberHash = crypto
+        .createHash("sha256")
+        .update(phoneNumber.trim().toLowerCase())
+        .digest("hex");
+
       const user = await prisma.user.findUnique({
-        where: { phoneNumber },
+        where: { phoneNumberHash },
       });
 
       if (!user || user.isDeleted) {

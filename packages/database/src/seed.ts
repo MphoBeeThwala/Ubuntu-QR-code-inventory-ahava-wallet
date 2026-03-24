@@ -50,7 +50,7 @@ async function main() {
   // 1. Tier 0 user — Unverified (basic phone + selfie)
   const tier0User = await prisma.user.upsert({
     where: { phoneNumberHash: hash("+27611234567") },
-    update: {},
+    update: { primaryDeviceId: "seed-device-nomsa" },
     create: {
       phoneNumber: Buffer.from("+27611234567").toString("base64"), // Simulated encryption
       phoneNumberHash: hash("+27611234567"),
@@ -59,7 +59,7 @@ async function main() {
       kycTier: KycTier.TIER_0,
       kycStatus: "VERIFIED",
       preferredLanguage: "zu",
-      primaryDeviceId: hash("device-nomsa-001"),
+      primaryDeviceId: "seed-device-nomsa",
       deviceBoundAt: new Date(),
       pinHash,
       pinChangedAt: new Date(),
@@ -72,7 +72,7 @@ async function main() {
   // 2. Tier 1 user — Verified SA ID
   const tier1User = await prisma.user.upsert({
     where: { phoneNumberHash: hash("+27722345678") },
-    update: {},
+    update: { primaryDeviceId: "seed-device-gwede" },
     create: {
       phoneNumber: Buffer.from("+27722345678").toString("base64"),
       phoneNumberHash: hash("+27722345678"),
@@ -83,7 +83,7 @@ async function main() {
       idNumberHash: hash("8001015009087"),
       idType: "SA_ID_CARD",
       preferredLanguage: "en",
-      primaryDeviceId: hash("device-gwede-001"),
+      primaryDeviceId: "seed-device-gwede",
       deviceBoundAt: new Date(),
       pinHash,
       pinChangedAt: new Date(),
@@ -96,7 +96,7 @@ async function main() {
   // 3. Tier 2 merchant — Mama Thandi's Shop
   const merchantUser = await prisma.user.upsert({
     where: { phoneNumberHash: hash("+27833456789") },
-    update: {},
+    update: { primaryDeviceId: "seed-device-thandi" },
     create: {
       phoneNumber: Buffer.from("+27833456789").toString("base64"),
       phoneNumberHash: hash("+27833456789"),
@@ -107,7 +107,7 @@ async function main() {
       idNumberHash: hash("7503155009087"),
       idType: "SA_ID_CARD",
       preferredLanguage: "zu",
-      primaryDeviceId: hash("device-thandi-001"),
+      primaryDeviceId: "seed-device-thandi",
       deviceBoundAt: new Date(),
       pinHash,
       pinChangedAt: new Date(),
@@ -120,7 +120,7 @@ async function main() {
   // 4. Youth user — minor account
   const youthUser = await prisma.user.upsert({
     where: { phoneNumberHash: hash("+27611111111") },
-    update: {},
+    update: { primaryDeviceId: "seed-device-sipho" },
     create: {
       phoneNumber: Buffer.from("+27611111111").toString("base64"),
       phoneNumberHash: hash("+27611111111"),
@@ -131,7 +131,7 @@ async function main() {
       isMinor: true,
       guardianUserId: tier1User.id,
       preferredLanguage: "en",
-      primaryDeviceId: hash("device-sipho-001"),
+      primaryDeviceId: "seed-device-sipho",
       deviceBoundAt: new Date(),
       pinHash,
       pinChangedAt: new Date(),
@@ -144,7 +144,7 @@ async function main() {
   // 5. Tumi — the sender in the demo scenario
   const tumiUser = await prisma.user.upsert({
     where: { phoneNumberHash: hash("+27799999999") },
-    update: {},
+    update: { primaryDeviceId: "seed-device-tumi" },
     create: {
       phoneNumber: Buffer.from("+27799999999").toString("base64"),
       phoneNumberHash: hash("+27799999999"),
@@ -153,7 +153,7 @@ async function main() {
       kycTier: KycTier.TIER_1,
       kycStatus: "VERIFIED",
       preferredLanguage: "st",
-      primaryDeviceId: hash("device-tumi-001"),
+      primaryDeviceId: "seed-device-tumi",
       deviceBoundAt: new Date(),
       pinHash,
       pinChangedAt: new Date(),
@@ -190,8 +190,10 @@ async function main() {
     txn: centsFromRand(999999),
   };
 
-  const nnomsaWallet = await prisma.wallet.create({
-    data: {
+  const nnomsaWallet = await prisma.wallet.upsert({
+    where: { walletNumber: "AHV-NOMS-3344-7721" },
+    update: { balance: centsFromRand(245.5) },
+    create: {
       userId: tier0User.id,
       walletNumber: "AHV-NOMS-3344-7721",
       walletType: "PERSONAL",
@@ -206,8 +208,10 @@ async function main() {
     },
   });
 
-  const gwwdeWallet = await prisma.wallet.create({
-    data: {
+  const gwwdeWallet = await prisma.wallet.upsert({
+    where: { walletNumber: "AHV-GWED-7734-2291" },
+    update: { balance: centsFromRand(1247.5) },
+    create: {
       userId: tier1User.id,
       walletNumber: "AHV-GWED-7734-2291",
       walletType: "PERSONAL",
@@ -224,8 +228,10 @@ async function main() {
     },
   });
 
-  const thaandiWallet = await prisma.wallet.create({
-    data: {
+  const thaandiWallet = await prisma.wallet.upsert({
+    where: { walletNumber: "AHV-THAN-5582-3394" },
+    update: { balance: centsFromRand(8430.0) },
+    create: {
       userId: merchantUser.id,
       walletNumber: "AHV-THAN-5582-3394",
       walletType: "MERCHANT",
@@ -240,8 +246,10 @@ async function main() {
     },
   });
 
-  const tuumiWallet = await prisma.wallet.create({
-    data: {
+  const tuumiWallet = await prisma.wallet.upsert({
+    where: { walletNumber: "AHV-TUMI-3321-8894" },
+    update: { balance: centsFromRand(3200.0) },
+    create: {
       userId: tumiUser.id,
       walletNumber: "AHV-TUMI-3321-8894",
       walletType: "PERSONAL",
@@ -257,8 +265,10 @@ async function main() {
   });
 
   // Youth wallet for Sipho
-  const siphoWallet = await prisma.wallet.create({
-    data: {
+  const siphoWallet = await prisma.wallet.upsert({
+    where: { walletNumber: "AHV-SIPH-9910-4421" },
+    update: { balance: centsFromRand(45.0) },
+    create: {
       userId: youthUser.id,
       walletNumber: "AHV-SIPH-9910-4421",
       walletType: "YOUTH",
@@ -274,8 +284,10 @@ async function main() {
   });
 
   // Youth control settings
-  await prisma.youthWalletControl.create({
-    data: {
+  await prisma.youthWalletControl.upsert({
+    where: { walletId: siphoWallet.id },
+    update: {},
+    create: {
       walletId: siphoWallet.id,
       guardianUserId: tier1User.id,
       dailySpendLimit: centsFromRand(80),
@@ -290,8 +302,10 @@ async function main() {
   });
 
   // System fee pool wallet
-  await prisma.wallet.create({
-    data: {
+  await prisma.wallet.upsert({
+    where: { walletNumber: "AHV-FEES-0000-0001" },
+    update: {},
+    create: {
       userId: merchantUser.id, // Temporary — replace with system user
       walletNumber: "AHV-FEES-0000-0001",
       walletType: "PERSONAL",
@@ -419,26 +433,22 @@ async function main() {
 
   console.log("✅ System config seeded");
 
-  // ─────────────────────────────────────────────────────────────────
-  // SUMMARY
-  // ─────────────────────────────────────────────────────────────────
-
   console.log("\n🎉 Seed complete!\n");
   console.log("Test accounts (all PIN: 1234):");
   console.log(
-    `  Nomsa (Tier 0)    +27 61 123 4567   ${nnomsaWallet.walletNumber}   R245.50`,
+    `  Nomsa (Tier 0)       +27611234567   ${nnomsaWallet.walletNumber}   deviceId: seed-device-nomsa`,
   );
   console.log(
-    `  Gwede (Tier 1)    +27 72 234 5678   ${gwwdeWallet.walletNumber}   R1,247.50`,
+    `  Gwede (Tier 1)       +27722345678   ${gwwdeWallet.walletNumber}   deviceId: seed-device-gwede`,
   );
   console.log(
-    `  Mama Thandi (Merchant) +27 83 345 6789   ${thaandiWallet.walletNumber}   R8,430.00`,
+    `  Mama Thandi (Merch)  +27833456789   ${thaandiWallet.walletNumber}   deviceId: seed-device-thandi`,
   );
   console.log(
-    `  Tumi (Tier 1)     +27 79 999 9999   ${tuumiWallet.walletNumber}   R3,200.00`,
+    `  Tumi (Tier 1)        +27799999999   ${tuumiWallet.walletNumber}   deviceId: seed-device-tumi`,
   );
   console.log(
-    `  Sipho (Youth)     +27 61 111 1111   ${siphoWallet.walletNumber}   R45.00`,
+    `  Sipho (Youth)        +27611111111   ${siphoWallet.walletNumber}   deviceId: seed-device-sipho`,
   );
 }
 
