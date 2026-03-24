@@ -107,8 +107,19 @@ class AhavaApiClient {
   async getBalance(
     walletId: string,
   ): Promise<ApiResponse<{ balanceCents: number; pendingCents: number }>> {
-    const response = await this.client.get(`/wallet/${walletId}/balance`);
-    return response.data;
+    const response = await this.client.get(`/wallets/${walletId}/balance`);
+    const raw = response.data;
+    // Normalize wallet-service shape { balance: { available, pending } }
+    if (raw.success && raw.data?.balance) {
+      return {
+        ...raw,
+        data: {
+          balanceCents: Number(raw.data.balance.available ?? 0),
+          pendingCents: Number(raw.data.balance.pending ?? 0),
+        },
+      };
+    }
+    return raw;
   }
 
   async getTransactionHistory(
@@ -116,9 +127,10 @@ class AhavaApiClient {
     limit = 20,
     offset = 0,
   ): Promise<ApiResponse> {
-    const response = await this.client.get(`/wallet/${walletId}/transactions`, {
-      params: { limit, offset },
-    });
+    const response = await this.client.get(
+      `/wallets/${walletId}/transactions`,
+      { params: { limit, offset } },
+    );
     return response.data;
   }
 

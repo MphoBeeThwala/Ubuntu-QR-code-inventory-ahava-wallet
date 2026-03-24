@@ -36,6 +36,11 @@ export default function LoginPage() {
           localStorage.setItem("walletId", res.data.walletId);
         if (res.data.walletNumber)
           localStorage.setItem("walletNumber", res.data.walletNumber);
+        if ((res.data as { user?: { kycTier?: string } }).user?.kycTier)
+          localStorage.setItem(
+            "kycTier",
+            (res.data as { user?: { kycTier?: string } }).user!.kycTier!,
+          );
         router.replace("/dashboard");
       } else {
         setError(res.error?.message || "Login failed");

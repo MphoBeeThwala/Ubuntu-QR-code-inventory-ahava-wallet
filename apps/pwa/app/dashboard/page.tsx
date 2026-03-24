@@ -57,7 +57,11 @@ export default function DashboardPage() {
           apiClient.getTransactionHistory(wId, 5, 0),
         ]);
         if (balRes.success && balRes.data)
-          setBalance(balRes.data as WalletBalance);
+          setBalance({
+            ...(balRes.data as WalletBalance),
+            walletNumber: localStorage.getItem("walletNumber") || "",
+            kycTier: localStorage.getItem("kycTier") || "",
+          });
         if (txRes.success && txRes.data)
           setTransactions(
             (txRes.data as { transactions: Transaction[] }).transactions ?? [],
@@ -78,11 +82,18 @@ export default function DashboardPage() {
       router.replace("/auth/login");
       return;
     }
+    apiClient.setTokens(token, localStorage.getItem("refreshToken") || "");
     if (!wId) {
+      // No wallet yet — show dashboard shell without balance
+      setBalance({
+        balanceCents: 0,
+        pendingCents: 0,
+        walletNumber: localStorage.getItem("walletNumber") || "",
+        kycTier: localStorage.getItem("kycTier") || "",
+      });
       setLoading(false);
       return;
     }
-    apiClient.setTokens(token, localStorage.getItem("refreshToken") || "");
     loadData(wId);
   }, [loadData, router]);
 
@@ -101,10 +112,10 @@ export default function DashboardPage() {
   }
 
   const kycTierColor: Record<string, string> = {
-    KYC_TIER_0: "bg-gray-100 text-gray-600",
-    KYC_TIER_1: "bg-blue-100 text-blue-700",
-    KYC_TIER_2: "bg-ahava-100 text-ahava-700",
-    KYC_TIER_3: "bg-gold-400 text-yellow-800",
+    TIER_0: "bg-gray-100 text-gray-600",
+    TIER_1: "bg-blue-100 text-blue-700",
+    TIER_2: "bg-ahava-100 text-ahava-700",
+    MERCHANT: "bg-yellow-100 text-yellow-800",
   };
 
   return (
@@ -206,7 +217,7 @@ export default function DashboardPage() {
           </div>
 
           {/* KYC upgrade nudge */}
-          {balance?.kycTier === "KYC_TIER_0" && (
+          {balance?.kycTier === "TIER_0" && (
             <Link
               href="/kyc/upgrade"
               className="mt-3 flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-lg p-2 text-xs text-amber-700"
