@@ -34,6 +34,7 @@ Future<void> setupServiceLocator() async {
       apiClient: sl<AhavaApiClient>(),
       tokenStorage: sl<TokenStorage>(),
       deviceIdService: sl<DeviceIdService>(),
+      pinStore: sl<PinStore>(),
     ),
   );
 
