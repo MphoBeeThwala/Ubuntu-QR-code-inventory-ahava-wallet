@@ -114,7 +114,7 @@ class _QrScanScreenState extends State<QrScanScreen>
       }
 
       // Show confirm bottom sheet
-      final confirmed = await showModalBottomSheet<bool>(
+      final confirmedCents = await showModalBottomSheet<int>(
         context: context,
         isScrollControlled: true,
         shape: const RoundedRectangleBorder(
@@ -123,12 +123,12 @@ class _QrScanScreenState extends State<QrScanScreen>
         builder: (ctx) => _ConfirmPaymentSheet(qrInfo: qrInfo),
       );
 
-      if (confirmed != true) {
+      if (confirmedCents == null || confirmedCents <= 0) {
         _resetScanner();
         return;
       }
 
-      await _pay(qrHash, qrInfo);
+      await _pay(qrHash, qrInfo, confirmedCents);
     } on AhavaError catch (e) {
       if (!mounted) return;
       Navigator.of(context).pop(); // close loading sheet
@@ -142,7 +142,7 @@ class _QrScanScreenState extends State<QrScanScreen>
     }
   }
 
-  Future<void> _pay(String qrHash, QrInfo qrInfo) async {
+  Future<void> _pay(String qrHash, QrInfo qrInfo, int amountCents) async {
     final tokenStorage = sl<TokenStorage>();
     final walletId = await tokenStorage.walletId;
     if (walletId == null || !mounted) {
@@ -165,7 +165,7 @@ class _QrScanScreenState extends State<QrScanScreen>
       final result = await _qrRepository.payViaQr(
         qrHash: qrHash,
         senderWalletId: walletId,
-        amountCents: qrInfo.amountCents ?? 0,
+        amountCents: amountCents,
         idempotencyKey: const Uuid().v4(),
       );
 
@@ -523,7 +523,7 @@ class _ConfirmPaymentSheetState extends State<_ConfirmPaymentSheet> {
                   width: 40,
                   height: 40,
                   decoration: BoxDecoration(
-                    color: AhavaColors.primary100,
+                    color: AhavaColors.gold100,
                     shape: BoxShape.circle,
                   ),
                   child: Center(
@@ -531,9 +531,9 @@ class _ConfirmPaymentSheetState extends State<_ConfirmPaymentSheet> {
                       widget.qrInfo.walletNumber.isNotEmpty
                           ? widget.qrInfo.walletNumber[0]
                           : 'W',
-                      style: TextStyle(
+                      style: const TextStyle(
                         fontWeight: FontWeight.bold,
-                        color: AhavaColors.primary700,
+                        color: AhavaColors.navy900,
                       ),
                     ),
                   ),
@@ -609,11 +609,10 @@ class _ConfirmPaymentSheetState extends State<_ConfirmPaymentSheet> {
                             0) *
                         100;
                     if (cents <= 0) return;
-                    // Patch amountCents on qrInfo via closure
-                    Navigator.of(context).pop(true);
+                    Navigator.of(context).pop(cents.round());
                   },
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: AhavaColors.primary700,
+                    backgroundColor: AhavaColors.navy900,
                     foregroundColor: Colors.white,
                     padding: const EdgeInsets.symmetric(vertical: 14),
                     shape: RoundedRectangleBorder(
@@ -703,7 +702,7 @@ class _SuccessSheet extends StatelessWidget {
                 child: ElevatedButton(
                   onPressed: onDone,
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: AhavaColors.primary700,
+                    backgroundColor: AhavaColors.navy900,
                     foregroundColor: Colors.white,
                     padding: const EdgeInsets.symmetric(vertical: 14),
                     shape: RoundedRectangleBorder(
