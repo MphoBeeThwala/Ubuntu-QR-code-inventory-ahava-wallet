@@ -230,9 +230,9 @@ export default function DashboardPage() {
               bg: "bg-ahava-600",
             },
             {
-              href: "/wallet/request",
-              icon: "↓",
-              label: "Request",
+              href: "/wallet/qr",
+              icon: "⬛",
+              label: "My QR",
               bg: "bg-blue-500",
             },
             {

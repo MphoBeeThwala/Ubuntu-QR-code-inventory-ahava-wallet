@@ -128,6 +128,59 @@ class AhavaApiClient {
     return response.data;
   }
 
+  // QR Code Methods
+  async lookupQr(qrHash: string): Promise<
+    ApiResponse<{
+      qrId: string;
+      qrType: string;
+      walletNumber: string;
+      amountCents: number | null;
+      currency: string;
+      description: string | null;
+      expiresAt: string | null;
+    }>
+  > {
+    const response = await this.client.get(`/qr/${qrHash}`);
+    return response.data;
+  }
+
+  async payViaQr(
+    qrHash: string,
+    senderWalletId: string,
+    amountCents: number,
+    idempotencyKey: string,
+  ): Promise<ApiResponse<{ transactionId: string; amountCents: number }>> {
+    const response = await this.client.post(`/qr/${qrHash}/pay`, {
+      senderWalletId,
+      amountCents,
+      idempotencyKey,
+    });
+    return response.data;
+  }
+
+  async generateQr(
+    walletId: string,
+    qrType: "STATIC" | "DYNAMIC" = "STATIC",
+    amountCents?: number,
+    description?: string,
+  ): Promise<
+    ApiResponse<{
+      qrId: string;
+      qrHash: string;
+      deepLink: string;
+      qrType: string;
+      amountCents: number | null;
+      expiresAt: string | null;
+    }>
+  > {
+    const response = await this.client.post(`/wallets/${walletId}/qr`, {
+      qrType,
+      ...(amountCents !== undefined ? { amountCents } : {}),
+      ...(description ? { description } : {}),
+    });
+    return response.data;
+  }
+
   // KYC Methods
   async getKycStatus(userId: string): Promise<ApiResponse> {
     const response = await this.client.get(`/kyc/user/${userId}`);
