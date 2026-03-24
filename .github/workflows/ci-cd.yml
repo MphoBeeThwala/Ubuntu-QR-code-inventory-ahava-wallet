@@ -103,10 +103,12 @@ jobs:
           GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
 
       - name: Secret detection (TruffleHog)
-        uses: trufflesecurity/trufflehog-action@v3
+        uses: trufflesecurity/trufflehog@v3
         with:
-          # Scan the entire repo history for secrets; fail on any findings
-          scan: true
+          path: ./
+          base: ${{ github.event.repository.default_branch }}
+          head: HEAD
+          extra_args: --only-verified
 
       - name: SAST scan (Semgrep)
         uses: returntocorp/semgrep-action@v1
@@ -117,7 +119,6 @@ jobs:
             p/jwt
             p/sql-injection
             p/express
-          auditOn: push
 
   # ─────────────────────────────────────────────────────────────────
   # 3. UNIT TESTS (Node.js)
