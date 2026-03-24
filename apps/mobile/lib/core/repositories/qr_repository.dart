@@ -43,6 +43,36 @@ class QrInfo {
   }
 }
 
+class QrGenerateResult {
+  final String qrId;
+  final String qrHash;
+  final String deepLink;
+  final String qrType;
+  final int? amountCents;
+  final DateTime? expiresAt;
+
+  const QrGenerateResult({
+    required this.qrId,
+    required this.qrHash,
+    required this.deepLink,
+    required this.qrType,
+    this.amountCents,
+    this.expiresAt,
+  });
+
+  factory QrGenerateResult.fromJson(Map<String, dynamic> json) =>
+      QrGenerateResult(
+        qrId: json['qrId'] as String,
+        qrHash: json['qrHash'] as String,
+        deepLink: json['deepLink'] as String,
+        qrType: json['qrType'] as String,
+        amountCents: json['amountCents'] as int?,
+        expiresAt: json['expiresAt'] != null
+            ? DateTime.tryParse(json['expiresAt'] as String)
+            : null,
+      );
+}
+
 class QrPayResult {
   final String transactionId;
   final int amountCents;
@@ -60,6 +90,24 @@ class QrRepository {
 
   const QrRepository({required AhavaApiClient apiClient})
       : _apiClient = apiClient;
+
+  Future<QrGenerateResult> generateQr(
+    String walletId, {
+    String qrType = 'STATIC',
+    int? amountCents,
+    String? description,
+  }) async {
+    final response = await _apiClient.post(
+      '/wallets/$walletId/qr',
+      body: {
+        'qrType': qrType,
+        if (amountCents != null) 'amountCents': amountCents,
+        if (description != null) 'description': description,
+      },
+    );
+    final data = response['data'] as Map<String, dynamic>;
+    return QrGenerateResult.fromJson(data);
+  }
 
   Future<QrInfo> lookupQr(String qrHash) async {
     final response = await _apiClient.get('/qr/$qrHash');

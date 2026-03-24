@@ -233,10 +233,10 @@ class _HomeScreenState extends State<HomeScreen> {
             onTap: () => context.go('/payment'),
           ),
           _QuickActionButton(
-            icon: Icons.arrow_downward_rounded,
-            label: 'Request',
+            icon: Icons.qr_code_rounded,
+            label: 'My QR',
             color: const Color(0xFF0C447C),
-            onTap: () {},
+            onTap: () => context.go('/qr'),
           ),
           _QuickActionButton(
             icon: Icons.qr_code_scanner,

@@ -9,6 +9,7 @@ import '../../features/home/home_screen.dart';
 import '../../features/payments/screens/payment_screen.dart';
 import '../../features/wallet/screens/transaction_history_screen.dart';
 import '../../features/wallet/screens/qr_scan_screen.dart';
+import '../../features/wallet/screens/my_qr_screen.dart';
 import '../../features/settings/settings_screen.dart';
 
 /// Provides the router configuration based on auth state.
@@ -38,6 +39,10 @@ class AppRouter {
         GoRoute(
           path: '/scan',
           builder: (context, state) => const QrScanScreen(),
+        ),
+        GoRoute(
+          path: '/qr',
+          builder: (context, state) => const MyQrScreen(),
         ),
         GoRoute(
           path: '/settings',
