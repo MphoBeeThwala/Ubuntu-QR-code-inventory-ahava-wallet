@@ -17,8 +17,9 @@ export default function RootLayout({ children }: { children: ReactNode }) {
           name="viewport"
           content="width=device-width, initial-scale=1, maximum-scale=1"
         />
+        <link rel="icon" href="/icons/icon-192x192.svg" type="image/svg+xml" />
         <link rel="manifest" href="/manifest.json" />
-        <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+        <link rel="apple-touch-icon" href="/icons/icon-192x192.svg" />
       </head>
       <body className={inter.className}>
         <div id="root">{children}</div>
