@@ -62,7 +62,11 @@ class AhavaApiClient {
     phone: string,
     pin: string,
   ): Promise<ApiResponse<{ accessToken: string; refreshToken: string }>> {
-    const response = await this.client.post("/auth/login", { phone, pin });
+    const response = await this.client.post("/auth/login", {
+      phoneNumber: phone,
+      pin,
+      deviceId: this.getDeviceId(),
+    });
     const { data } = response.data;
     this.accessToken = data.accessToken;
     this.refreshToken = data.refreshToken;
@@ -73,7 +77,11 @@ class AhavaApiClient {
     phone: string,
     pin: string,
   ): Promise<ApiResponse<{ userId: string; accessToken: string }>> {
-    const response = await this.client.post("/auth/register", { phone, pin });
+    const response = await this.client.post("/auth/register", {
+      phoneNumber: phone,
+      pin,
+      deviceId: this.getDeviceId(),
+    });
     const { data } = response.data;
     this.accessToken = data.accessToken;
     return response.data;

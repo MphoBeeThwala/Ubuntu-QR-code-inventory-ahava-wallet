@@ -21,8 +21,8 @@ export default function LoginPage() {
       setError("Enter a valid South African mobile number");
       return;
     }
-    if (pin.length < 5) {
-      setError("PIN must be at least 5 digits");
+    if (pin.length < 4) {
+      setError("PIN must be at least 4 digits");
       return;
     }
 
