@@ -353,6 +353,13 @@ app.post(
         },
       });
 
+      // Fetch primary wallet for the session
+      const wallet = await prisma.wallet.findFirst({
+        where: { userId: user.id, status: "ACTIVE", isDeleted: false },
+        select: { id: true, walletNumber: true },
+        orderBy: { createdAt: "asc" },
+      });
+
       res.json(
         createSuccessResponse({
           userId: user.id,
@@ -362,6 +369,10 @@ app.post(
             phoneNumber: user.phoneNumber,
             kycTier: user.kycTier,
           },
+          ...(wallet && {
+            walletId: wallet.id,
+            walletNumber: wallet.walletNumber,
+          }),
         }),
       );
     } catch (error) {

@@ -32,6 +32,10 @@ export default function LoginPage() {
       if (res.success && res.data) {
         localStorage.setItem("accessToken", res.data.accessToken);
         localStorage.setItem("refreshToken", res.data.refreshToken);
+        if (res.data.walletId)
+          localStorage.setItem("walletId", res.data.walletId);
+        if (res.data.walletNumber)
+          localStorage.setItem("walletNumber", res.data.walletNumber);
         router.replace("/dashboard");
       } else {
         setError(res.error?.message || "Login failed");
