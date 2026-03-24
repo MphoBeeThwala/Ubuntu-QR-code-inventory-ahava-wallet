@@ -12,6 +12,11 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
+  // Clear stale error state on mount (survives Fast Refresh otherwise)
+  React.useEffect(() => {
+    setError("");
+  }, []);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
