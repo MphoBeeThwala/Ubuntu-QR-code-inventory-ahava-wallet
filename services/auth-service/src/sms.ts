@@ -8,6 +8,7 @@ import AfricasTalking from "africastalking";
 
 const username = process.env.AT_USERNAME;
 const apiKey = process.env.AT_API_KEY;
+const senderId = process.env.AT_SENDER_ID || "AHAVA";
 
 let smsClient: ReturnType<typeof AfricasTalking>["SMS"] | null = null;
 
@@ -28,7 +29,7 @@ export async function sendSms(to: string, message: string): Promise<void> {
   const normalised = to.startsWith("+") ? to : `+${to}`;
 
   try {
-    await smsClient.send({ to: [normalised], message });
+    await smsClient.send({ to: [normalised], message, from: senderId });
   } catch (err) {
     console.error("[sms] Failed to send SMS to", normalised, err);
   }
