@@ -87,6 +87,7 @@ export default function LoginPage() {
                 autoComplete="tel"
                 inputMode="tel"
                 required
+                suppressHydrationWarning
               />
             </div>
 
@@ -106,6 +107,7 @@ export default function LoginPage() {
                 inputMode="numeric"
                 maxLength={6}
                 required
+                suppressHydrationWarning
               />
             </div>
 
