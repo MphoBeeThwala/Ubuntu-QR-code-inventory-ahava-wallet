@@ -25,6 +25,7 @@ import {
   generateAccessToken,
   generateRefreshToken,
 } from "@ahava/shared-crypto";
+import { sendSms, welcomeMessage, loginAlertMessage } from "./sms";
 
 const app = express();
 const prisma = new PrismaClient();
@@ -187,18 +188,8 @@ app.post(
         },
       });
 
-      // TODO: Publish USER_REGISTERED event to BullMQ
-      // const userRegisteredQueue = new Queue(QUEUE_NAMES.USER_REGISTERED, { connection: redis });
-      // await userRegisteredQueue.add("user-registered", { userId: user.id, phoneNumber });
-
-      // TODO: Send welcome SMS notification via NotificationService
-      // await fetch(`http://notification-service:3006/sms/send`, {
-      //   method: "POST",
-      //   body: JSON.stringify({
-      //     phoneNumber,
-      //     message: "Welcome to Ahava eWallet! Your account is ready. Please set up biometric for security.",
-      //   }),
-      // });
+      // Send welcome SMS (fire-and-forget — never blocks registration)
+      void sendSms(phoneNumber, welcomeMessage(walletNumber));
 
       res.status(201).json(
         createSuccessResponse({
@@ -352,6 +343,16 @@ app.post(
           deviceId,
         },
       });
+
+      // Login alert SMS (fire-and-forget)
+      void sendSms(
+        user.phoneNumber,
+        loginAlertMessage(
+          new Date().toLocaleString("en-ZA", {
+            timeZone: "Africa/Johannesburg",
+          }),
+        ),
+      );
 
       // Fetch primary wallet for the session
       const wallet = await prisma.wallet.findFirst({
