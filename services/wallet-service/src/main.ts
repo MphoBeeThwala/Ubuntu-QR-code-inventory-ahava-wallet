@@ -10,6 +10,7 @@ import {
 import { Queue } from "bullmq";
 import { QUEUE_NAMES } from "@ahava/shared-events";
 import { sendSms, txSentMessage, txReceivedMessage } from "./sms";
+import { writeAuditLog } from "@ahava/shared-audit";
 
 const app = express();
 const prisma = new PrismaClient();
@@ -127,18 +128,16 @@ app.post(
         },
       });
 
-      await prisma.auditLog.create({
-        data: {
-          userId,
-          action: "WALLET_CREATED",
-          entityType: "Wallet",
-          entityId: wallet.id,
-          newState: JSON.stringify({
-            walletNumber: wallet.walletNumber,
-            walletType: wallet.walletType,
-          }),
-          serviceId: "wallet-service",
-        },
+      await writeAuditLog(prisma, {
+        userId,
+        action: "WALLET_CREATED",
+        entityType: "Wallet",
+        entityId: wallet.id,
+        newState: JSON.stringify({
+          walletNumber: wallet.walletNumber,
+          walletType: wallet.walletType,
+        }),
+        serviceId: "wallet-service",
       });
 
       // Publish WALLET_CREATED event (fire-and-forget)
@@ -315,21 +314,18 @@ app.post(
         },
       });
 
-      // Audit log
-      await prisma.auditLog.create({
-        data: {
-          userId: wallet.userId,
-          action: "WALLET_LIMITS_UPDATED",
-          entityType: "Wallet",
-          entityId: walletId,
-          newState: JSON.stringify({
-            dailyLimit,
-            monthlyLimit,
-            maxBalance,
-            perTransactionLimit,
-          }),
-          serviceId: "wallet-service",
-        },
+      await writeAuditLog(prisma, {
+        userId: wallet.userId,
+        action: "WALLET_LIMITS_UPDATED",
+        entityType: "Wallet",
+        entityId: walletId,
+        newState: JSON.stringify({
+          dailyLimit,
+          monthlyLimit,
+          maxBalance,
+          perTransactionLimit,
+        }),
+        serviceId: "wallet-service",
       });
 
       res.json(
@@ -404,15 +400,13 @@ app.post(
         },
       });
 
-      await prisma.auditLog.create({
-        data: {
-          userId: wallet.userId,
-          action: "WALLET_SUSPENDED",
-          entityType: "Wallet",
-          entityId: walletId,
-          newState: JSON.stringify({ reason }),
-          serviceId: "wallet-service",
-        },
+      await writeAuditLog(prisma, {
+        userId: wallet.userId,
+        action: "WALLET_SUSPENDED",
+        entityType: "Wallet",
+        entityId: walletId,
+        newState: JSON.stringify({ reason }),
+        serviceId: "wallet-service",
       });
 
       res.json(

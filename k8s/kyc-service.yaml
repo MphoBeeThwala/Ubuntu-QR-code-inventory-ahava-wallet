@@ -24,10 +24,10 @@ spec:
       terminationGracePeriodSeconds: 30
       containers:
         - name: kyc-service
-          image: ${AWS_ACCOUNT_ID}.dkr.ecr.af-south-1.amazonaws.com/ahava/kyc-service:latest
+          image: ahava/kyc-service:latest
           imagePullPolicy: Always
           ports:
-            - containerPort: 3004
+            - containerPort: 6004
               name: http
           envFrom:
             - configMapRef:
@@ -36,7 +36,7 @@ spec:
                 name: ahava-secrets
           env:
             - name: PORT
-              value: "3004"
+              value: "6004"
           resources:
             requests:
               cpu: "100m"
@@ -47,14 +47,14 @@ spec:
           livenessProbe:
             httpGet:
               path: /health
-              port: 3004
+              port: 6004
             initialDelaySeconds: 15
             periodSeconds: 20
             failureThreshold: 3
           readinessProbe:
             httpGet:
               path: /health
-              port: 3004
+              port: 6004
             initialDelaySeconds: 5
             periodSeconds: 10
           securityContext:
@@ -76,5 +76,5 @@ spec:
     app: kyc-service
   ports:
     - name: http
-      port: 3004
-      targetPort: 3004
+      port: 6004
+      targetPort: 6004

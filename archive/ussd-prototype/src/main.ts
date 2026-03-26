@@ -5,7 +5,7 @@
 import express from "express";
 import type { Request, Response } from "express";
 import bodyParser from "body-parser";
-import { PrismaClient, Prisma } from "@prisma/client";
+import { PrismaClient } from "@prisma/client";
 import { v4 as uuidv4 } from "uuid";
 import { createSuccessResponse } from "@ahava/shared-errors";
 import { hashForLookup } from "@ahava/shared-crypto";
@@ -16,7 +16,7 @@ import { hashForLookup } from "@ahava/shared-crypto";
 
 const app = express();
 const prisma = new PrismaClient();
-const PORT = process.env.PORT || 3008;
+const PORT = process.env.PORT || 6008;
 
 // Africa's Talking sends form-encoded POST
 app.use(bodyParser.urlencoded({ extended: false }));
@@ -91,7 +91,7 @@ async function handleBalance(phoneNumber: string): Promise<string> {
     return "END No Ahava account found.\nRegister at www.ahava.co.za";
   }
   const wallet = user.wallets[0];
-  return `END Your Ahava Balance\n${fmtRand(wallet.balanceCents)}\nKYC: ${user.kycTier}\nDial *384# for menu`;
+  return `END Your Ahava Balance\n${fmtRand(wallet.balance)}\nKYC: ${user.kycTier}\nDial *384# for menu`;
 }
 
 async function handleMiniStatement(phoneNumber: string): Promise<string> {
@@ -100,19 +100,19 @@ async function handleMiniStatement(phoneNumber: string): Promise<string> {
     return "END No Ahava account found.";
   }
   const txns = await prisma.walletTransaction.findMany({
-    where: { walletId: user.wallets[0].id, isDeleted: false },
+    where: { walletId: user.wallets[0].id },
     orderBy: { createdAt: "desc" },
     take: 5,
-    select: { type: true, amountCents: true, createdAt: true },
+    select: { transactionType: true, amount: true, createdAt: true },
   });
   if (txns.length === 0) return "END No transactions yet.";
   const lines = txns.map((t) => {
-    const sign = t.type === "DEBIT" ? "-" : "+";
+    const sign = t.transactionType === "DEBIT" ? "-" : "+";
     const date = t.createdAt.toLocaleDateString("en-ZA", {
       day: "2-digit",
       month: "short",
     });
-    return `${date} ${sign}${fmtRand(t.amountCents)}`;
+    return `${date} ${sign}${fmtRand(t.amount)}`;
   });
   return `END Last ${txns.length} transactions:\n${lines.join("\n")}`;
 }
@@ -150,99 +150,56 @@ async function executePayment(
     return "END Your wallet is suspended. Contact support.";
   if (rw.status !== "ACTIVE") return "END Recipient wallet is inactive.";
 
-  const feeCents = Math.max(25, Math.round(amountCents * 0.005));
-  const totalDebit = amountCents + feeCents;
+  const feeCents = Math.max(25, Math.ceil(amountCents * 0.005));
+  const totalDebit = amountCents;
 
-  if (sw.balanceCents < BigInt(totalDebit)) {
+  if (sw.balance < BigInt(totalDebit)) {
     return (
-      `END Insufficient balance.\nRequired: ${fmtRand(totalDebit)} (incl. fee)\n` +
-      `Available: ${fmtRand(sw.balanceCents)}`
+      `END Insufficient balance.\nRequired: ${fmtRand(totalDebit)}\n` +
+      `Available: ${fmtRand(sw.balance)}`
     );
   }
 
-  const idempotencyKey = `ussd:${sw.id}:${rw.id}:${amountCents}:${uuidv4()}`;
-
   try {
-    const result = await prisma.$transaction(
-      async (tx) => {
-        // Lock in deterministic UUID order to prevent deadlocks
-        const [firstId, secondId] =
-          sw.id < rw.id ? [sw.id, rw.id] : [rw.id, sw.id];
+    const paymentServiceUrl =
+      process.env.PAYMENT_SERVICE_URL || "http://localhost:6003";
 
-        await tx.$queryRaw`
-          SELECT id FROM "Wallet"
-          WHERE id IN (${firstId}::uuid, ${secondId}::uuid)
-          ORDER BY id
-          FOR UPDATE`;
+    const idempotencyKey = uuidv4();
 
-        const lockedSw = await tx.wallet.findUnique({
-          where: { id: sw.id },
-          select: { balanceCents: true },
-        });
-        if (!lockedSw || lockedSw.balanceCents < BigInt(totalDebit)) {
-          throw new Error("INSUFFICIENT_BALANCE");
-        }
-
-        const lockedRw = await tx.wallet.findUnique({
-          where: { id: rw.id },
-          select: { balanceCents: true },
-        });
-
-        const swBefore = lockedSw.balanceCents;
-        const swAfter = swBefore - BigInt(totalDebit);
-        const rwBefore = lockedRw!.balanceCents;
-        const rwAfter = rwBefore + BigInt(amountCents);
-
-        await tx.walletTransaction.create({
-          data: {
-            walletId: sw.id,
-            type: "DEBIT",
-            amountCents,
-            balanceBefore: swBefore,
-            balanceAfter: swAfter,
-            idempotencyKey,
-            description: `USSD send to ${normalisePhone(recipientPhone)}`,
-            channel: "USSD",
-            status: "COMPLETED",
-          },
-        });
-        await tx.walletTransaction.create({
-          data: {
-            walletId: rw.id,
-            type: "CREDIT",
-            amountCents,
-            balanceBefore: rwBefore,
-            balanceAfter: rwAfter,
-            idempotencyKey: `${idempotencyKey}:credit`,
-            description: `USSD receive from ${normalisePhone(senderPhone)}`,
-            channel: "USSD",
-            status: "COMPLETED",
-          },
-        });
-        await tx.wallet.update({
-          where: { id: sw.id },
-          data: { balanceCents: swAfter },
-        });
-        await tx.wallet.update({
-          where: { id: rw.id },
-          data: { balanceCents: rwAfter },
-        });
-
-        return swAfter;
+    const response = await fetch(`${paymentServiceUrl}/payments`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Request-ID": idempotencyKey,
       },
-      {
-        timeout: 10000,
-        isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
-      },
-    );
+      body: JSON.stringify({
+        senderWalletId: sw.id,
+        receiverWalletId: rw.id,
+        amountCents: totalDebit,
+        description: `USSD send to ${normalisePhone(recipientPhone)}`,
+        idempotencyKey,
+        paymentMethod: "USSD",
+        deviceId: `ussd:${normalisePhone(senderPhone)}`,
+        ipAddress: "0.0.0.0",
+      }),
+    });
+
+    const payload = (await response.json()) as any;
+    if (!response.ok || !payload?.success) {
+      return "END Payment failed.\nPlease try again or contact support.";
+    }
+
+    const refreshed = await prisma.wallet.findUnique({
+      where: { id: sw.id },
+      select: { balance: true },
+    });
+    const newBalance = refreshed?.balance ?? sw.balance;
 
     return (
-      `END Payment Successful!\nSent ${fmtRand(amountCents)} to ${normalisePhone(recipientPhone)}\n` +
-      `Fee: ${fmtRand(feeCents)}\nNew balance: ${fmtRand(result)}`
+      `END Payment Successful!\nSent ${fmtRand(amountCents - feeCents)} to ${normalisePhone(recipientPhone)}\n` +
+      `Fee: ${fmtRand(feeCents)}\nTotal: ${fmtRand(totalDebit)}\nNew balance: ${fmtRand(newBalance)}`
     );
   } catch (err) {
-    if (err instanceof Error && err.message === "INSUFFICIENT_BALANCE")
-      return "END Insufficient balance. Payment failed.";
     console.error("[USSD] payment error:", err);
     return "END Payment failed due to a system error.\nPlease try again or contact support.";
   }
@@ -291,15 +248,15 @@ async function handleUssd(phoneNumber: string, text: string): Promise<string> {
       return "END Invalid amount. Minimum is R1.00.\nPlease try again.";
     }
     const amountCents = Math.round(amountRands * 100);
-    const feeCents = Math.max(25, Math.round(amountCents * 0.005));
+    const feeCents = Math.max(25, Math.ceil(amountCents * 0.005));
 
     if (rest.length === 2) {
       return (
         `CON Confirm Payment\n` +
         `To: ${normalisePhone(recipientPhone)}\n` +
-        `Amount: ${fmtRand(amountCents)}\n` +
+        `Total: ${fmtRand(amountCents)}\n` +
         `Fee: ${fmtRand(feeCents)}\n` +
-        `Total: ${fmtRand(amountCents + feeCents)}\n\n` +
+        `Recipient gets: ${fmtRand(amountCents - feeCents)}\n\n` +
         `1. Confirm\n2. Cancel`
       );
     }

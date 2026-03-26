@@ -7,7 +7,7 @@ module.exports = {
   // Only collect from main.ts; other src files (auth.service.ts, queues, etc.)
   // have external deps not mocked in this suite.
   collectCoverageFrom: ["src/main.ts"],
-  coverageThresholds: {
+  coverageThreshold: {
     global: {
       lines: 93,      // main.ts is ~94.9%; gap is untestable startup app.listen block
       functions: 85,  // startup callback is uncoverable in unit tests

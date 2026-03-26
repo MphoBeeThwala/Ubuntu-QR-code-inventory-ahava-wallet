@@ -280,7 +280,7 @@ export function clearSecretCache(): void {
  */
 export async function fetchJWTPrivateKey(): Promise<string> {
   return fetchSecret(
-    `${process.env.NODE_ENV || "dev"}/ahava/jwt-private-key`,
+    `/ahava/${process.env.NODE_ENV || "dev"}/jwt-private-key`,
     "JWT_PRIVATE_KEY",
   );
 }
@@ -291,7 +291,7 @@ export async function fetchJWTPrivateKey(): Promise<string> {
  */
 export async function fetchJWTPublicKey(): Promise<string> {
   return fetchSecret(
-    `${process.env.NODE_ENV || "dev"}/ahava/jwt-public-key`,
+    `/ahava/${process.env.NODE_ENV || "dev"}/jwt-public-key`,
     "JWT_PUBLIC_KEY",
   );
 }
@@ -302,7 +302,7 @@ export async function fetchJWTPublicKey(): Promise<string> {
  */
 export async function fetchPIIEncryptionKey(): Promise<string> {
   return fetchSecret(
-    `${process.env.NODE_ENV || "dev"}/ahava/pii-encryption-key`,
+    `/ahava/${process.env.NODE_ENV || "dev"}/pii-encryption-key`,
     "PII_ENCRYPTION_KEY",
   );
 }

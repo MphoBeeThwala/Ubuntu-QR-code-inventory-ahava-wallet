@@ -18,10 +18,18 @@ import express, { Request, Response } from "express";
 import { PrismaClient } from "@prisma/client";
 import { createSuccessResponse } from "@ahava/shared-errors";
 import { v4 as uuidv4 } from "uuid";
+import africastalking from "africastalking";
 
 const app = express();
 const prisma = new PrismaClient();
 const PORT = process.env.PORT || 6008;
+
+// Africa's Talking Configuration
+const atCredentials = {
+  apiKey: process.env.AFRICAS_TALKING_API_KEY || "sandbox",
+  username: process.env.AFRICAS_TALKING_USERNAME || "sandbox",
+};
+const AT = africastalking(atCredentials);
 
 // Africa's Talking sends form-encoded POST bodies
 app.use(express.urlencoded({ extended: false }));
@@ -374,8 +382,21 @@ async function processAirtime(
       }),
     ]);
 
-    // TODO: Call Africa's Talking Airtime API here
-    // const airtime = AT.AIRTIME; airtime.send({ recipients: [{ phoneNumber: recipientPhone, amount: `ZAR ${amountRand}` }] });
+    if ((process.env.NODE_ENV || "").toLowerCase() === "test") {
+      return `Airtime sent!\nR${amountRand.toFixed(2)} airtime sent to ${recipientPhone}.\n\nNew balance: ${formatRand(Number(payerWallet.balance) - amountCents)}`;
+    }
+
+    // Call Africa's Talking Airtime API
+    const airtime = (AT as any).AIRTIME;
+    await airtime.send({
+      recipients: [
+        {
+          phoneNumber: recipientPhone,
+          amount: amountRand,
+          currencyCode: "ZAR",
+        },
+      ],
+    });
 
     return `Airtime sent!\nR${amountRand.toFixed(2)} airtime sent to ${recipientPhone}.\n\nNew balance: ${formatRand(Number(payerWallet.balance) - amountCents)}`;
   } catch (err) {

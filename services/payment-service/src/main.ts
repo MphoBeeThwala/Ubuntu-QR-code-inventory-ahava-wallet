@@ -10,6 +10,7 @@ import {
   createErrorResponse,
 } from "@ahava/shared-errors";
 import { QUEUE_NAMES } from "@ahava/shared-events";
+import { writeAuditLog } from "@ahava/shared-audit";
 
 const app = express();
 const prisma = new PrismaClient();
@@ -327,24 +328,21 @@ app.post(
             });
           }
 
-          // Audit log
-          await tx.auditLog.create({
-            data: {
-              userId: senderWallet.userId,
-              action: "PAYMENT_SENT",
-              entityType: "wallet_transaction",
-              entityId: debitTxn.id,
-              previousState: JSON.stringify({
-                balance: senderWallet.balance.toString(),
-              }),
-              newState: JSON.stringify({
-                balance: senderBalanceAfter.toString(),
-              }),
-              ipAddress,
-              deviceId,
-              serviceId: "payment-service",
-              correlationId: idempotencyKey,
-            },
+          await writeAuditLog(tx, {
+            userId: senderWallet.userId,
+            action: "PAYMENT_SENT",
+            entityType: "wallet_transaction",
+            entityId: debitTxn.id,
+            previousState: JSON.stringify({
+              balance: senderWallet.balance.toString(),
+            }),
+            newState: JSON.stringify({
+              balance: senderBalanceAfter.toString(),
+            }),
+            ipAddress,
+            deviceId,
+            serviceId: "payment-service",
+            correlationId: idempotencyKey,
           });
 
           return {

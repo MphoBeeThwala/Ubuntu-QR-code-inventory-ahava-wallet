@@ -75,7 +75,12 @@ resource "aws_secretsmanager_secret" "redis_auth_token" {
 
 resource "aws_secretsmanager_secret_version" "redis_auth_token" {
   secret_id       = aws_secretsmanager_secret.redis_auth_token.id
-  secret_string   = random_password.redis.result
+  secret_string = jsonencode({
+    auth_token     = random_password.redis.result
+    host           = aws_elasticache_replication_group.redis.primary_endpoint_address
+    port           = aws_elasticache_replication_group.redis.port
+    connection_url = "rediss://:${random_password.redis.result}@${aws_elasticache_replication_group.redis.primary_endpoint_address}:${aws_elasticache_replication_group.redis.port}"
+  })
 }
 
 # CloudWatch logs

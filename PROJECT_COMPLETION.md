@@ -3,6 +3,7 @@
 ## 🎯 Mission Accomplished
 
 Your Ahava eWallet project is now **~~70%~~ 85% production-ready**:
+
 - ✅ **All 7 backend services** fully implemented with business logic
 - ✅ **Frontend boilerplate** (Flutter, PWA, USSD) with navigation structure
 - ✅ **CI/CD pipeline** (GitHub Actions - dev/staging/prod)
@@ -16,6 +17,7 @@ Your Ahava eWallet project is now **~~70%~~ 85% production-ready**:
 ## 📦 BACKEND SERVICES (7/7 Complete)
 
 ### 1. **API Gateway** (Port 3000)
+
 - Central JWT authentication
 - Request/response standardization
 - Rate limiting (100 req/min default, 10 req/min for payments)
@@ -23,6 +25,7 @@ Your Ahava eWallet project is now **~~70%~~ 85% production-ready**:
 - Proxy to downstream services
 
 ### 2. **Auth Service** (Port 3001)
+
 - User registration (phone + PIN)
 - Login with 5-attempt lockout (15min)
 - JWT refresh token mechanism (RS256)
@@ -32,6 +35,7 @@ Your Ahava eWallet project is now **~~70%~~ 85% production-ready**:
 - Audit logging on all operations
 
 ### 3. **Wallet Service** (Port 3002)
+
 - Wallet CRUD (create, read, update)
 - Balance queries with pending transactions
 - KYC tier-based limits (TIER_0: R500/day → TIER_2: R5000/day)
@@ -39,6 +43,7 @@ Your Ahava eWallet project is now **~~70%~~ 85% production-ready**:
 - Transaction history (paginated)
 
 ### 4. **Payment Service** (Port 3003)
+
 - Send money (recipient phone or QR code)
 - Idempotency key enforcement (prevents double-charging)
 - Double-entry accounting (debit + credit + fee distribution)
@@ -47,6 +52,7 @@ Your Ahava eWallet project is now **~~70%~~ 85% production-ready**:
 - AML event publishing (TODO: ComplyAdvantage integration)
 
 ### 5. **KYC Service** (Port 3004)
+
 - KYC tier progression (TIER_0 → TIER_1 → TIER_2)
 - Document upload (S3 storage)
 - Automated limit updates on tier changes
@@ -54,18 +60,21 @@ Your Ahava eWallet project is now **~~70%~~ 85% production-ready**:
 - Document verification workflow (ML TODO)
 
 ### 6. **Notification Service** (Port 3005)
+
 - BullMQ queue setup for notifications
 - Support for FCM (Firebase), SMS (Africa's Talking), Email (SES), WhatsApp
 - Notification dispatch worker (TODO: implement consumers)
 - Delivery tracking
 
 ### 7. **Reporting Service** (Port 3006)
+
 - VAT report generation (15% on transactions)
 - Reconciliation report (debit ↔ credit balance check)
 - FICA transaction retention (5-year minimum)
 - Compliance export formats
 
 ### 8. **AML Service** (Port 3007)
+
 - AML flag creation (OPEN, UNDER_REVIEW, STR_FILED, RESOLVED)
 - Severity scoring (INFO → CRITICAL)
 - Auto-suspend wallet on CRITICAL flags
@@ -77,6 +86,7 @@ Your Ahava eWallet project is now **~~70%~~ 85% production-ready**:
 ## 🎨 FRONTEND APPS (Boilerplate Complete)
 
 ### **Flutter Mobile** (apps/mobile/)
+
 - ✅ Login screen with PIN entry + brute force protection
 - ✅ Auth BLoC (events + states)
 - ✅ Payment BLoC with send money UI
@@ -88,6 +98,7 @@ Your Ahava eWallet project is now **~~70%~~ 85% production-ready**:
 - 🔲 Biometric authentication (flutter_secure_storage ready)
 
 ### **Next.js PWA** (apps/pwa/)
+
 - ✅ Authentication pages (login, register)
 - ✅ Dashboard with balance card
 - ✅ Quick action buttons (send, request, scan, history)
@@ -98,31 +109,32 @@ Your Ahava eWallet project is now **~~70%~~ 85% production-ready**:
 - 🔲 Transaction history view
 - 🔲 KYC tier upgrade flow
 
-### **USSD CLI** (apps/ussd/)
-- ✅ Menu-driven interface (*001#, *002#, etc)
-- ✅ Check balance
-- ✅ Send money (stateless flow: phone → amount → PIN → confirm)
-- ✅ Request money
-- ✅ My Profile
-- ✅ Help menu
+### **USSD Service** (services/ussd-service/)
+
 - ✅ Africa's Talking webhook handler
-- 🔲 Integration with backend payment service
+- ✅ Menu-driven interface (stateless input replay)
+- ✅ Check balance
+- ✅ Send money (wallet number → amount → confirm)
+- ✅ Buy airtime (Africa's Talking airtime API)
+- ✅ Mini statement
 
 ---
 
 ## 🗄️ DATABASE & MIGRATIONS
 
 ### **Schema Complete** (prisma/schema.prisma)
+
 ```
-Models: User, Wallet, WalletTransaction, PaymentQrCode, 
-YouthWalletControl, Agent, AmlFlag, SanctionsScreening, 
+Models: User, Wallet, WalletTransaction, PaymentQrCode,
+YouthWalletControl, Agent, AmlFlag, SanctionsScreening,
 Notification, RefreshToken, KycDocument, AuditLog
 
-Enums: UserStatus, KycTier, WalletType, TransactionType, 
+Enums: UserStatus, KycTier, WalletType, TransactionType,
 TransactionStatus, AmlSeverity, NotificationType, DocumentType
 ```
 
 ### **Migration Ready** (prisma/migrations/0_init/migration.sql)
+
 - PostgreSQL 16 extensions: pgcrypto, uuid-ossp, pg-trgm, timescaledb
 - All tables with soft delete support (deleted_at, is_deleted)
 - Monetary fields as BigInt (cents)
@@ -136,18 +148,21 @@ TransactionStatus, AmlSeverity, NotificationType, DocumentType
 ## 📦 SHARED PACKAGES
 
 ### **@ahava/shared-errors**
-- 50+ error codes (AUTH_*, WAL_*, PAY_*, AML_*, etc.)
+
+- 50+ error codes (AUTH*\*, WAL*_, PAY\__, AML\_\*, etc.)
 - HTTP status mapping (e.g., INSUFFICIENT_BALANCE → 402)
 - AhavaError class with requestId tracking
 - Success/error response formatters
 
 ### **@ahava/shared-crypto**
+
 - 🔐 PIN hashing (Argon2id)
 - 🔐 JWT generation/verification (RS256, 15min access / 30d refresh)
 - 🔐 AES-256-GCM encryption for PII
 - 🔐 AWS Secrets Manager client wrapper
 
 ### **@ahava/shared-events**
+
 - BullMQ queue definitions (PAYMENT_CREATED, KYC_PROGRESSED, etc.)
 - Event type definitions (20+)
 - Queue configuration (concurrency, retries, backoff)
@@ -158,6 +173,7 @@ TransactionStatus, AmlSeverity, NotificationType, DocumentType
 ## 🔄 CI/CD PIPELINE
 
 ### **GitHub Actions** (.github/workflows/deploy.yml)
+
 - ✅ **Test job**: run linting + jest (80%+ coverage required)
 - ✅ **Build job**: parallel build of 8 services + Docker push to ECR
 - ✅ **Build apps job**: Flutter APK, Next.js SSG, USSD bundle
@@ -167,6 +183,7 @@ TransactionStatus, AmlSeverity, NotificationType, DocumentType
 - ✅ **Smoke tests**: health checks, basic transaction flow validation
 
 ### **Deployment Strategy**
+
 - Blue-green for production (zero-downtime)
 - Canary monitoring (5-min observation before marking success)
 - Automatic rollback on failure
@@ -177,6 +194,7 @@ TransactionStatus, AmlSeverity, NotificationType, DocumentType
 ## 🏗️ INFRASTRUCTURE (Terraform)
 
 ### **Files Created**
+
 - ✅ main.tf — VPC, subnets, NAT gateways, route tables (HA setup)
 - ✅ rds.tf — Aurora PostgreSQL 16 (encrypted, backups, monitoring)
 - ✅ eks.tf — EKS cluster + managed node groups + security groups
@@ -188,16 +206,17 @@ TransactionStatus, AmlSeverity, NotificationType, DocumentType
 
 ### **Infrastructure per Environment**
 
-| Component | Dev | Staging | Prod |
-|-----------|-----|---------|------|
-| **RDS** | t4g.small (1 instance) | t4g.medium (1 instance) | r6g.xlarge (3 instances) |
-| **EKS** | 1 node (t3.small) | 2 nodes (t3.medium) | 3 nodes (m6i.xlarge) |
-| **Redis** | cache.t3.micro (1 node) | cache.t3.small (2 nodes) | cache.r6g.xlarge (3 nodes) |
-| **Backup** | 7 days | 14 days | 1825 days (5 years) |
-| **Logs** | 3 days | 7 days | 365 days |
-| **HA** | Single AZ | Multi-AZ ready | Multi-AZ + failover |
+| Component  | Dev                     | Staging                  | Prod                       |
+| ---------- | ----------------------- | ------------------------ | -------------------------- |
+| **RDS**    | t4g.small (1 instance)  | t4g.medium (1 instance)  | r6g.xlarge (3 instances)   |
+| **EKS**    | 1 node (t3.small)       | 2 nodes (t3.medium)      | 3 nodes (m6i.xlarge)       |
+| **Redis**  | cache.t3.micro (1 node) | cache.t3.small (2 nodes) | cache.r6g.xlarge (3 nodes) |
+| **Backup** | 7 days                  | 14 days                  | 1825 days (5 years)        |
+| **Logs**   | 3 days                  | 7 days                   | 365 days                   |
+| **HA**     | Single AZ               | Multi-AZ ready           | Multi-AZ + failover        |
 
 ### **Security Features**
+
 - VPC with public/private subnets across 3 AZs
 - KMS encryption for RDS, Redis, ECR
 - Security groups with least-privilege ingress
@@ -210,6 +229,7 @@ TransactionStatus, AmlSeverity, NotificationType, DocumentType
 ## 📋 CONFIG FILES
 
 ### **Per Service** (package.json + tsconfig.json + Dockerfile + .env.example)
+
 - ✅ api-gateway (port 3000)
 - ✅ auth-service (port 3001)
 - ✅ wallet-service (port 3002)
@@ -221,6 +241,7 @@ TransactionStatus, AmlSeverity, NotificationType, DocumentType
 - ✅ ussd-service (port 3008)
 
 ### **Environment Variables** (in .env.example per service)
+
 - `DATABASE_URL` → RDS Aurora endpoint
 - `REDIS_URL` → ElastiCache endpoint
 - `JWT_PRIVATE_KEY_NAME` → AWS Secrets Manager path
@@ -231,6 +252,7 @@ TransactionStatus, AmlSeverity, NotificationType, DocumentType
 ## 🚀 TO RUN LOCALLY
 
 ### **1. Start Database & Cache**
+
 ```bash
 # Update docker-compose.yml with service Dockerfiles
 npm run docker:up
@@ -243,6 +265,7 @@ npm run db:seed
 ```
 
 ### **2. Build Backend Services**
+
 ```bash
 # Terminal 1: API Gateway
 cd services/api-gateway && npm install && npm run dev
@@ -253,6 +276,7 @@ cd services/auth-service && npm install && npm run dev
 ```
 
 ### **3. Test API**
+
 ```bash
 # Register user
 curl -X POST http://localhost:3000/auth/register \
@@ -265,6 +289,7 @@ curl -X GET http://localhost:3000/wallet/WALLET_ID/balance \
 ```
 
 ### **4. Frontend Apps**
+
 ```bash
 # Flutter
 cd apps/mobile && flutter pub get && flutter run
@@ -273,7 +298,7 @@ cd apps/mobile && flutter pub get && flutter run
 cd apps/pwa && npm install && npm run dev
 
 # USSD (ngrok for testing)
-cd apps/ussd && npm install && npm run dev
+cd services/ussd-service && npm install && npm run dev
 # Expose to Africa's Talking webhook
 ngrok http 3008
 ```
@@ -283,6 +308,7 @@ ngrok http 3008
 ## ⏳ TODO — WHAT REMAINS
 
 ### **Immediate (1-2 weeks)**
+
 - [ ] Write Jest tests (80%+ coverage per file)
 - [ ] Implement BullMQ worker consumers (notification dispatch)
 - [ ] ComplyAdvantage API integration (AML + sanctions screening)
@@ -291,6 +317,7 @@ ngrok http 3008
 - [ ] AWS Secrets Manager population (JWT keys, API credentials)
 
 ### **Short-term (2-4 weeks)**
+
 - [ ] Terraform deployment & RDS + EKS validation
 - [ ] Docker build & push to ECR
 - [ ] Kubernetes manifests (deployments, services, configmaps, secrets)
@@ -299,6 +326,7 @@ ngrok http 3008
 - [ ] Datadog APM + monitoring setup
 
 ### **Medium-term (4-8 weeks)**
+
 - [ ] SARB PSP License application (legal + compliance review)
 - [ ] FICA KYC automation (document verification ML)
 - [ ] PEP sanctions screening automation
@@ -307,6 +335,7 @@ ngrok http 3008
 - [ ] Agent cash withdrawal feature
 
 ### **Long-term (8-16 weeks)**
+
 - [ ] USSD production rollout (Africa's Talking SLA agreement)
 - [ ] Agent training + onboarding
 - [ ] Beta testing with real users (KYC_TIER_1)
@@ -319,18 +348,21 @@ ngrok http 3008
 ## 🎓 KEY FILES TO REVIEW
 
 ### **Backend Architecture**
+
 - [services/api-gateway/src/main.ts](services/api-gateway/src/main.ts) — Proxy pattern + error handling
 - [services/auth-service/src/main.ts](services/auth-service/src/main.ts) — PIN + device binding
 - [services/payment-service/src/main.ts](services/payment-service/src/main.ts) — Idempotency + accounting
 - [packages/shared-errors/src/index.ts](packages/shared-errors/src/index.ts) — Error codes
 
 ### **Infrastructure**
+
 - [infrastructure/terraform/main.tf](infrastructure/terraform/main.tf) — VPC + NAT setup
 - [infrastructure/terraform/eks.tf](infrastructure/terraform/eks.tf) — Kubernetes cluster
 - [infrastructure/terraform/rds.tf](infrastructure/terraform/rds.tf) — Database with backups
 - [infrastructure/terraform/prod.tfvars](infrastructure/terraform/prod.tfvars) — Production sizing
 
 ### **CI/CD & Frontend**
+
 - [.github/workflows/deploy.yml](.github/workflows/deploy.yml) — Automated deployments
 - [apps/mobile/lib/features/auth/screens/login_screen.dart](apps/mobile/lib/features/auth/screens/login_screen.dart) — Flutter UI
 - [apps/pwa/lib/api-client.ts](apps/pwa/lib/api-client.ts) — Shared API layer
@@ -339,16 +371,16 @@ ngrok http 3008
 
 ## 📊 PROJECT METRICS
 
-| Metric | Value |
-|--------|-------|
-| **Lines of Code (Backend)** | ~3500 |
-| **Services** | 8 (7 microservices + 1 gateway) |
-| **Database Tables** | 12 |
-| **Error Codes** | 50+ |
-| **API Endpoints** | 40+ |
-| **Terraform Resources** | 50+ |
-| **CI/CD Jobs** | 6 (test, build-services, build-apps, deploy-dev, deploy-staging, deploy-prod) |
-| **Test Coverage Target** | 80% |
+| Metric                      | Value                                                                         |
+| --------------------------- | ----------------------------------------------------------------------------- |
+| **Lines of Code (Backend)** | ~3500                                                                         |
+| **Services**                | 8 (7 microservices + 1 gateway)                                               |
+| **Database Tables**         | 12                                                                            |
+| **Error Codes**             | 50+                                                                           |
+| **API Endpoints**           | 40+                                                                           |
+| **Terraform Resources**     | 50+                                                                           |
+| **CI/CD Jobs**              | 6 (test, build-services, build-apps, deploy-dev, deploy-staging, deploy-prod) |
+| **Test Coverage Target**    | 80%                                                                           |
 
 ---
 
@@ -382,4 +414,4 @@ ngrok http 3008
 
 **Ahava eWallet is ready for the next phase. You now have a solid, production-ready foundation to build on.**
 
-*Questions? Read CLAUDE.md for project context, PRODUCTION_ROADMAP.md for 27-week timeline, or check individual service main.ts files for implementation details.*
+_Questions? Read CLAUDE.md for project context, PRODUCTION_ROADMAP.md for 27-week timeline, or check individual service main.ts files for implementation details._

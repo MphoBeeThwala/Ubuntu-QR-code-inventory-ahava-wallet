@@ -48,7 +48,8 @@ export default function RegisterPage() {
       } else {
         setError(res.error?.message || "Registration failed");
       }
-    } catch {
+    } catch (err) {
+      console.error("Network Error Details:", err);
       setError("Unable to connect. Please check your network and try again.");
     } finally {
       setLoading(false);

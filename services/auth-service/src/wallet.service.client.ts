@@ -1,18 +1,32 @@
-// Minimal stub for wallet service client. In production, this would call the wallet-service API
-// or use an internal client library to create wallets and query balances.
+import {
+  PrismaClient,
+  WalletType as PrismaWalletType,
+  KycTier as PrismaKycTier,
+} from "@prisma/client";
+import { generateWalletNumber } from "./utils/format.utils";
+
+// Wallet service client for auth service to provision initial wallets.
+// In a fully decoupled microservice architecture this would be an HTTP/gRPC call.
+// Here we use Prisma directly since they share the database.
 
 export class WalletService {
-  async createWallet(userId: string, walletType: string, kycTier: string) {
-    // TODO: Implement actual wallet creation (API call / DB operation)
-    return {
-      id: `wallet-${userId}-${Date.now()}`,
-      walletNumber: `WALLET-${Math.random().toString(36).slice(2, 10).toUpperCase()}`,
-      walletType,
-      status: 'ACTIVE',
-      kycTier,
-      balance: 0,
-      pendingBalance: 0,
-      currency: 'ZAR',
-    };
+  constructor(private readonly prisma: PrismaClient) {}
+
+  async createWallet(
+    userId: string,
+    walletType: PrismaWalletType,
+    kycTier: PrismaKycTier,
+  ) {
+    return this.prisma.wallet.create({
+      data: {
+        userId,
+        walletNumber: generateWalletNumber(),
+        walletType,
+        status: "ACTIVE",
+        kycTier,
+        balance: 0,
+        currency: "ZAR",
+      },
+    });
   }
 }

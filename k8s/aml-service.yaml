@@ -24,10 +24,10 @@ spec:
       terminationGracePeriodSeconds: 30
       containers:
         - name: aml-service
-          image: ${AWS_ACCOUNT_ID}.dkr.ecr.af-south-1.amazonaws.com/ahava/aml-service:latest
+          image: ahava/aml-service:latest
           imagePullPolicy: Always
           ports:
-            - containerPort: 3007
+            - containerPort: 6007
               name: http
           envFrom:
             - configMapRef:
@@ -36,7 +36,7 @@ spec:
                 name: ahava-secrets
           env:
             - name: PORT
-              value: "3007"
+              value: "6007"
           resources:
             requests:
               cpu: "100m"
@@ -47,14 +47,14 @@ spec:
           livenessProbe:
             httpGet:
               path: /health
-              port: 3007
+              port: 6007
             initialDelaySeconds: 15
             periodSeconds: 20
             failureThreshold: 3
           readinessProbe:
             httpGet:
               path: /health
-              port: 3007
+              port: 6007
             initialDelaySeconds: 5
             periodSeconds: 10
           securityContext:
@@ -76,5 +76,5 @@ spec:
     app: aml-service
   ports:
     - name: http
-      port: 3007
-      targetPort: 3007
+      port: 6007
+      targetPort: 6007

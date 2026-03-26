@@ -331,7 +331,9 @@ export class AhavaError extends Error {
         statusCode: this.statusCode,
         requestId: this.requestId,
         timestamp: this.timestamp.toISOString(),
-        details: this.details,
+        details: normalizeForJson(this.details) as
+          | Record<string, unknown>
+          | undefined,
       },
     };
   }
@@ -378,7 +380,7 @@ export function createSuccessResponse<T>(
 ): AhavaSuccessResponse<T> {
   return {
     success: true,
-    data,
+    data: normalizeForJson(data) as T,
     requestId,
     timestamp: new Date().toISOString(),
   };
@@ -396,9 +398,35 @@ export function createErrorResponse(error: AhavaError): AhavaErrorResponse {
       statusCode: error.statusCode,
       requestId: error.requestId,
       timestamp: error.timestamp.toISOString(),
-      details: error.details,
+      details: normalizeForJson(error.details) as
+        | Record<string, unknown>
+        | undefined,
     },
   };
 }
 
 export default AhavaError;
+
+function normalizeForJson<T>(value: T, seen = new WeakSet<object>()): unknown {
+  if (value === null || value === undefined) return value;
+  const t = typeof value;
+  if (t === "bigint") return value.toString();
+  if (t !== "object") return value;
+
+  if (value instanceof Date) return value.toISOString();
+  if (value instanceof Buffer) return value.toString("base64");
+
+  if (Array.isArray(value)) {
+    return value.map((v) => normalizeForJson(v, seen));
+  }
+
+  const obj = value as unknown as Record<string, unknown>;
+  if (seen.has(obj)) return "[Circular]";
+  seen.add(obj);
+
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(obj)) {
+    out[k] = normalizeForJson(v, seen);
+  }
+  return out;
+}

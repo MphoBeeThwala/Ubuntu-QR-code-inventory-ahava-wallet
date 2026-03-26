@@ -14,6 +14,7 @@ import { AmlFlagSeverity } from "@ahava/shared-types";
 import { AmlEngine } from "./aml.engine";
 import { ComplyAdvantageClient } from "./comply-advantage.client";
 import { MlroNotifier } from "./mlro.notifier";
+import { writeAuditLog } from "@ahava/shared-audit";
 
 // ─────────────────────────────────────────────────────────────────
 // SETUP
@@ -246,19 +247,16 @@ app.post(
         },
       });
 
-      // Audit the STR filing
-      await prisma.auditLog.create({
-        data: {
-          userId: flag.userId || "system",
-          action: "AML_STR_FILED",
-          entityType: "AmlFlag",
-          entityId: flagId,
-          newState: JSON.stringify({
-            strReference,
-            filedAt: new Date().toISOString(),
-          }),
-          serviceId: "aml-service",
-        },
+      await writeAuditLog(prisma, {
+        userId: flag.userId || "system",
+        action: "AML_STR_FILED",
+        entityType: "AmlFlag",
+        entityId: flagId,
+        newState: JSON.stringify({
+          strReference,
+          filedAt: new Date().toISOString(),
+        }),
+        serviceId: "aml-service",
       });
 
       logger.warn("STR filed", { flagId, strReference });

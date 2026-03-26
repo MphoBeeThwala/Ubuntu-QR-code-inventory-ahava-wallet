@@ -26,6 +26,7 @@ import {
   generateRefreshToken,
 } from "@ahava/shared-crypto";
 import { sendSms, welcomeMessage, loginAlertMessage } from "./sms";
+import { writeAuditLog } from "@ahava/shared-audit";
 
 const app = express();
 const prisma = new PrismaClient();
@@ -174,18 +175,15 @@ app.post(
         process.env.JWT_PRIVATE_KEY || "",
       );
 
-      // Log to audit trail
-      await prisma.auditLog.create({
-        data: {
-          userId: user.id,
-          action: "USER_REGISTERED",
-          entityType: "User",
-          entityId: user.id,
-          serviceId: "auth-service",
-          ipAddress,
-          userAgent,
-          deviceId,
-        },
+      await writeAuditLog(prisma, {
+        userId: user.id,
+        action: "USER_REGISTERED",
+        entityType: "User",
+        entityId: user.id,
+        serviceId: "auth-service",
+        ipAddress,
+        userAgent,
+        deviceId,
       });
 
       // Send welcome SMS (fire-and-forget — never blocks registration)
@@ -331,18 +329,15 @@ app.post(
         process.env.JWT_PRIVATE_KEY || "",
       );
 
-      // Audit log
-      await prisma.auditLog.create({
-        data: {
-          userId: user.id,
-          action: "USER_LOGIN",
-          entityType: "User",
-          entityId: user.id,
-          serviceId: "auth-service",
-          ipAddress,
-          userAgent,
-          deviceId,
-        },
+      await writeAuditLog(prisma, {
+        userId: user.id,
+        action: "USER_LOGIN",
+        entityType: "User",
+        entityId: user.id,
+        serviceId: "auth-service",
+        ipAddress,
+        userAgent,
+        deviceId,
       });
 
       // Login alert SMS (fire-and-forget)
@@ -495,15 +490,12 @@ app.post(
         },
       });
 
-      // Audit log
-      await prisma.auditLog.create({
-        data: {
-          userId,
-          action: "USER_LOGOUT",
-          entityType: "User",
-          entityId: userId,
-          serviceId: "auth-service",
-        },
+      await writeAuditLog(prisma, {
+        userId,
+        action: "USER_LOGOUT",
+        entityType: "User",
+        entityId: userId,
+        serviceId: "auth-service",
       });
 
       res.json(createSuccessResponse({ message: "Logged out successfully" }));
@@ -556,16 +548,13 @@ app.post(
         },
       });
 
-      // Audit log
-      await prisma.auditLog.create({
-        data: {
-          userId,
-          action: "DEVICE_BOUND",
-          entityType: "User",
-          entityId: userId,
-          serviceId: "auth-service",
-          deviceId,
-        },
+      await writeAuditLog(prisma, {
+        userId,
+        action: "DEVICE_BOUND",
+        entityType: "User",
+        entityId: userId,
+        serviceId: "auth-service",
+        deviceId,
       });
 
       res.json(createSuccessResponse({ message: "Device bound successfully" }));

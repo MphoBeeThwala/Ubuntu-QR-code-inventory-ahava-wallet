@@ -552,6 +552,9 @@ model AuditLog {
   userAgent       String?   @db.VarChar(500)
   serviceId       String    @db.VarChar(50)   // Which microservice created this log
   correlationId   String?   @db.VarChar(36)   // Request trace ID
+  prevHash        String?   @map("prev_hash") @db.Char(64)
+  recordHash      String?   @map("record_hash") @db.Char(64)
+  hashVersion     Int       @default(1) @map("hash_version")
   createdAt       DateTime  @default(now())
 
   user            User?     @relation(fields: [userId], references: [id])
@@ -560,6 +563,7 @@ model AuditLog {
   @@index([userId])
   @@index([action])
   @@index([entityType, entityId])
+  @@index([recordHash])
   @@index([createdAt])
   @@map("audit_logs")
 }

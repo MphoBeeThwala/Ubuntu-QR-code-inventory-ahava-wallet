@@ -16,6 +16,7 @@ import 'core/security/certificate_pinning.dart';
 import 'core/security/lock_screen.dart';
 import 'core/security/pin_hasher.dart';
 import 'core/security/pin_store.dart';
+import 'core/storage/offline_inventory_storage.dart';
 import 'features/auth/bloc/auth_bloc.dart';
 import 'features/wallet/bloc/wallet_bloc.dart';
 import 'features/payments/bloc/payment_bloc.dart';
@@ -42,6 +43,9 @@ void main() async {
 
   // Initialise dependency injection
   await setupServiceLocator();
+
+  // Initialise Hive offline storage
+  await OfflineInventoryStorage.initialise();
 
   // Initialise certificate pinning before any network calls
   await CertificatePinning.initialise();

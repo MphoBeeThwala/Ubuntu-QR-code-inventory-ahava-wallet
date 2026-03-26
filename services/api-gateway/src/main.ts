@@ -13,6 +13,7 @@
  */
 
 import express, { Express, Request, Response, NextFunction } from "express";
+import helmet from "helmet";
 import { v4 as uuidv4 } from "uuid";
 import {
   AhavaError,
@@ -34,8 +35,45 @@ const PORT = process.env.PORT || 6000;
 // MIDDLEWARE SETUP
 // ─────────────────────────────────────────────────────────────────
 
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.disable("x-powered-by");
+app.set("trust proxy", 1);
+
+app.use(express.json({ limit: "1mb" }));
+app.use(express.urlencoded({ extended: true, limit: "1mb" }));
+
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'"],
+        styleSrc: ["'self'"],
+        imgSrc: ["'self'", "data:"],
+        connectSrc: ["'self'"],
+      },
+    },
+    crossOriginEmbedderPolicy: true,
+    crossOriginOpenerPolicy: true,
+    crossOriginResourcePolicy: { policy: "same-site" },
+    dnsPrefetchControl: { allow: false },
+    frameguard: { action: "deny" },
+    hidePoweredBy: true,
+    hsts: { maxAge: 31536000, includeSubDomains: true, preload: true },
+    ieNoOpen: true,
+    noSniff: true,
+    referrerPolicy: { policy: "no-referrer" },
+    xssFilter: true,
+  }),
+);
+
+// Additional custom security headers not covered by Helmet
+app.use((req: Request, res: Response, next: NextFunction) => {
+  res.setHeader(
+    "Permissions-Policy",
+    "geolocation=(), microphone=(), camera=(), payment=()",
+  );
+  next();
+});
 
 // Request ID tracking (must be first)
 app.use((req: Request, res: Response, next: NextFunction) => {
@@ -49,6 +87,59 @@ app.use((req: Request, _res: Response, next: NextFunction) => {
   const deviceId = (req.headers["x-device-id"] as string) || "";
   req.deviceId = deviceId;
   req.deviceFingerprint = deviceId || req.ip || "unknown";
+  next();
+});
+
+// Helper function for log redaction
+function redactLog(data: any): any {
+  if (!data) return data;
+  const redacted = { ...data };
+  const sensitiveKeys = [
+    "password",
+    "pin",
+    "authorization",
+    "cookie",
+    "x-api-key",
+    "cardnumber",
+    "cvv",
+    "secret",
+  ];
+
+  for (const key of Object.keys(redacted)) {
+    if (sensitiveKeys.some((k) => key.toLowerCase().includes(k))) {
+      redacted[key] = "[REDACTED]";
+    } else if (typeof redacted[key] === "object" && redacted[key] !== null) {
+      redacted[key] = redactLog(redacted[key]);
+    }
+  }
+  return redacted;
+}
+
+app.use((req: Request, res: Response, next: NextFunction) => {
+  const start = process.hrtime.bigint();
+  res.on("finish", () => {
+    const end = process.hrtime.bigint();
+    const durationMs = Number(end - start) / 1_000_000;
+
+    // Only log body for non-GET/HEAD and errors
+    const shouldLogBody =
+      req.method !== "GET" && req.method !== "HEAD" && res.statusCode >= 400;
+
+    const entry = {
+      level: "info",
+      msg: "request",
+      requestId: req.id,
+      method: req.method,
+      path: req.path,
+      status: res.statusCode,
+      durationMs: Math.round(durationMs),
+      ip: req.ip,
+      deviceId: req.deviceId,
+      headers: redactLog(req.headers),
+      ...(shouldLogBody && { body: redactLog(req.body) }),
+    };
+    process.stdout.write(`${JSON.stringify(entry)}\n`);
+  });
   next();
 });
 
@@ -79,16 +170,6 @@ app.get("/health", (req: Request, res: Response) => {
     }),
   );
 });
-
-// TODO: Import and mount route handlers
-// import authRoutes from './routes/auth.routes';
-// import walletRoutes from './routes/wallet.routes';
-// import paymentRoutes from './routes/payment.routes';
-// import kycRoutes from './routes/kyc.routes';
-// app.use('/auth', authRoutes);
-// app.use('/wallets', walletRoutes);
-// app.use('/payments', paymentRoutes);
-// app.use('/kyc', kycRoutes);
 
 // Proxy routes to internal services
 const SERVICE_URLS = {
@@ -141,6 +222,8 @@ async function proxyRequest(
         : undefined,
   });
 
+  const contentType = response.headers.get("content-type");
+  if (contentType) res.setHeader("Content-Type", contentType);
   const bodyText = await response.text();
   res.status(response.status).send(bodyText);
 }
@@ -160,7 +243,7 @@ app.all("*", async (req: Request, res: Response, next: NextFunction) => {
 // ERROR HANDLING MIDDLEWARE
 // ─────────────────────────────────────────────────────────────────
 
-// TODO: Catch 404
+// Catch 404
 app.use((req: Request, res: Response) => {
   const error = new AhavaError(
     AhavaErrorCode.INTERNAL_NOT_IMPLEMENTED,
@@ -170,17 +253,28 @@ app.use((req: Request, res: Response) => {
   res.status(error.statusCode).json(createErrorResponse(error));
 });
 
-// TODO: Global error handler
+// Global error handler
 app.use((err: unknown, req: Request, res: Response, _next: NextFunction) => {
   // If it's already AhavaError, use it directly
   if (err instanceof AhavaError) {
     return res.status(err.statusCode).json(createErrorResponse(err));
   }
 
-  // TODO: Log unknown errors to Sentry + Datadog
-  console.error("Unhandled error:", err);
+  // Log unknown errors (could be piped to Datadog/Sentry)
+  if (process.env.NODE_ENV === "production") {
+    if (err instanceof Error) {
+      console.error("Unhandled error:", {
+        name: err.name,
+        message: err.message,
+      });
+    } else {
+      console.error("Unhandled error:", { message: "non-error thrown" });
+    }
+  } else {
+    console.error("Unhandled error:", err);
+  }
 
-  // TODO: Return generic error to client (don't expose internals)
+  // Return generic error to client (don't expose internals)
   const error = new AhavaError(
     AhavaErrorCode.INTERNAL_SERVER_ERROR,
     "Internal server error",

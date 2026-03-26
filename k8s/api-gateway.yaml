@@ -25,7 +25,7 @@ spec:
       terminationGracePeriodSeconds: 30
       containers:
         - name: api-gateway
-          image: ${AWS_ACCOUNT_ID}.dkr.ecr.af-south-1.amazonaws.com/ahava/api-gateway:latest
+          image: ahava/api-gateway:latest
           imagePullPolicy: Always
           ports:
             - containerPort: 6000

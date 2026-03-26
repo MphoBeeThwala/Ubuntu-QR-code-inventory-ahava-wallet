@@ -27,6 +27,7 @@ import {
   generateRefreshToken,
   verifyJWT,
 } from "@ahava/shared-crypto";
+import { writeAuditLog } from "@ahava/shared-audit";
 
 const app = express();
 const prisma = new PrismaClient();
@@ -178,15 +179,13 @@ app.post(
         },
       });
 
-      await prisma.auditLog.create({
-        data: {
-          userId: user.id,
-          action: "AGENT_LOGIN",
-          entityType: "Agent",
-          entityId: agent.id,
-          serviceId: "agent-service",
-          ipAddress: req.ip,
-        },
+      await writeAuditLog(prisma, {
+        userId: user.id,
+        action: "AGENT_LOGIN",
+        entityType: "Agent",
+        entityId: agent.id,
+        serviceId: "agent-service",
+        ipAddress: req.ip,
       });
 
       res.json(

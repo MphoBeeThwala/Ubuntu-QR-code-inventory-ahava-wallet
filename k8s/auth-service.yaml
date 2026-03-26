@@ -24,10 +24,10 @@ spec:
       terminationGracePeriodSeconds: 30
       containers:
         - name: auth-service
-          image: ${AWS_ACCOUNT_ID}.dkr.ecr.af-south-1.amazonaws.com/ahava/auth-service:latest
+          image: ahava/auth-service:latest
           imagePullPolicy: Always
           ports:
-            - containerPort: 3001
+            - containerPort: 6001
               name: http
           envFrom:
             - configMapRef:
@@ -36,7 +36,7 @@ spec:
                 name: ahava-secrets
           env:
             - name: PORT
-              value: "3001"
+              value: "6001"
           resources:
             requests:
               cpu: "100m"
@@ -47,14 +47,14 @@ spec:
           livenessProbe:
             httpGet:
               path: /health
-              port: 3001
+              port: 6001
             initialDelaySeconds: 15
             periodSeconds: 20
             failureThreshold: 3
           readinessProbe:
             httpGet:
               path: /health
-              port: 3001
+              port: 6001
             initialDelaySeconds: 5
             periodSeconds: 10
           securityContext:
@@ -76,8 +76,8 @@ spec:
     app: auth-service
   ports:
     - name: http
-      port: 3001
-      targetPort: 3001
+      port: 6001
+      targetPort: 6001
 ---
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler

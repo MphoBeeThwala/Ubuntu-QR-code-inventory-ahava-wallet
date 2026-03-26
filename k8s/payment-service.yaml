@@ -25,10 +25,10 @@ spec:
       terminationGracePeriodSeconds: 60
       containers:
         - name: payment-service
-          image: ${AWS_ACCOUNT_ID}.dkr.ecr.af-south-1.amazonaws.com/ahava/payment-service:latest
+          image: ahava/payment-service:latest
           imagePullPolicy: Always
           ports:
-            - containerPort: 3003
+            - containerPort: 6003
               name: http
           envFrom:
             - configMapRef:
@@ -37,7 +37,7 @@ spec:
                 name: ahava-secrets
           env:
             - name: PORT
-              value: "3003"
+              value: "6003"
           resources:
             requests:
               cpu: "200m"
@@ -48,14 +48,14 @@ spec:
           livenessProbe:
             httpGet:
               path: /health
-              port: 3003
+              port: 6003
             initialDelaySeconds: 15
             periodSeconds: 20
             failureThreshold: 3
           readinessProbe:
             httpGet:
               path: /health
-              port: 3003
+              port: 6003
             initialDelaySeconds: 5
             periodSeconds: 10
           securityContext:
@@ -85,8 +85,8 @@ spec:
     app: payment-service
   ports:
     - name: http
-      port: 3003
-      targetPort: 3003
+      port: 6003
+      targetPort: 6003
 ---
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler

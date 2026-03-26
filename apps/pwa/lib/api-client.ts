@@ -15,6 +15,14 @@ interface ApiResponse<T = unknown> {
   };
 }
 
+type AuthTokens = {
+  accessToken: string;
+  refreshToken: string;
+  walletId?: string;
+  walletNumber?: string;
+  user?: { kycTier?: string };
+};
+
 class AhavaApiClient {
   private client: AxiosInstance;
   private accessToken: string | null = null;
@@ -58,10 +66,7 @@ class AhavaApiClient {
   }
 
   // Auth Methods
-  async login(
-    phone: string,
-    pin: string,
-  ): Promise<ApiResponse<{ accessToken: string; refreshToken: string }>> {
+  async login(phone: string, pin: string): Promise<ApiResponse<AuthTokens>> {
     const response = await this.client.post("/auth/login", {
       phoneNumber: phone,
       pin,

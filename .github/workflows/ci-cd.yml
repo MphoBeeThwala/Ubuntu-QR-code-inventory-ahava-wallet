@@ -292,8 +292,8 @@ jobs:
           file: services/${{ matrix.service }}/Dockerfile
           push: true
           tags: |
-            ${{ env.ECR_REGISTRY }}/ahava-${{ matrix.service }}:${{ github.sha }}
-            ${{ env.ECR_REGISTRY }}/ahava-${{ matrix.service }}:latest
+            ${{ env.ECR_REGISTRY }}/ahava/${{ matrix.service }}:${{ github.sha }}
+            ${{ env.ECR_REGISTRY }}/ahava/${{ matrix.service }}:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
           build-args: |
@@ -305,7 +305,7 @@ jobs:
       - name: Trivy container scan
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: ${{ env.ECR_REGISTRY }}/ahava-${{ matrix.service }}:${{ github.sha }}
+          image-ref: ${{ env.ECR_REGISTRY }}/ahava/${{ matrix.service }}:${{ github.sha }}
           format: "sarif"
           output: "trivy-${{ matrix.service }}.sarif"
           severity: "CRITICAL,HIGH"
@@ -340,6 +340,9 @@ jobs:
       - name: Configure kubectl (EKS)
         run: aws eks update-kubeconfig --name ahava-staging --region ${{ env.AWS_REGION }}
 
+      - name: Apply Kubernetes manifests (staging)
+        run: kubectl apply -k k8s/overlays/staging
+
       - name: Run database migrations (staging)
         run: |
           kubectl exec -n ahava-staging deployment/api-gateway -- \
@@ -349,7 +352,7 @@ jobs:
         run: |
           for SERVICE in api-gateway auth-service wallet-service payment-service kyc-service notification-service aml-service reporting-service ussd-service agent-service; do
             kubectl set image deployment/$SERVICE \
-              $SERVICE=${{ env.ECR_REGISTRY }}/ahava-$SERVICE:${{ github.sha }} \
+              $SERVICE=${{ env.ECR_REGISTRY }}/ahava/$SERVICE:${{ github.sha }} \
               -n ahava-staging
           done
 
@@ -392,7 +395,10 @@ jobs:
         uses: azure/setup-kubectl@v3
 
       - name: Configure kubectl (production EKS)
-        run: aws eks update-kubeconfig --name ahava-production --region ${{ env.AWS_REGION }}
+        run: aws eks update-kubeconfig --name ahava-prod --region ${{ env.AWS_REGION }}
+
+      - name: Apply Kubernetes manifests (production)
+        run: kubectl apply -k k8s/overlays/prod
 
       - name: Run database migrations (production — careful!)
         run: |
@@ -401,39 +407,27 @@ jobs:
             npx prisma migrate deploy
           echo "Migrations complete"
 
-      - name: Blue/green deployment
+      - name: Deploy all services (rolling update)
         run: |
-          # Update image tags on green deployments
           for SERVICE in api-gateway auth-service wallet-service payment-service kyc-service notification-service aml-service reporting-service ussd-service agent-service; do
-            kubectl set image deployment/$SERVICE-green \
-              $SERVICE=${{ env.ECR_REGISTRY }}/ahava-$SERVICE:${{ github.sha }} \
+            kubectl set image deployment/$SERVICE \
+              $SERVICE=${{ env.ECR_REGISTRY }}/ahava/$SERVICE:${{ github.sha }} \
               -n ahava-prod
           done
-
-          # Wait for green to be healthy
           for SERVICE in api-gateway auth-service wallet-service payment-service kyc-service notification-service aml-service reporting-service ussd-service agent-service; do
-            kubectl rollout status deployment/$SERVICE-green -n ahava-prod --timeout=600s
+            kubectl rollout status deployment/$SERVICE -n ahava-prod --timeout=600s
           done
 
-          # Switch traffic to green (update ALB target group weights)
-          aws elbv2 modify-rule \
-            --rule-arn ${{ secrets.ALB_MAIN_RULE_ARN }} \
-            --actions '[{"Type":"forward","ForwardConfig":{"TargetGroups":[{"TargetGroupArn":"${{ secrets.TG_GREEN_ARN }}","Weight":100},{"TargetGroupArn":"${{ secrets.TG_BLUE_ARN }}","Weight":0}]}}]'
-
-      - name: Post-deploy health check + automatic rollback
+      - name: Post-deploy health check
         run: |
           echo "Waiting 30s for traffic to stabilise..."
           sleep 30
           HEALTH=$(curl -sf https://api.ahava.co.za/health | jq -r '.status' || echo "unreachable")
           if [ "$HEALTH" != "healthy" ]; then
-            echo "::error::Health check failed (status: $HEALTH) — initiating automatic rollback"
-            aws elbv2 modify-rule \
-              --rule-arn ${{ secrets.ALB_MAIN_RULE_ARN }} \
-              --actions '[{"Type":"forward","ForwardConfig":{"TargetGroups":[{"TargetGroupArn":"${{ secrets.TG_BLUE_ARN }}","Weight":100},{"TargetGroupArn":"${{ secrets.TG_GREEN_ARN }}","Weight":0}]}}]'
-            echo "Rollback complete — traffic restored to blue."
+            echo "::error::Health check failed (status: $HEALTH)"
             exit 1
           fi
-          echo "Production deployment healthy — green is live."
+          echo "Production deployment healthy."
 
       - name: Notify team (Slack)
         if: always()

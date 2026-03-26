@@ -1,11 +1,40 @@
-// Minimal MLRO notifier stub. In production, this would send an email/Slack/alert
-// to the MLRO team and/or create a ticket in the case management system.
-
-import { AmlFlag } from '@prisma/client';
+import { AmlFlag } from "@prisma/client";
+import { Queue } from "bullmq";
+import { QUEUE_NAMES } from "@ahava/shared-events";
 
 export class MlroNotifier {
+  private queue: Queue;
+
+  constructor() {
+    this.queue = new Queue(QUEUE_NAMES.NOTIFICATION_QUEUED, {
+      connection: {
+        host: process.env.REDIS_HOST || "localhost",
+        port: parseInt(process.env.REDIS_PORT || "6379"),
+        password: process.env.REDIS_PASSWORD,
+      },
+    });
+  }
+
   async notifyFlag(flag: AmlFlag): Promise<void> {
-    // TODO: integrate with real MLRO notification channel (email/SMS/Slack)
-    console.warn('MLRO notification stub called for flag', flag.id);
+    // Send email/slack notification via the notification service
+    await this.queue.add(
+      "mlro-alert",
+      {
+        channel: "EMAIL",
+        userId: "MLRO_TEAM", // Special routing key
+        title: `URGENT: AML Flag [${flag.severity}] - ${flag.flagType}`,
+        body: `A new AML flag requires immediate attention.\n\nType: ${flag.flagType}\nSeverity: ${flag.severity}\nScore: ${flag.riskScore}\nDetails: ${flag.description}\n\nReview in Agent Portal.`,
+        metadata: {
+          flagId: flag.id,
+          walletId: flag.walletId,
+          transactionId: flag.transactionId,
+        },
+      },
+      {
+        removeOnComplete: true,
+        removeOnFail: false,
+      },
+    );
+    console.log("MLRO notification queued for flag", flag.id);
   }
 }

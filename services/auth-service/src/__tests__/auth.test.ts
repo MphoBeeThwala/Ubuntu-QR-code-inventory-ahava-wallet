@@ -23,6 +23,7 @@ const mockPrisma = {
   },
   wallet: {
     create: jest.fn(),
+    findFirst: jest.fn(),
   },
   refreshToken: {
     create: jest.fn(),
@@ -111,6 +112,10 @@ beforeEach(() => {
 
   mockPrisma.user.create.mockResolvedValue(makeUser());
   mockPrisma.wallet.create.mockResolvedValue({ id: "wallet-001" });
+  mockPrisma.wallet.findFirst.mockResolvedValue({
+    id: "wallet-001",
+    walletNumber: "AHV-TEST-0000-0001",
+  });
   mockPrisma.refreshToken.create.mockResolvedValue({ id: "rt-001" });
   mockPrisma.auditLog.create.mockResolvedValue({});
 });

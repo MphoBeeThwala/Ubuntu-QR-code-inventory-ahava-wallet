@@ -4,16 +4,10 @@
 // RUN: npm run db:seed (NEVER run against production)
 
 import { PrismaClient, KycTier } from "@prisma/client";
-import * as argon2 from "argon2";
 import * as crypto from "crypto";
+import { hashPin } from "@ahava/shared-crypto";
 
 const prisma = new PrismaClient();
-
-const ARGON2_OPTIONS = {
-  memoryCost: 65536,
-  timeCost: 3,
-  parallelism: 4,
-};
 
 function hash(value: string): string {
   return crypto
@@ -39,7 +33,7 @@ async function main() {
   }
 
   const testPin = "1234";
-  const pinHash = await argon2.hash(testPin, ARGON2_OPTIONS);
+  const pinHash = await hashPin(testPin);
 
   // ─────────────────────────────────────────────────────────────────
   // TEST USERS

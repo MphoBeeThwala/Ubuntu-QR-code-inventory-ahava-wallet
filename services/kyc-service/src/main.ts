@@ -9,6 +9,7 @@ import {
 } from "@ahava/shared-errors";
 import { Queue } from "bullmq";
 import { QUEUE_NAMES } from "@ahava/shared-events";
+import { writeAuditLog } from "@ahava/shared-audit";
 
 const app = express();
 const prisma = new PrismaClient();
@@ -182,16 +183,13 @@ app.post(
         },
       });
 
-      // Audit
-      await prisma.auditLog.create({
-        data: {
-          userId,
-          action: "KYC_TIER_UPGRADED",
-          entityType: "User",
-          entityId: userId,
-          newState: JSON.stringify({ newTier }),
-          serviceId: "kyc-service",
-        },
+      await writeAuditLog(prisma, {
+        userId,
+        action: "KYC_TIER_UPGRADED",
+        entityType: "User",
+        entityId: userId,
+        newState: JSON.stringify({ newTier }),
+        serviceId: "kyc-service",
       });
 
       res.json(createSuccessResponse({ user: updated }));

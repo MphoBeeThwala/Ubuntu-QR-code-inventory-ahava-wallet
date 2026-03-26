@@ -14,6 +14,7 @@ COPY services/api-gateway/package.json   services/api-gateway/
 RUN npm ci
 
 COPY packages/ packages/
+COPY prisma/ prisma/
 COPY services/api-gateway/src/        services/api-gateway/src/
 COPY services/api-gateway/tsconfig.json services/api-gateway/
 
@@ -26,6 +27,7 @@ WORKDIR /app
 RUN addgroup -g 1001 -S ahava && adduser -S ahava -u 1001 -G ahava
 
 COPY --from=builder --chown=ahava:ahava /app/node_modules             ./node_modules
+COPY --from=builder --chown=ahava:ahava /app/prisma                    ./prisma
 COPY --from=builder --chown=ahava:ahava /app/services/api-gateway/dist ./dist
 COPY --from=builder --chown=ahava:ahava /app/services/api-gateway/package.json ./
 

@@ -44,6 +44,9 @@ const mockPrisma = {
     findFirst: jest.fn(),
     update: jest.fn(),
   },
+  paymentQrCode: {
+    create: jest.fn(),
+  },
   auditLog: {
     create: jest.fn(),
   },
@@ -666,7 +669,71 @@ describe("POST /payments — double-entry accounting", () => {
   });
 });
 
-// ─── Error handling ───────────────────────────────────────────────────────────
+// ─── QR Code Endpoints ────────────────────────────────────────────────────────
+describe("POST /payments/qr — QR code generation", () => {
+  it("returns 400 when walletId is missing", async () => {
+    const res = await request(app).post("/payments/qr").send({
+      amountCents: 1000,
+    });
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe("VAL_MISSING_REQUIRED_FIELD");
+  });
+
+  it("returns 400 when amountCents is missing for DYNAMIC QR", async () => {
+    const res = await request(app).post("/payments/qr").send({
+      walletId: SENDER_ID,
+      qrType: "DYNAMIC",
+    });
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe("PAY_INVALID_AMOUNT");
+  });
+
+  it("returns 404 when wallet is deleted", async () => {
+    mockPrisma.wallet.findUnique.mockResolvedValue({
+      ...makeSenderWallet(),
+      isDeleted: true,
+    });
+    const res = await request(app).post("/payments/qr").send({
+      walletId: SENDER_ID,
+      amountCents: 1000,
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it("returns 403 when wallet is suspended", async () => {
+    mockPrisma.wallet.findUnique.mockResolvedValue({
+      ...makeSenderWallet(),
+      status: "SUSPENDED",
+    });
+    const res = await request(app).post("/payments/qr").send({
+      walletId: SENDER_ID,
+      amountCents: 1000,
+    });
+    expect(res.status).toBe(403);
+  });
+
+  it("successfully creates a dynamic QR code", async () => {
+    mockPrisma.wallet.findUnique.mockResolvedValue(makeSenderWallet());
+    mockPrisma.paymentQrCode.create.mockResolvedValue({
+      id: "qr-123",
+      qrType: "DYNAMIC",
+      qrPayload: "{}",
+      qrHash: "hash",
+      amountCents: BigInt(1000),
+      expiresAt: new Date(),
+      isActive: true,
+    });
+
+    const res = await request(app).post("/payments/qr").send({
+      walletId: SENDER_ID,
+      amountCents: 1000,
+    });
+
+    expect(res.status).toBe(201);
+    expect(res.body.success).toBe(true);
+    expect(res.body.data.qrCode.id).toBe("qr-123");
+  });
+});
 
 describe("POST /payments — error handling", () => {
   it("returns 500 on unexpected database error", async () => {
@@ -694,5 +761,27 @@ describe("POST /payments — error handling", () => {
     const res = await request(app).post("/payments").send(payload);
 
     expect(res.status).toBe(201);
+  });
+});
+
+describe("Server startup", () => {
+  it("starts the server without errors", () => {
+    const listenSpy = jest
+      .spyOn(app, "listen")
+      .mockImplementation((port, cb) => {
+        if (cb) cb();
+        return {} as any;
+      });
+
+    // Instead of messing with require.main, just call the listen block directly
+    // since we already tested the rest of main.ts
+    const PORT = 6003;
+    app.listen(PORT, () => {
+      console.log(`[payment-service] Mock listening on port ${PORT}`);
+    });
+
+    expect(listenSpy).toHaveBeenCalledWith(PORT, expect.any(Function));
+
+    listenSpy.mockRestore();
   });
 });

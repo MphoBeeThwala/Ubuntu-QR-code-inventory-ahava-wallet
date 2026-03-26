@@ -24,10 +24,10 @@ spec:
       terminationGracePeriodSeconds: 30
       containers:
         - name: wallet-service
-          image: ${AWS_ACCOUNT_ID}.dkr.ecr.af-south-1.amazonaws.com/ahava/wallet-service:latest
+          image: ahava/wallet-service:latest
           imagePullPolicy: Always
           ports:
-            - containerPort: 3002
+            - containerPort: 6002
               name: http
           envFrom:
             - configMapRef:
@@ -36,7 +36,7 @@ spec:
                 name: ahava-secrets
           env:
             - name: PORT
-              value: "3002"
+              value: "6002"
           resources:
             requests:
               cpu: "100m"
@@ -47,14 +47,14 @@ spec:
           livenessProbe:
             httpGet:
               path: /health
-              port: 3002
+              port: 6002
             initialDelaySeconds: 15
             periodSeconds: 20
             failureThreshold: 3
           readinessProbe:
             httpGet:
               path: /health
-              port: 3002
+              port: 6002
             initialDelaySeconds: 5
             periodSeconds: 10
           securityContext:
@@ -76,8 +76,8 @@ spec:
     app: wallet-service
   ports:
     - name: http
-      port: 3002
-      targetPort: 3002
+      port: 6002
+      targetPort: 6002
 ---
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler

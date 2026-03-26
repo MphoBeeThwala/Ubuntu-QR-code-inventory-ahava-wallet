@@ -8,7 +8,7 @@
   }
 
   body {
-    @apply bg-gray-50 text-gray-900 antialiased;
+    @apply bg-gray-50 text-gray-900 antialiased selection:bg-ahava-200 selection:text-ahava-900;
     font-family: var(--font-geist-sans), system-ui, sans-serif;
   }
 
@@ -19,28 +19,28 @@
 
 @layer components {
   .btn-primary {
-    @apply w-full bg-ahava-600 text-white font-semibold py-3 px-4 rounded-xl
-           hover:bg-ahava-700 active:bg-ahava-800 transition-colors
-           disabled:opacity-50 disabled:cursor-not-allowed;
+    @apply w-full bg-ahava-600 text-white font-medium py-3.5 px-4 rounded-2xl        
+           hover:bg-ahava-700 active:bg-ahava-800 transition-all duration-200 shadow-sm hover:shadow-md
+           disabled:opacity-50 disabled:cursor-not-allowed transform active:scale-[0.98];
   }
 
   .btn-secondary {
-    @apply w-full border-2 border-ahava-600 text-ahava-600 font-semibold py-3 px-4 rounded-xl
-           hover:bg-ahava-50 active:bg-ahava-100 transition-colors
-           disabled:opacity-50 disabled:cursor-not-allowed;
+    @apply w-full bg-white border border-gray-200 text-gray-700 font-medium py-3.5 px-4 rounded-2xl
+           hover:bg-gray-50 hover:border-gray-300 active:bg-gray-100 transition-all duration-200
+           disabled:opacity-50 disabled:cursor-not-allowed transform active:scale-[0.98];
   }
 
   .input-field {
-    @apply w-full border border-gray-300 rounded-xl px-4 py-3 text-base
-           focus:border-ahava-500 focus:ring-2 focus:ring-ahava-200
-           placeholder:text-gray-400 bg-white transition;
+    @apply w-full border border-gray-200 rounded-2xl px-4 py-3.5 text-base bg-gray-50/50
+           focus:border-ahava-500 focus:bg-white focus:ring-4 focus:ring-ahava-500/10
+           placeholder:text-gray-400 transition-all duration-200;
   }
 
   .card {
-    @apply bg-white rounded-2xl shadow-sm border border-gray-100 p-5;
+    @apply bg-white rounded-3xl shadow-[0_2px_12px_-4px_rgba(0,0,0,0.08)] border border-gray-100 p-6;
   }
 
   .page-header {
-    @apply sticky top-0 z-10 bg-white border-b border-gray-100 px-4 py-3 flex items-center gap-3;
+    @apply sticky top-0 z-10 bg-white/80 backdrop-blur-md border-b border-gray-100 px-4 py-4 flex items-center gap-3 transition-all duration-200;
   }
 }

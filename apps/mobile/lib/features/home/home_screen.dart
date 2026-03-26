@@ -70,14 +70,14 @@ class _HomeScreenState extends State<HomeScreen> {
       expandedHeight: 120,
       floating: false,
       pinned: true,
-      backgroundColor: AhavaColors.navy800,
+      backgroundColor: AhavaColors.navy900,
       foregroundColor: Colors.white,
       automaticallyImplyLeading: false,
       flexibleSpace: FlexibleSpaceBar(
         background: Container(
           decoration: const BoxDecoration(
             gradient: LinearGradient(
-              colors: [AhavaColors.navy800, AhavaColors.navy700],
+              colors: [AhavaColors.navy900, AhavaColors.navy800],
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
             ),
@@ -110,15 +110,21 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 ],
               ),
-              IconButton(
-                icon: const Icon(Icons.notifications_outlined, color: Colors.white70),
-                onPressed: () {},
+              Container(
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: IconButton(
+                  icon: const Icon(Icons.notifications_outlined, color: Colors.white),
+                  onPressed: () {},
+                ),
               ),
             ],
           ),
         ),
-        title: const Text('Ahava Wallet', style: TextStyle(fontSize: 16)),
-        titlePadding: const EdgeInsets.only(left: 20, bottom: 12),
+        title: const Text('Ahava', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+        titlePadding: const EdgeInsets.only(left: 20, bottom: 16),
         collapseMode: CollapseMode.parallax,
       ),
     );
@@ -139,19 +145,19 @@ class _HomeScreenState extends State<HomeScreen> {
           }
 
           return Container(
-            padding: const EdgeInsets.all(20),
+            padding: const EdgeInsets.all(24),
             decoration: BoxDecoration(
               gradient: const LinearGradient(
-                colors: [AhavaColors.navy800, AhavaColors.navy700],
+                colors: [AhavaColors.navy800, AhavaColors.navy600],
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
               ),
-              borderRadius: BorderRadius.circular(20),
+              borderRadius: BorderRadius.circular(32),
               boxShadow: [
                 BoxShadow(
-                  color: AhavaColors.navy900.withValues(alpha: 0.3),
-                  blurRadius: 12,
-                  offset: const Offset(0, 4),
+                  color: AhavaColors.navy900.withOpacity(0.15),
+                  blurRadius: 20,
+                  offset: const Offset(0, 10),
                 ),
               ],
             ),
@@ -163,25 +169,24 @@ class _HomeScreenState extends State<HomeScreen> {
                   children: [
                     const Text(
                       'Available Balance',
-                      style: TextStyle(color: Colors.white60, fontSize: 13),
+                      style: TextStyle(color: Colors.white70, fontSize: 14, fontWeight: FontWeight.w500),
                     ),
                     GestureDetector(
                       onTap: () => setState(() => _balanceVisible = !_balanceVisible),
                       child: Icon(
                         _balanceVisible ? Icons.visibility_outlined : Icons.visibility_off_outlined,
-                        color: Colors.white54,
-                        size: 20,
+                        color: Colors.white70,
+                        size: 22,
                       ),
                     ),
                   ],
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 12),
                 isLoading
                     ? const SizedBox(
-                        height: 38,
+                        height: 48,
                         child: Center(
-                          child: LinearProgressIndicator(
-                            backgroundColor: Colors.white24,
+                          child: CircularProgressIndicator(
                             color: AhavaColors.gold500,
                           ),
                         ),
@@ -192,24 +197,50 @@ class _HomeScreenState extends State<HomeScreen> {
                             : 'R •••••',
                         style: const TextStyle(
                           color: Colors.white,
-                          fontSize: 34,
+                          fontSize: 40,
                           fontWeight: FontWeight.bold,
-                          letterSpacing: 0.5,
+                          letterSpacing: -1,
                         ),
                       ),
                 if (pendingCents > 0) ...[
                   const SizedBox(height: 4),
                   Text(
                     '${_fmtZAR(pendingCents)} pending',
-                    style: const TextStyle(color: Colors.white38, fontSize: 12),
+                    style: const TextStyle(color: Colors.white54, fontSize: 13),
                   ),
                 ],
-                const SizedBox(height: 16),
-                const Row(
+                const SizedBox(height: 24),
+                Row(
                   children: [
-                    _WalletChip(icon: Icons.shield_outlined, label: 'Secured'),
-                    SizedBox(width: 8),
-                    _WalletChip(icon: Icons.account_balance_outlined, label: 'ZAR'),
+                    Expanded(
+                      child: ElevatedButton.icon(
+                        onPressed: () => context.go('/wallet/add'),
+                        icon: const Icon(Icons.add, size: 18),
+                        label: const Text('Top Up'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.white.withOpacity(0.2),
+                          foregroundColor: Colors.white,
+                          elevation: 0,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: ElevatedButton.icon(
+                        onPressed: () => context.go('/history'),
+                        icon: const Icon(Icons.history, size: 18),
+                        label: const Text('Details'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.white.withOpacity(0.1),
+                          foregroundColor: Colors.white,
+                          elevation: 0,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                        ),
+                      ),
+                    ),
                   ],
                 ),
               ],

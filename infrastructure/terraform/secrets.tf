@@ -173,6 +173,21 @@ resource "aws_secretsmanager_secret" "sentry_dsn" {
 }
 
 # ─────────────────────────────────────────────────────────────────
+# DATADOG API KEY
+# ─────────────────────────────────────────────────────────────────
+
+resource "aws_secretsmanager_secret" "datadog_api_key" {
+  name                    = "/ahava/${var.environment}/datadog-api-key"
+  description             = "Datadog API key for APM/metrics/logs ingestion"
+  recovery_window_in_days = 7
+
+  tags = {
+    Name      = "ahava-${var.environment}-datadog-api-key"
+    DataClass = "API-Credential"
+  }
+}
+
+# ─────────────────────────────────────────────────────────────────
 # OUTPUTS
 # ─────────────────────────────────────────────────────────────────
 
@@ -190,6 +205,7 @@ output "secret_arns" {
     africas_talking        = aws_secretsmanager_secret.africas_talking.arn
     fcm_server_key         = aws_secretsmanager_secret.fcm_server_key.arn
     sentry_dsn             = aws_secretsmanager_secret.sentry_dsn.arn
+    datadog_api_key        = aws_secretsmanager_secret.datadog_api_key.arn
     db_master_password     = aws_secretsmanager_secret.db_master_password.arn
     redis_auth_token       = aws_secretsmanager_secret.redis_auth_token.arn
   }

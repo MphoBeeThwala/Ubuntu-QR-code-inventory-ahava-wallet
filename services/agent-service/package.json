@@ -13,6 +13,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@ahava/shared-audit": "*",
     "@ahava/shared-errors": "*",
     "@ahava/shared-crypto": "*",
     "@prisma/client": "^5.8.0",

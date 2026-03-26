@@ -8,6 +8,10 @@ node_modules/
 dist/
 .next/
 
+# Generated service worker artifacts (PWA build output)
+apps/pwa/public/sw.js
+apps/pwa/public/workbox-*.js
+
 # Environment
 .env
 .env.*

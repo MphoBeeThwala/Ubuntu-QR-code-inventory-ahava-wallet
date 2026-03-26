@@ -14,7 +14,7 @@ resource "aws_ecr_repository" "base" {
     "aml-service"
   ])
 
-  name                 = "ahava-${each.value}"
+  name                 = "ahava/${each.value}"
   image_tag_mutability = "IMMUTABLE"
 
   image_scanning_configuration {

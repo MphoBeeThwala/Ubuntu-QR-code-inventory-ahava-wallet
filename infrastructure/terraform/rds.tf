@@ -47,7 +47,14 @@ resource "aws_secretsmanager_secret" "db_master_password" {
 
 resource "aws_secretsmanager_secret_version" "db_master_password" {
   secret_id       = aws_secretsmanager_secret.db_master_password.id
-  secret_string   = random_password.db_master.result
+  secret_string = jsonencode({
+    username       = aws_db_instance.postgres.username
+    password       = random_password.db_master.result
+    host           = aws_db_instance.postgres.address
+    port           = aws_db_instance.postgres.port
+    database       = aws_db_instance.postgres.db_name
+    connection_url = "postgresql://${aws_db_instance.postgres.username}:${random_password.db_master.result}@${aws_db_instance.postgres.address}:${aws_db_instance.postgres.port}/${aws_db_instance.postgres.db_name}?sslmode=require"
+  })
 }
 
 # RDS Enhanced Monitoring IAM Role

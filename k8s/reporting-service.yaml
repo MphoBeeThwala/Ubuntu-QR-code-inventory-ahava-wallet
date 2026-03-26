@@ -24,10 +24,10 @@ spec:
       terminationGracePeriodSeconds: 60
       containers:
         - name: reporting-service
-          image: ${AWS_ACCOUNT_ID}.dkr.ecr.af-south-1.amazonaws.com/ahava/reporting-service:latest
+          image: ahava/reporting-service:latest
           imagePullPolicy: Always
           ports:
-            - containerPort: 3006
+            - containerPort: 6006
               name: http
           envFrom:
             - configMapRef:
@@ -36,7 +36,7 @@ spec:
                 name: ahava-secrets
           env:
             - name: PORT
-              value: "3006"
+              value: "6006"
           resources:
             requests:
               cpu: "200m"
@@ -47,14 +47,14 @@ spec:
           livenessProbe:
             httpGet:
               path: /health
-              port: 3006
+              port: 6006
             initialDelaySeconds: 15
             periodSeconds: 20
             failureThreshold: 3
           readinessProbe:
             httpGet:
               path: /health
-              port: 3006
+              port: 6006
             initialDelaySeconds: 5
             periodSeconds: 10
           securityContext:
@@ -76,5 +76,5 @@ spec:
     app: reporting-service
   ports:
     - name: http
-      port: 3006
-      targetPort: 3006
+      port: 6006
+      targetPort: 6006

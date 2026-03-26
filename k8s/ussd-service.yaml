@@ -24,10 +24,10 @@ spec:
       terminationGracePeriodSeconds: 30
       containers:
         - name: ussd-service
-          image: ${AWS_ACCOUNT_ID}.dkr.ecr.af-south-1.amazonaws.com/ahava/ussd-service:latest
+          image: ahava/ussd-service:latest
           imagePullPolicy: Always
           ports:
-            - containerPort: 3008
+            - containerPort: 6008
               name: http
           envFrom:
             - configMapRef:
@@ -36,7 +36,7 @@ spec:
                 name: ahava-secrets
           env:
             - name: PORT
-              value: "3008"
+              value: "6008"
           resources:
             requests:
               cpu: "100m"
@@ -47,14 +47,14 @@ spec:
           livenessProbe:
             httpGet:
               path: /health
-              port: 3008
+              port: 6008
             initialDelaySeconds: 10
             periodSeconds: 20
             failureThreshold: 3
           readinessProbe:
             httpGet:
               path: /health
-              port: 3008
+              port: 6008
             initialDelaySeconds: 5
             periodSeconds: 10
           securityContext:
@@ -80,4 +80,4 @@ spec:
   ports:
     - name: http
       port: 80
-      targetPort: 3008
+      targetPort: 6008
