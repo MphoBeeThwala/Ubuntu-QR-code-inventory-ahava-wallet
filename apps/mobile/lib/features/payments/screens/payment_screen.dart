@@ -4,6 +4,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
+import '../../core/di/service_locator.dart';
 import '../bloc/payment_bloc.dart';
 
 class PaymentScreen extends StatefulWidget {
@@ -90,6 +91,8 @@ class _PaymentEntryViewState extends State<PaymentEntryView> {
 
   @override
   Widget build(BuildContext context) {
+    final paymentRepository = sl<PaymentRepository>();
+
     return Padding(
       padding: const EdgeInsets.all(16.0),
       child: Form(
@@ -98,7 +101,37 @@ class _PaymentEntryViewState extends State<PaymentEntryView> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text('Send money', style: Theme.of(context).textTheme.headlineSmall),
-            const SizedBox(height: 24),
+            const SizedBox(height: 16),
+            FutureBuilder<List<WalletSummary>>(
+              future: paymentRepository.getRecentRecipients(),
+              builder: (context, snapshot) {
+                if (!snapshot.hasData || snapshot.data!.isEmpty) {
+                  return const SizedBox.shrink();
+                }
+
+                final recipients = snapshot.data!;
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Recent recipients'),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: recipients.map((recipient) {
+                        return ActionChip(
+                          label: Text(recipient.holderName),
+                          onPressed: () {
+                            _walletController.text = recipient.walletNumber;
+                          },
+                        );
+                      }).toList(),
+                    ),
+                    const SizedBox(height: 16),
+                  ],
+                );
+              },
+            ),
             TextFormField(
               controller: _walletController,
               decoration: const InputDecoration(

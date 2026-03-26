@@ -7,11 +7,14 @@ import '../api/ahava_api_client.dart';
 import '../cache/offline_cache.dart';
 import '../device/device_id_service.dart';
 import '../models/auth_session.dart';
+import '../models/payment_receipt.dart';
 import '../storage/token_storage.dart';
 import '../../shared_types/payment_types.dart';
 
 class PaymentRepository {
   static const _pendingPaymentCacheKey = 'payment.pending';
+  static const _recentRecipientsKey = 'payment.recent_recipients';
+  static const _receiptsKey = 'payment.receipts';
 
   final AhavaApiClient _apiClient;
   final DeviceIdService _deviceIdService;
@@ -49,6 +52,8 @@ class PaymentRepository {
     if (receiverWallet == null) {
       throw Exception('Unable to resolve recipient wallet ID');
     }
+
+    await addRecentRecipient(receiverWallet);
 
     final body = {
       'senderWalletId': actualSender,
@@ -109,8 +114,99 @@ class PaymentRepository {
     return idempotencyKey;
   }
 
+  Future<void> addRecentRecipient(WalletSummary recipient) async {
+    final stored = _cache.get(_recentRecipientsKey);
+    final list = <Map<String, dynamic>>[];
+
+    if (stored is Map<String, dynamic> && stored['items'] is List) {
+      final items = stored['items'] as List;
+      for (final item in items) {
+        if (item is Map<String, dynamic>) {
+          list.add(item);
+        }
+      }
+    }
+
+    final existingIndex = list.indexWhere((item) => item['walletNumber'] == recipient.walletNumber);
+    if (existingIndex != -1) {
+      list.removeAt(existingIndex);
+    }
+
+    list.insert(0, {
+      'walletId': recipient.walletId,
+      'walletNumber': recipient.walletNumber,
+      'holderName': recipient.holderName,
+    });
+
+    // Keep only the most recent 10 recipients
+    if (list.length > 10) {
+      list.removeRange(10, list.length);
+    }
+
+    await _cache.set(_recentRecipientsKey, {'items': list});
+  }
+
+  Future<List<WalletSummary>> getRecentRecipients({int limit = 5}) async {
+    final stored = _cache.get(_recentRecipientsKey);
+    if (stored is! Map<String, dynamic> || stored['items'] is! List) return [];
+
+    final items = stored['items'] as List;
+    final entries = items
+        .whereType<Map<String, dynamic>>()
+        .take(limit)
+        .map(
+          (item) => WalletSummary(
+            walletId: item['walletId'] as String,
+            walletNumber: item['walletNumber'] as String,
+            holderName: item['holderName'] as String,
+          ),
+        )
+        .toList();
+
+    return entries;
+  }
+
   Future<void> clearPendingIdempotencyKey() async {
     await _cache.delete(_pendingPaymentCacheKey);
+  }
+
+  Future<void> saveReceipt(PaymentReceipt receipt) async {
+    final stored = _cache.get(_receiptsKey);
+    final list = <Map<String, dynamic>>[];
+
+    if (stored is Map<String, dynamic> && stored['items'] is List) {
+      final items = stored['items'] as List;
+      for (final item in items) {
+        if (item is Map<String, dynamic>) {
+          list.add(item);
+        }
+      }
+    }
+
+    // Remove any existing receipt with the same transaction id.
+    list.removeWhere((item) => item['transactionId'] == receipt.transactionId);
+    list.insert(0, receipt.toJson());
+
+    // Keep only the most recent 20 receipts.
+    if (list.length > 20) {
+      list.removeRange(20, list.length);
+    }
+
+    await _cache.set(_receiptsKey, {'items': list});
+  }
+
+  Future<List<PaymentReceipt>> getRecentReceipts({int limit = 20}) async {
+    final stored = _cache.get(_receiptsKey);
+    if (stored is! Map<String, dynamic> || stored['items'] is! List) return [];
+
+    final items = stored['items'] as List;
+    final entries = items
+        .whereType<Map<String, dynamic>>()
+        .map(PaymentReceipt.fromJson)
+        .take(limit)
+        .toList();
+
+    return entries;
   }
 
   Future<QrCodePayload> validateQrCode(String qrPayload) async {

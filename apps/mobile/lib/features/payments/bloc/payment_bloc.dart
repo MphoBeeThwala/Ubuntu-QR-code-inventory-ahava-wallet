@@ -7,6 +7,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:equatable/equatable.dart';
 
 import '../../../core/errors/ahava_error.dart';
+import '../../../core/models/payment_receipt.dart';
 import '../../../core/repositories/payment_repository.dart';
 import '../../../shared_types/payment_types.dart';
 
@@ -261,6 +262,18 @@ class PaymentBloc extends Bloc<PaymentEvent, PaymentState> {
         reference: currentState.reference,
         isFamilyTransfer: currentState.isFamilyTransfer,
       );
+
+      // Persist a local receipt so it survives app restarts.
+      await _paymentRepository.saveReceipt(PaymentReceipt(
+        transactionId: result.transactionId,
+        recipientWalletNumber: currentState.recipientWalletNumber,
+        recipientName: currentState.recipientName,
+        amountCents: result.amountCents,
+        feeCents: result.feeCents,
+        totalDebitedCents: result.totalDebitedCents,
+        completedAt: result.completedAt,
+        reference: currentState.reference,
+      ));
 
       await _paymentRepository.clearPendingIdempotencyKey();
       emit(PaymentSuccess(result: result));
