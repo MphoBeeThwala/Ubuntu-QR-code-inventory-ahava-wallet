@@ -12,6 +12,12 @@ const app = express();
 const prisma = new PrismaClient();
 const PORT = process.env.PORT || 3003;
 
+function jsonSafe<T>(value: T): T {
+  return JSON.parse(
+    JSON.stringify(value, (_key, v) => (typeof v === "bigint" ? Number(v) : v))
+  ) as T;
+}
+
 app.use(express.json());
 app.use((req: Request, res: Response, next: NextFunction) => {
   req.id = uuidv4();
@@ -60,7 +66,7 @@ app.post("/payments", async (req: Request, res: Response, next: NextFunction) =>
 
     if (existingTxn) {
       if (existingTxn.status === "COMPLETED") {
-        return res.json(createSuccessResponse({ transaction: existingTxn }));
+        return res.json(createSuccessResponse({ transaction: jsonSafe(existingTxn) }));
       }
       throw new AhavaError(
         AhavaErrorCode.PAY_DUPLICATE_IDEMPOTENCY_KEY,
@@ -79,7 +85,7 @@ app.post("/payments", async (req: Request, res: Response, next: NextFunction) =>
     };
 
     const [senderWallet] = await prisma.$queryRaw<WalletRow[]>`
-      SELECT id, user_id AS "userId", is_deleted AS "isDeleted", status, balance
+      SELECT id, "userId", "isDeleted", status, balance
       FROM wallets
       WHERE id = ${senderWalletId}::uuid
       FOR UPDATE
@@ -233,8 +239,8 @@ app.post("/payments", async (req: Request, res: Response, next: NextFunction) =>
     res.status(201).json(
       createSuccessResponse({
         transaction: {
-          debit: debitTxn,
-          credit: creditTxn,
+          debit: jsonSafe(debitTxn),
+          credit: jsonSafe(creditTxn),
           fee: feeAmount,
         },
       })
@@ -257,9 +263,11 @@ app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
   res.status(500).json(createErrorResponse(genericError));
 });
 
-app.listen(PORT, () => {
-  console.log(`✅ Payment Service listening on port ${PORT}`);
-});
+if (require.main === module) {
+  app.listen(PORT, () => {
+    console.log(`Payment Service listening on port ${PORT}`);
+  });
+}
 
 export default app;
 
@@ -270,3 +278,4 @@ declare global {
     }
   }
 }
+

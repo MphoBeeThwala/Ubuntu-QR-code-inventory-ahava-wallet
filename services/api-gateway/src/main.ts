@@ -33,8 +33,12 @@ app.use(express.urlencoded({ extended: true }));
 
 // Request ID tracking
 app.use((req: Request, res: Response, next: NextFunction) => {
-  req.id = uuidv4();
+  const incomingRequestId = req.header("x-request-id");
+  const incomingCorrelationId = req.header("x-correlation-id");
+  req.id = incomingRequestId || uuidv4();
+  req.correlationId = incomingCorrelationId || req.id;
   res.setHeader("X-Request-ID", req.id);
+  res.setHeader("X-Correlation-ID", req.correlationId);
   next();
 });
 
@@ -113,24 +117,138 @@ function serviceBaseUrlForPath(path: string): string | null {
   return null;
 }
 
+function isProtectedRoute(path: string): boolean {
+  return !path.startsWith("/health") && !path.startsWith("/auth");
+}
+
+function parseJsonSafely(value: string): unknown {
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+}
+
+function toRecord(value: unknown): Record<string, unknown> | null {
+  if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+  return null;
+}
+
+function extractUpstreamError(payload: unknown) {
+  const obj = toRecord(payload);
+  const errorObj = obj ? toRecord(obj.error) : null;
+  if (!obj || obj.success !== false || !errorObj) {
+    return null;
+  }
+
+  const code = errorObj.code;
+  const message = errorObj.message;
+  const statusCode = errorObj.statusCode;
+  if (typeof code !== "string" || typeof message !== "string") {
+    return null;
+  }
+
+  return {
+    code,
+    message,
+    statusCode: typeof statusCode === "number" ? statusCode : undefined,
+    details: toRecord(errorObj.details) ?? undefined,
+  };
+}
+
+function requireBearerAuth(req: Request, _res: Response, next: NextFunction) {
+  if (!isProtectedRoute(req.path)) {
+    return next();
+  }
+
+  const authorization = req.header("authorization");
+  if (!authorization || !authorization.startsWith("Bearer ")) {
+    return next(
+      new AhavaError(
+        AhavaErrorCode.AUTH_UNAUTHORIZED,
+        "Missing or invalid Authorization header",
+        { requestId: req.id, statusCode: 401 }
+      )
+    );
+  }
+
+  return next();
+}
+
+app.use(requireBearerAuth);
+
 async function proxyRequest(serviceBaseUrl: string, req: Request, res: Response) {
   const query = req.url.includes('?') ? req.url.substring(req.url.indexOf('?')) : '';
   const forwardUrl = `${serviceBaseUrl}${req.path}${query}`;
 
-  const response = await fetch(forwardUrl, {
-    method: req.method,
-    headers: {
-      "Content-Type": "application/json",
-      ...(req.id && { "X-Request-ID": req.id }),
-      "X-Forwarded-For": req.ip || "",
-      ...(req.headers.authorization && { Authorization: req.headers.authorization }),
-      ...(req.headers['x-device-id'] ? { "X-Device-Id": req.headers['x-device-id'] as string } : {}),
-    } as Record<string, string>,
-    body: req.method !== "GET" && req.method !== "HEAD" ? JSON.stringify(req.body) : undefined,
-  });
+  let response: globalThis.Response;
+  try {
+    response = await fetch(forwardUrl, {
+      method: req.method,
+      headers: {
+        "Content-Type": "application/json",
+        ...(req.id && { "X-Request-ID": req.id }),
+        ...(req.correlationId && { "X-Correlation-ID": req.correlationId }),
+        "X-Forwarded-For": req.ip || "",
+        ...(req.headers.authorization && { Authorization: req.headers.authorization }),
+        ...(req.headers["x-device-id"] ? { "X-Device-Id": req.headers["x-device-id"] as string } : {}),
+      } as Record<string, string>,
+      body: req.method !== "GET" && req.method !== "HEAD" ? JSON.stringify(req.body) : undefined,
+    });
+  } catch (error) {
+    throw new AhavaError(
+      AhavaErrorCode.INTERNAL_DEPENDENCY_FAILURE,
+      "Upstream service unavailable",
+      {
+        requestId: req.id,
+        statusCode: 502,
+        details: {
+          forwardUrl,
+          reason: error instanceof Error ? error.message : "unknown",
+        },
+      }
+    );
+  }
 
   const bodyText = await response.text();
-  res.status(response.status).send(bodyText);
+  const parsed = parseJsonSafely(bodyText);
+  const upstreamError = extractUpstreamError(parsed);
+
+  if (upstreamError) {
+    throw new AhavaError(
+      upstreamError.code as AhavaErrorCode,
+      upstreamError.message,
+      {
+        requestId: req.id,
+        statusCode: upstreamError.statusCode ?? response.status,
+        details: upstreamError.details,
+      }
+    );
+  }
+
+  if (response.status >= 400) {
+    throw new AhavaError(
+      AhavaErrorCode.INTERNAL_DEPENDENCY_FAILURE,
+      "Upstream service error",
+      {
+        requestId: req.id,
+        statusCode: response.status,
+        details: {
+          forwardUrl,
+          upstreamStatus: response.status,
+          upstreamBody: parsed ?? bodyText,
+        },
+      }
+    );
+  }
+
+  if (parsed !== null) {
+    return res.status(response.status).json(parsed);
+  }
+
+  return res.status(response.status).send(bodyText);
 }
 
 app.all("*", async (req: Request, res: Response, next: NextFunction) => {
@@ -162,8 +280,12 @@ app.use((req: Request, res: Response) => {
 app.use((err: unknown, req: Request, res: Response, _next: NextFunction) => {
   // If it's already AhavaError, use it directly
   if (err instanceof AhavaError) {
-    err.requestId = req.id;
-    return res.status(err.statusCode).json(createErrorResponse(err));
+    const mappedError = new AhavaError(err.code, err.message, {
+      requestId: req.id,
+      statusCode: err.statusCode,
+      details: err.details,
+    });
+    return res.status(mappedError.statusCode).json(createErrorResponse(mappedError));
   }
 
   // TODO: Log unknown errors to Sentry + Datadog
@@ -186,13 +308,13 @@ app.use((err: unknown, req: Request, res: Response, _next: NextFunction) => {
 // SERVER STARTUP
 // ─────────────────────────────────────────────────────────────────
 
-app.listen(PORT, () => {
-  console.log(`✅ API Gateway listening on port ${PORT}`);
-  console.log(`📍 Environment: ${process.env.NODE_ENV || "dev"}`);
-  console.log(
-    `🏥 Health check: http://localhost:${PORT}/health`
-  );
-});
+if (require.main === module) {
+  app.listen(PORT, () => {
+    console.log(`API Gateway listening on port ${PORT}`);
+    console.log(`Environment: ${process.env.NODE_ENV || "dev"}`);
+    console.log(`Health check: http://localhost:${PORT}/health`);
+  });
+}
 
 export default app;
 
@@ -208,7 +330,9 @@ declare global {
       userId?: string;
       deviceFingerprint?: string;
       deviceId?: string;
+      correlationId?: string;
     }
   }
 }
 /* eslint-enable @typescript-eslint/no-namespace */
+

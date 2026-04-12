@@ -27,6 +27,20 @@ const PORT = process.env.PORT || 3001;
 
 app.use(express.json());
 
+function normalizePhoneNumber(phoneNumber: string): string {
+  const digits = phoneNumber.replace(/\s+/g, "");
+  if (digits.startsWith("+")) {
+    return digits;
+  }
+  if (digits.startsWith("0") && digits.length === 10) {
+    return `+27${digits.slice(1)}`;
+  }
+  if (digits.startsWith("27") && digits.length === 11) {
+    return `+${digits}`;
+  }
+  return digits;
+}
+
 // Request ID middleware
 app.use((req: Request, res: Response, next: NextFunction) => {
   req.id = uuidv4();
@@ -57,9 +71,11 @@ app.post("/auth/register", async (req: Request, res: Response, next: NextFunctio
       );
     }
 
+    const normalizedPhoneNumber = normalizePhoneNumber(phoneNumber);
+
     // Validate phone format (South African)
-    const phoneRegex = /^(\+27|0)[1-9]\d{8}$/;
-    if (!phoneRegex.test(phoneNumber.replace(/\s/g, ""))) {
+    const phoneRegex = /^\+27[1-9]\d{8}$/;
+    if (!phoneRegex.test(normalizedPhoneNumber)) {
       throw new AhavaError(
         AhavaErrorCode.VAL_INVALID_PHONE,
         "Invalid phone number format",
@@ -78,7 +94,12 @@ app.post("/auth/register", async (req: Request, res: Response, next: NextFunctio
 
     // Check if user already exists
     const existingUser = await prisma.user.findUnique({
-      where: { phoneNumber },
+      where: {
+        phoneNumberHash: crypto
+          .createHash("sha256")
+          .update(normalizedPhoneNumber.toLowerCase())
+          .digest("hex"),
+      },
     });
 
     if (existingUser) {
@@ -95,13 +116,13 @@ app.post("/auth/register", async (req: Request, res: Response, next: NextFunctio
     // Generate phone number hash for lookups (SHA-256)
     const phoneNumberHash = crypto
       .createHash("sha256")
-      .update(phoneNumber)
+      .update(normalizedPhoneNumber.toLowerCase())
       .digest("hex");
 
     // Create user
     const user = await prisma.user.create({
       data: {
-        phoneNumber,
+        phoneNumber: normalizedPhoneNumber,
         phoneNumberHash,
         pinHash,
         primaryDeviceId: deviceId,
@@ -158,7 +179,7 @@ app.post("/auth/register", async (req: Request, res: Response, next: NextFunctio
     const accessToken = await generateAccessToken(
       {
         userId: user.id,
-        phoneNumber,
+        phoneNumber: normalizedPhoneNumber,
         kycTier: user.kycTier,
         deviceId,
       },
@@ -173,6 +194,19 @@ app.post("/auth/register", async (req: Request, res: Response, next: NextFunctio
         action: "USER_REGISTERED",
         entityType: "User",
         entityId: user.id,
+        serviceId: "auth-service",
+        ipAddress,
+        userAgent,
+        deviceId,
+      },
+    });
+
+    await prisma.auditLog.create({
+      data: {
+        userId: user.id,
+        action: "WALLET_CREATED",
+        entityType: "Wallet",
+        entityId: wallet.id,
         serviceId: "auth-service",
         ipAddress,
         userAgent,
@@ -225,9 +259,16 @@ app.post("/auth/login", async (req: Request, res: Response, next: NextFunction) 
       );
     }
 
+    const normalizedPhoneNumber = normalizePhoneNumber(phoneNumber);
+
     // Find user
     const user = await prisma.user.findUnique({
-      where: { phoneNumber },
+      where: {
+        phoneNumberHash: crypto
+          .createHash("sha256")
+          .update(normalizedPhoneNumber.toLowerCase())
+          .digest("hex"),
+      },
     });
 
     if (!user || user.isDeleted) {
@@ -314,7 +355,7 @@ app.post("/auth/login", async (req: Request, res: Response, next: NextFunction) 
     const accessToken = await generateAccessToken(
       {
         userId: user.id,
-        phoneNumber,
+        phoneNumber: normalizedPhoneNumber,
         kycTier: user.kycTier,
         deviceId,
       },
@@ -552,10 +593,12 @@ app.use((err: Error, req: Request, res: Response, _next: NextFunction) => {
 // SERVER STARTUP
 // ─────────────────────────────────────────────────────────────────
 
-app.listen(PORT, () => {
-  console.log(`✅ Auth Service listening on port ${PORT}`);
-  console.log(`🏥 Health: http://localhost:${PORT}/health`);
-});
+if (require.main === module) {
+  app.listen(PORT, () => {
+    console.log(`Auth Service listening on port ${PORT}`);
+    console.log(`Health: http://localhost:${PORT}/health`);
+  });
+}
 
 export default app;
 
@@ -568,3 +611,5 @@ declare global {
   }
 }
 /* eslint-enable @typescript-eslint/no-namespace */
+
+

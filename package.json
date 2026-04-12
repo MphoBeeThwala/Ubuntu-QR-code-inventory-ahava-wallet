@@ -23,6 +23,10 @@
     "docker:up": "docker-compose up -d",
     "docker:down": "docker-compose down",
     "docker:reset": "docker-compose down -v && docker-compose up -d",
+    "integration:up": "docker compose -f docker-compose.integration.yml --profile integration up -d",
+    "integration:down": "docker compose -f docker-compose.integration.yml --profile integration down -v",
+    "integration:logs": "docker compose -f docker-compose.integration.yml --profile integration logs -f api-gateway-integration auth-service-integration wallet-service-integration payment-service-integration",
+    "integration:smoke": "node scripts/integration-smoke.js",
     "smoke:payment": "node scripts/smoke-payment.js",
     "secrets:validate": "node scripts/validate-secrets.js",
     "audit:deps": "npm audit --audit-level=high"

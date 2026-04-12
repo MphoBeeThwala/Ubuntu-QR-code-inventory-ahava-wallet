@@ -1,28 +1,21 @@
-'use client';
+import type { Metadata } from "next";
+import type { ReactNode } from "react";
+import { Space_Grotesk, Lora } from "next/font/google";
+import "./globals.css";
 
-import { ReactNode } from 'react';
-import { Geist } from 'next/font/google';
-import './globals.css';
+const heading = Space_Grotesk({ subsets: ["latin"], variable: "--font-heading" });
+const body = Lora({ subsets: ["latin"], variable: "--font-body" });
 
-const geist = Geist({ subsets: ['latin'] });
+export const metadata: Metadata = {
+  title: "Ahava Wallet PWA",
+  description: "Ahava MVP wallet client",
+};
 
-export default function RootLayout({
-  children,
-}: {
-  children: ReactNode;
-}) {
+export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en">
-      <head>
-        <meta name="theme-color" content="#059669" />
-        <meta name="description" content="Ahava - South African Digital Wallet" />
-        <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
-        <link rel="manifest" href="/manifest.json" />
-        <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-      </head>
-      <body className={geist.className}>
-        <div id="root">{children}</div>
-      </body>
+      <body className={`${heading.variable} ${body.variable}`}>{children}</body>
     </html>
   );
 }
+

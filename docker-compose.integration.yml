@@ -1,0 +1,250 @@
+x-workspace-base: &workspace-base
+  image: node:20
+  working_dir: /workspace
+  volumes:
+    - ./:/workspace
+    - integration_root_node_modules:/workspace/node_modules
+    - integration_api_gateway_node_modules:/workspace/services/api-gateway/node_modules
+    - integration_auth_node_modules:/workspace/services/auth-service/node_modules
+    - integration_wallet_node_modules:/workspace/services/wallet-service/node_modules
+    - integration_payment_node_modules:/workspace/services/payment-service/node_modules
+    - integration_kyc_node_modules:/workspace/services/kyc-service/node_modules
+    - integration_notification_node_modules:/workspace/services/notification-service/node_modules
+    - integration_aml_node_modules:/workspace/services/aml-service/node_modules
+    - integration_reporting_node_modules:/workspace/services/reporting-service/node_modules
+    - integration_shared_crypto_node_modules:/workspace/packages/shared-crypto/node_modules
+    - integration_shared_errors_node_modules:/workspace/packages/shared-errors/node_modules
+    - integration_shared_events_node_modules:/workspace/packages/shared-events/node_modules
+    - integration_shared_types_node_modules:/workspace/packages/shared-types/node_modules
+    - integration_database_node_modules:/workspace/packages/database/node_modules
+
+services:
+  postgres-integration:
+    profiles: ["integration"]
+    image: timescale/timescaledb:latest-pg16
+    environment:
+      POSTGRES_USER: ahava
+      POSTGRES_PASSWORD: ahava_integration_pw
+      POSTGRES_DB: ahava_integration
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8"
+    ports:
+      - "55432:5432"
+    volumes:
+      - postgres_integration_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ahava -d ahava_integration"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis-integration:
+    profiles: ["integration"]
+    image: redis:7-alpine
+    ports:
+      - "56379:6379"
+    volumes:
+      - redis_integration_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  deps-integration:
+    <<: *workspace-base
+    profiles: ["integration"]
+    command: >
+      sh -lc "npm ci && touch /tmp/deps-ready && tail -f /dev/null"
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /tmp/deps-ready"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  migrate-integration:
+    <<: *workspace-base
+    profiles: ["integration"]
+    depends_on:
+      deps-integration:
+        condition: service_healthy
+      postgres-integration:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://ahava:ahava_integration_pw@postgres-integration:5432/ahava_integration
+    command: >
+      sh -lc "npx prisma@5.22.0 generate --schema=prisma/schema.prisma &&
+      npx prisma@5.22.0 migrate deploy --schema=prisma/schema.prisma &&
+      npx prisma@5.22.0 db execute --schema=prisma/schema.prisma --file=scripts/integration-auditlog-compat.sql &&
+      touch /tmp/migrate-ready && tail -f /dev/null"
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /tmp/migrate-ready"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  seed-integration:
+    <<: *workspace-base
+    profiles: ["integration"]
+    depends_on:
+      migrate-integration:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://ahava:ahava_integration_pw@postgres-integration:5432/ahava_integration
+    command: >
+      sh -lc "node scripts/seed-integration.js &&
+      touch /tmp/seed-ready && tail -f /dev/null"
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /tmp/seed-ready"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  auth-service-integration:
+    <<: *workspace-base
+    profiles: ["integration"]
+    depends_on:
+      seed-integration:
+        condition: service_healthy
+      redis-integration:
+        condition: service_healthy
+    environment:
+      NODE_ENV: integration
+      PORT: 3001
+      DATABASE_URL: postgresql://ahava:ahava_integration_pw@postgres-integration:5432/ahava_integration
+      REDIS_URL: redis://redis-integration:6379
+      JWT_PRIVATE_KEY: |-
+        -----BEGIN PRIVATE KEY-----
+        MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC41shv8HvrLZOC
+        AfUFUghrDMrcv7poa4cqUfnT/JOk2C6vn9I2EXlJ5jGVFGEWJTOqaoGDn7n9dOXE
+        bUWBB54M0uBvm8xz3M6tRrUVTvw17VlE00FrYAS/mMxFmJu96yGLXLKbIVW+nQvw
+        URMpWbCQTXRD+WIAaLzrJhLPTZFYn/6EtC+R1yNONv0XKV4t51/DpnTrbZHpYnfu
+        D5UF+tWOBSpUbj7WQIGjW6wFZZiUsZdwLDsI3EwGnpBbA5tX/2AmvvHhwwYdOF9t
+        aRc5HEA0cuK2YvCn5+fXHrW1th/ipbftsev7o+IeMO+VGsURbfrhwkm5h4hcCf/s
+        qO8uW9YjAgMBAAECggEABOGwnSWMnZtFtDR0Bvtx0Hif2kZQAyulKrd2hyQ6YVX6
+        Sat0Dvcq17T2Je9KBHPgEkX00gfuZA9pyrnDZlMlV/EGehFzIV45W8yBwiR6DGc5
+        KSmr0SJR4x4tyurAYOWBrHS6x4ERCtM1T61RzxDuKlQkAsWRJ9ycR1jpPJivrYJP
+        VRIpGhEOzJsWn+bUg7Zl928QMeFHKhfGnFBpzgKFAWfqWFGFrMvJMdtGMFPwABCo
+        ldR0WXn9W+2gw66uDTYzi8HFDWGBs2ajDDIZsiWzCoYNj5KVj4pLjVpC1Dbdn6aw
+        KdgSEMxtBgjjYI/n8JY1mhMz+YT1cwpY0s1D/rYG9QKBgQDyUdIMbNTBJyU9xK9k
+        pUmbuMqsj0l0TD0a0ysQviCIaYpbik84TngCkZnSf3X9E6DIGI52GEa4yrTrauDR
+        f76g/MX6pTh9/0r3UaeGMEpwLcAIWl0DmwAM2WqnWN27eDKRl7Le0i9r6zzOQ/2X
+        CTPd2ckxhCXS1uiVY/HSfts+1QKBgQDDRjXzF0efgl5NwbubocXrm3suZge2Ewkb
+        t6tIyOCJJ2Z1UkNpSMf65QU2yYjpksQl3mbYWauc3CubOp1XzQYjU689BpJPL9kT
+        xxU5JFIkZeL7123PWi7ccr+9Cvmx6ncfDyO4gVyG/f3nqmg3jGht5Ln0xuGgnbzV
+        9ym4PIbtFwKBgGaV7wfllxiCmwiQWPSR6Rys2di9/InosMHHfmbjJuC5VaK1Zh5f
+        Uf08aNOttGTEx3+OrdkfI+mdn4Q+xhjLLQf4m1QmWEk3KCSWBAcSMKFXLQIcR158
+        Y0QNU1Kvk4eHNlle0JH2h673ctGcBSLI+ZVFWyDEYkLlSqfcHQdRPz5VAoGAGgAB
+        MurImI5tLAE9j41MowBCuHzRTgbe0Zf08G3+p4RdegWIAD62kctolFDlL+RgxYIF
+        Q4088lfGXpbBWG1uAcokrQVw+aYvSxjY1JDndv0x6cJXVqJ1VtjYer05Xd0QG0yS
+        vwBKZ5bt9aiU08CYLvmjYNoSNKaL/Bk6rtMwS+UCgYEA3kPD9oevnS13kya42Ejz
+        /5CFMd3FUiwUAuk+jbCCPGW4iOgvLKeHDfxI/Wu+cuulaIKdWnqyQ5PeYFQGsiUf
+        H5zD3JSthcTmAnC08mXat8I7RBHGWeVptE3k62/oqxpOn0bUgqT6B4Fx2VGg/uvy
+        zHsuQiL+gO+cvnteSdFVAdc=
+        -----END PRIVATE KEY-----
+    command: sh -lc "npm run dev --workspace @ahava/auth-service"
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://localhost:3001/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  wallet-service-integration:
+    <<: *workspace-base
+    profiles: ["integration"]
+    depends_on:
+      seed-integration:
+        condition: service_healthy
+    environment:
+      NODE_ENV: integration
+      PORT: 3002
+      DATABASE_URL: postgresql://ahava:ahava_integration_pw@postgres-integration:5432/ahava_integration
+    command: sh -lc "npm run dev --workspace @ahava/wallet-service"
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://localhost:3002/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  payment-service-integration:
+    <<: *workspace-base
+    profiles: ["integration"]
+    depends_on:
+      seed-integration:
+        condition: service_healthy
+      redis-integration:
+        condition: service_healthy
+    environment:
+      NODE_ENV: integration
+      PORT: 3003
+      DATABASE_URL: postgresql://ahava:ahava_integration_pw@postgres-integration:5432/ahava_integration
+      REDIS_URL: redis://redis-integration:6379
+    command: sh -lc "npm run dev --workspace @ahava/payment-service"
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://localhost:3003/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  kyc-service-integration:
+    <<: *workspace-base
+    profiles: ["integration"]
+    depends_on:
+      seed-integration:
+        condition: service_healthy
+    environment:
+      NODE_ENV: integration
+      PORT: 3004
+      DATABASE_URL: postgresql://ahava:ahava_integration_pw@postgres-integration:5432/ahava_integration
+    command: sh -lc "npm run dev --workspace @ahava/kyc-service"
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://localhost:3004/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  api-gateway-integration:
+    <<: *workspace-base
+    profiles: ["integration"]
+    depends_on:
+      auth-service-integration:
+        condition: service_healthy
+      wallet-service-integration:
+        condition: service_healthy
+      payment-service-integration:
+        condition: service_healthy
+      kyc-service-integration:
+        condition: service_healthy
+    environment:
+      NODE_ENV: integration
+      PORT: 3000
+      AUTH_SERVICE_URL: http://auth-service-integration:3001
+      WALLET_SERVICE_URL: http://wallet-service-integration:3002
+      PAYMENT_SERVICE_URL: http://payment-service-integration:3003
+      KYC_SERVICE_URL: http://kyc-service-integration:3004
+      NOTIFICATION_SERVICE_URL: http://notification-service:6005
+    command: sh -lc "npm run dev --workspace @ahava/api-gateway"
+    ports:
+      - "3000:3000"
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://localhost:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  integration_root_node_modules:
+  integration_api_gateway_node_modules:
+  integration_auth_node_modules:
+  integration_wallet_node_modules:
+  integration_payment_node_modules:
+  integration_kyc_node_modules:
+  integration_notification_node_modules:
+  integration_aml_node_modules:
+  integration_reporting_node_modules:
+  integration_shared_crypto_node_modules:
+  integration_shared_errors_node_modules:
+  integration_shared_events_node_modules:
+  integration_shared_types_node_modules:
+  integration_database_node_modules:
+  postgres_integration_data:
+  redis_integration_data:
