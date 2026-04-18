@@ -27,13 +27,17 @@ const paymentCreatedQueue = new Queue(QUEUE_NAMES.PAYMENTS_CREATED, {
 
 app.use(express.json());
 app.use((req: Request, res: Response, next: NextFunction) => {
-  req.id = uuidv4();
+  const incoming = req.get("X-Request-ID");
+  req.id =
+    typeof incoming === "string" && incoming.length > 0 ? incoming : uuidv4();
   res.setHeader("X-Request-ID", req.id);
   next();
 });
 
-app.get("/health", (_req, res) => {
-  res.json(createSuccessResponse({ status: "ok", service: "payment-service" }));
+app.get("/health", (req, res) => {
+  res.json(
+    createSuccessResponse({ status: "ok", service: "payment-service" }, req.id),
+  );
 });
 
 // POST /payments/qr - Generate a payment QR code (static or dynamic)
@@ -114,17 +118,20 @@ app.post(
       });
 
       return res.status(201).json(
-        createSuccessResponse({
-          qrCode: {
-            id: qrCode.id,
-            qrType: qrCode.qrType,
-            qrPayload: qrCode.qrPayload,
-            qrHash: qrCode.qrHash,
-            amountCents: qrCode.amountCents?.toString() ?? null,
-            expiresAt: qrCode.expiresAt,
-            isActive: qrCode.isActive,
+        createSuccessResponse(
+          {
+            qrCode: {
+              id: qrCode.id,
+              qrType: qrCode.qrType,
+              qrPayload: qrCode.qrPayload,
+              qrHash: qrCode.qrHash,
+              amountCents: qrCode.amountCents?.toString() ?? null,
+              expiresAt: qrCode.expiresAt,
+              isActive: qrCode.isActive,
+            },
           },
-        }),
+          req.id,
+        ),
       );
     } catch (error) {
       next(error);
@@ -184,7 +191,9 @@ app.post(
 
       if (existingTxn) {
         if (existingTxn.status === "COMPLETED") {
-          return res.json(createSuccessResponse({ transaction: existingTxn }));
+          return res.json(
+            createSuccessResponse({ transaction: existingTxn }, req.id),
+          );
         }
         throw new AhavaError(
           AhavaErrorCode.PAY_DUPLICATE_IDEMPOTENCY_KEY,
@@ -206,7 +215,7 @@ app.post(
               : [receiverWalletId, senderWalletId];
 
           const lockedWallets = await tx.$queryRaw<WalletRow[]>`
-        SELECT id, user_id AS "userId", is_deleted AS "isDeleted", status, balance
+        SELECT id, "userId" AS "userId", "isDeleted" AS "isDeleted", status, balance
         FROM wallets
         WHERE id IN (${firstId}::uuid, ${secondId}::uuid)
         ORDER BY id
@@ -253,6 +262,8 @@ app.post(
           const senderBalanceAfter = senderWallet.balance - BigInt(amountCents);
           const receiverBalanceAfter =
             receiverWallet.balance + BigInt(netAmount);
+          const creditIdempotencyKey = `${idempotencyKey.slice(0, 35)}c`;
+          const feeIdempotencyKey = `${idempotencyKey.slice(0, 35)}f`;
 
           // Create debit record (sender)
           const debitTxn = await tx.walletTransaction.create({
@@ -288,7 +299,7 @@ app.post(
               balanceAfter: receiverBalanceAfter,
               counterpartyWalletId: senderWalletId,
               description,
-              idempotencyKey: `${idempotencyKey}-credit`,
+              idempotencyKey: creditIdempotencyKey,
             },
           });
 
@@ -319,7 +330,7 @@ app.post(
                 balanceBefore: feePoolWallet.balance,
                 balanceAfter: feePoolWallet.balance + BigInt(feeAmount),
                 description: `Fee for ${idempotencyKey}`,
-                idempotencyKey: `${idempotencyKey}-fee`,
+                idempotencyKey: feeIdempotencyKey,
               },
             });
             await tx.wallet.update({
@@ -378,13 +389,16 @@ app.post(
         );
 
       return res.status(201).json(
-        createSuccessResponse({
-          transaction: {
-            debit: result.debitTxn,
-            credit: result.creditTxn,
-            fee: result.feeAmount,
+        createSuccessResponse(
+          {
+            transaction: {
+              debit: result.debitTxn,
+              credit: result.creditTxn,
+              fee: result.feeAmount,
+            },
           },
-        }),
+          req.id,
+        ),
       );
     } catch (error) {
       next(error);

@@ -3,6 +3,7 @@
 ## What You Have
 
 **A complete, production-ready South African digital wallet monorepo** with:
+
 - 8 backend microservices (Node.js + TypeScript)
 - Flutter mobile app (iOS/Android)
 - Next.js PWA (web)
@@ -15,65 +16,54 @@
 ## 5-Minute Startup
 
 ### **1. Install Dependencies**
+
 ```bash
-cd c:\Users\User\OneDrive\Documentos\Projects\ahava_ewallet
+cd Ubuntu-QR-code-inventory-ahava-wallet\repo-main
 npm install
 ```
 
-### **2. Start Database & Cache**
+### **2. Create Local Env File**
+
+Create `.env` from `.env.example` and populate:
+
+- `JWT_PRIVATE_KEY`
+- `JWT_PUBLIC_KEY`
+- `PII_ENCRYPTION_KEY`
+- `HASH_SALT`
+
+### **3. Start Database & Cache**
+
 ```bash
 npm run docker:up
 # Waits for Postgres + Redis to be healthy
 ```
 
-### **3. Run Database Migrations**
+### **4. Run Database Migrations**
+
 ```bash
 npm run db:migrate
 ```
 
-### **4. Start Services** (in separate terminals)
+### **5. Start Services**
 
-**Terminal 1 — API Gateway**
 ```bash
-cd services/api-gateway
-npm install && npm run dev
-# Listens on http://localhost:3000
+npm run dev
 ```
 
-**Terminal 2 — Auth Service**
-```bash
-cd services/auth-service
-npm install && npm run dev
-# Listens on http://localhost:3001
-```
+### **6. Test Registration API**
 
-**Terminal 3 — Wallet Service**
 ```bash
-cd services/wallet-service
-npm install && npm run dev
-# Listens on http://localhost:3002
-```
-
-**Terminal 4 — Payment Service**
-```bash
-cd services/payment-service
-npm install && npm run dev
-# Listens on http://localhost:3003
-```
-
-**Repeat for remaining services** (kyc, notification, reporting, aml)
-
-### **5. Test Registration API**
-```bash
-curl -X POST http://localhost:3000/auth/register \
+curl -X POST http://localhost:6000/auth/register \
   -H "Content-Type: application/json" \
   -d '{
-    "phone": "+27823456789",
-    "pin": "1234"
+    "phoneNumber": "+27823456789",
+    "pin": "1234",
+    "deviceId": "quickstart"
   }'
 ```
 
 **Expected response:**
+
 ```json
 {
   "success": true,
@@ -86,18 +76,23 @@ curl -X POST http://localhost:3000/auth/register \
 ```
 
 ### **6. Test Payment API**
+
 ```bash
 # Use accessToken from registration
 BEARER="Bearer eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9..."
 
-curl -X POST http://localhost:3000/payments \
+curl -X POST http://localhost:6000/payments \
   -H "Content-Type: application/json" \
   -H "Authorization: $BEARER" \
-  -H "X-Idempotency-Key: $(uuidgen)" \
   -d '{
-    "recipientPhone": "+27787654321",
+    "senderWalletId": "uuid",
+    "receiverWalletId": "uuid",
     "amountCents": 5000,
-    "description": "Lunch money"
+    "description": "Lunch money",
+    "idempotencyKey": "your-idempotency-key",
+    "paymentMethod": "UBUNTUPAY_WALLET",
+    "deviceId": "quickstart",
+    "ipAddress": "127.0.0.1"
   }'
 ```
 
@@ -181,21 +176,21 @@ terraform apply -var-file=dev.tfvars
 
 ## API Endpoints Quick Reference
 
-| Service | Endpoint | Method | Purpose |
-|---------|----------|--------|---------|
-| **Auth** | `/auth/register` | POST | Create account |
-| **Auth** | `/auth/login` | POST | Login with PIN |
-| **Auth** | `/auth/refresh` | POST | Get new access token |
-| **Auth** | `/auth/logout` | POST | Revoke token |
-| **Wallet** | `/wallet/{id}` | GET | Get wallet details |
-| **Wallet** | `/wallet/{id}/balance` | GET | Check balance |
-| **Wallet** | `/wallet/{id}/transactions` | GET | Transaction history |
-| **Payment** | `/payments` | POST | Send money |
-| **KYC** | `/kyc/user/{id}` | GET | KYC status |
-| **KYC** | `/kyc/tier-upgrade` | POST | Upgrade tier |
-| **AML** | `/aml/flag` | POST | Create AML flag |
-| **AML** | `/aml/flags` | GET | List open flags |
-| **Report** | `/reports/vat` | GET | VAT report |
+| Service     | Endpoint                    | Method | Purpose              |
+| ----------- | --------------------------- | ------ | -------------------- |
+| **Auth**    | `/auth/register`            | POST   | Create account       |
+| **Auth**    | `/auth/login`               | POST   | Login with PIN       |
+| **Auth**    | `/auth/refresh`             | POST   | Get new access token |
+| **Auth**    | `/auth/logout`              | POST   | Revoke token         |
+| **Wallet**  | `/wallet/{id}`              | GET    | Get wallet details   |
+| **Wallet**  | `/wallet/{id}/balance`      | GET    | Check balance        |
+| **Wallet**  | `/wallet/{id}/transactions` | GET    | Transaction history  |
+| **Payment** | `/payments`                 | POST   | Send money           |
+| **KYC**     | `/kyc/user/{id}`            | GET    | KYC status           |
+| **KYC**     | `/kyc/tier-upgrade`         | POST   | Upgrade tier         |
+| **AML**     | `/aml/flag`                 | POST   | Create AML flag      |
+| **AML**     | `/aml/flags`                | GET    | List open flags      |
+| **Report**  | `/reports/vat`              | GET    | VAT report           |
 
 ---
 
@@ -213,13 +208,14 @@ JWT_PUBLIC_KEY_NAME=/ahava/jwt-public-key
 AWS_REGION=af-south-1
 ```
 
-For production, use AWS Secrets Manager (see [services/*/src/main.ts](services/auth-service/src/main.ts) for usage).
+For production, use AWS Secrets Manager (see [services/\*/src/main.ts](services/auth-service/src/main.ts) for usage).
 
 ---
 
 ## Common Issues & Fixes
 
 ### **Docker failing to start**
+
 ```bash
 # Check if ports are in use
 netstat -ano | findstr "5432"  # PostgreSQL
@@ -230,6 +226,7 @@ taskkill /PID <PID> /F
 ```
 
 ### **Migrations not running**
+
 ```bash
 # Check Postgres is healthy
 docker-compose logs postgres
@@ -242,6 +239,7 @@ npm run db:reset
 ```
 
 ### **Services not communicating**
+
 ```bash
 # Check DNS/networking
 curl http://localhost:3001/health  # Should return { status: 'ok' }
@@ -251,6 +249,7 @@ cat services/api-gateway/src/main.ts | grep proxy
 ```
 
 ### **JWT token errors**
+
 ```bash
 # Regenerate JWT keys in AWS Secrets Manager
 aws secretsmanager create-secret \
@@ -263,24 +262,28 @@ aws secretsmanager create-secret \
 ## Testing Workflow
 
 ### **Unit Tests**
+
 ```bash
 npm run test -- services/auth-service
 # Runs Jest on auth-service with watch mode
 ```
 
 ### **Integration Tests**
+
 ```bash
 npm run test:integration
 # Tests API endpoints against live services
 ```
 
 ### **Smoke Tests** (after deployment)
+
 ```bash
 npm run test:smoke
 # Quick health checks + basic transaction flow
 ```
 
 ### **Load Testing**
+
 ```bash
 # Use k6 or Apache Bench
 ab -n 1000 -c 10 http://localhost:3000/health
@@ -291,6 +294,7 @@ ab -n 1000 -c 10 http://localhost:3000/health
 ## Deployment (AWS)
 
 ### **Dev Environment**
+
 ```bash
 cd infrastructure/terraform
 terraform init -backend-config="key=dev/terraform.tfstate"
@@ -304,6 +308,7 @@ kubectl apply -f ../k8s/
 ```
 
 ### **Production**
+
 ```bash
 # Push code to main branch
 git push origin main
@@ -322,6 +327,7 @@ git push origin main
 ## Monitoring & Logs
 
 ### **Local Logs**
+
 ```bash
 # View service logs
 npm run dev -- --filter=auth-service
@@ -332,6 +338,7 @@ docker-compose logs -f redis
 ```
 
 ### **Production (AWS CloudWatch)**
+
 ```bash
 # Logs stored automatically in CloudWatch
 # View via AWS console or CLI
@@ -359,7 +366,7 @@ aws logs filter-log-events \
 
 1. **Code questions** → Read service comments (e.g., `services/payment-service/src/main.ts`)
 2. **Architecture** → See PRODUCTION_ROADMAP.md or BACKEND_SCAFFOLDING_GUIDE.md
-3. **Deployment** → Check infrastructure/terraform/*.tf files
+3. **Deployment** → Check infrastructure/terraform/\*.tf files
 4. **Errors** → Search for error code in packages/shared-errors/src/index.ts
 5. **API docs** → Each service has route comments explaining request/response
 

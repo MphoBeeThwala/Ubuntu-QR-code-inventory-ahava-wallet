@@ -8,6 +8,7 @@
 
 import { Request, Response, NextFunction } from "express";
 import * as jwt from "jsonwebtoken";
+import { parseBearerToken } from "@ahava/shared-crypto";
 import {
   AhavaError,
   AhavaErrorCode,
@@ -82,8 +83,8 @@ export function jwtAuthMiddleware(
     return;
   }
 
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+  const token = parseBearerToken(req.headers.authorization);
+  if (!token) {
     const err = new AhavaError(
       AhavaErrorCode.AUTH_UNAUTHORIZED,
       "Authorization header missing or malformed",
@@ -92,8 +93,6 @@ export function jwtAuthMiddleware(
     res.status(err.statusCode).json(createErrorResponse(err));
     return;
   }
-
-  const token = authHeader.slice(7);
 
   try {
     const payload = jwt.verify(token, cachedPublicKey, {

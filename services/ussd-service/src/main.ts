@@ -14,9 +14,10 @@
  *   Mini Stmt  → last 5 transactions → back to menu
  */
 
-import express, { Request, Response } from "express";
+import express, { NextFunction, Request, Response } from "express";
 import { PrismaClient } from "@prisma/client";
 import { createSuccessResponse } from "@ahava/shared-errors";
+import { parseZarToCents } from "@ahava/shared-types";
 import { v4 as uuidv4 } from "uuid";
 import africastalking from "africastalking";
 
@@ -34,6 +35,13 @@ const AT = africastalking(atCredentials);
 // Africa's Talking sends form-encoded POST bodies
 app.use(express.urlencoded({ extended: false }));
 app.use(express.json());
+app.use((req: Request, res: Response, next: NextFunction) => {
+  const incoming = req.get("X-Request-ID");
+  (req as any).id =
+    typeof incoming === "string" && incoming.length > 0 ? incoming : uuidv4();
+  res.setHeader("X-Request-ID", (req as any).id);
+  next();
+});
 
 // ─────────────────────────────────────────────────────────────────
 // TYPES
@@ -132,14 +140,19 @@ async function routeUssd(req: UssdRequest): Promise<string> {
 
     if (steps[2] === "0") return CON(MAIN_MENU);
 
-    const amountRand = parseFloat(steps[2]);
-    if (isNaN(amountRand) || amountRand <= 0) {
+    let amountCents: number;
+    try {
+      amountCents = parseZarToCents(steps[2]);
+    } catch {
+      return CON("Invalid amount.\n\n1. Try again\n2. Main Menu");
+    }
+    if (amountCents <= 0) {
       return CON("Invalid amount.\n\n1. Try again\n2. Main Menu");
     }
 
     if (depth === 3) {
       return CON(
-        `Confirm transfer:\nTo: ${recipientWalletNumber}\nAmount: R${amountRand.toFixed(2)}\n\n1. Confirm\n2. Cancel`,
+        `Confirm transfer:\nTo: ${recipientWalletNumber}\nAmount: ${formatRand(amountCents)}\n\n1. Confirm\n2. Cancel`,
       );
     }
 
@@ -148,7 +161,7 @@ async function routeUssd(req: UssdRequest): Promise<string> {
         const result = await processSend(
           phoneNumber,
           recipientWalletNumber,
-          amountRand,
+          amountCents,
         );
         return END(result);
       }
@@ -173,14 +186,19 @@ async function routeUssd(req: UssdRequest): Promise<string> {
 
     if (steps[2] === "0") return CON(MAIN_MENU);
 
-    const airtimeAmount = parseFloat(steps[2]);
-    if (isNaN(airtimeAmount) || airtimeAmount <= 0) {
+    let airtimeAmountCents: number;
+    try {
+      airtimeAmountCents = parseZarToCents(steps[2]);
+    } catch {
+      return CON("Invalid amount.\n\n1. Try again\n2. Main Menu");
+    }
+    if (airtimeAmountCents <= 0) {
       return CON("Invalid amount.\n\n1. Try again\n2. Main Menu");
     }
 
     if (depth === 3) {
       return CON(
-        `Confirm airtime:\nPhone: ${airtimePhone}\nAmount: R${airtimeAmount.toFixed(2)}\n\n1. Confirm\n2. Cancel`,
+        `Confirm airtime:\nPhone: ${airtimePhone}\nAmount: ${formatRand(airtimeAmountCents)}\n\n1. Confirm\n2. Cancel`,
       );
     }
 
@@ -189,7 +207,7 @@ async function routeUssd(req: UssdRequest): Promise<string> {
         const result = await processAirtime(
           phoneNumber,
           airtimePhone,
-          airtimeAmount,
+          airtimeAmountCents,
         );
         return END(result);
       }
@@ -273,7 +291,7 @@ async function getMiniStatement(phoneNumber: string): Promise<string | null> {
 async function processSend(
   senderPhone: string,
   recipientWalletNumber: string,
-  amountRand: number,
+  amountCents: number,
 ): Promise<string> {
   try {
     const senderWallet = await getWalletByPhone(senderPhone);
@@ -283,8 +301,6 @@ async function processSend(
       where: { walletNumber: recipientWalletNumber },
     });
     if (!recipientWallet) return "Recipient wallet not found.";
-
-    const amountCents = Math.round(amountRand * 100);
 
     if (Number(senderWallet.balance) < amountCents) {
       return `Insufficient funds.\nBalance: ${formatRand(Number(senderWallet.balance))}`;
@@ -338,7 +354,7 @@ async function processSend(
       }),
     ]);
 
-    return `Transfer successful!\nSent R${amountRand.toFixed(2)} to ${recipientWalletNumber}.\n\nNew balance: ${formatRand(Number(senderWallet.balance) - amountCents)}`;
+    return `Transfer successful!\nSent ${formatRand(amountCents)} to ${recipientWalletNumber}.\n\nNew balance: ${formatRand(Number(senderWallet.balance) - amountCents)}`;
   } catch (err) {
     console.error("[ussd-service] send error:", err);
     return "Transfer failed. Please try again or contact support.";
@@ -348,13 +364,11 @@ async function processSend(
 async function processAirtime(
   payerPhone: string,
   recipientPhone: string,
-  amountRand: number,
+  amountCents: number,
 ): Promise<string> {
   try {
     const payerWallet = await getWalletByPhone(payerPhone);
     if (!payerWallet) return "Account not found.";
-
-    const amountCents = Math.round(amountRand * 100);
 
     if (Number(payerWallet.balance) < amountCents) {
       return `Insufficient funds.\nBalance: ${formatRand(Number(payerWallet.balance))}`;
@@ -383,22 +397,23 @@ async function processAirtime(
     ]);
 
     if ((process.env.NODE_ENV || "").toLowerCase() === "test") {
-      return `Airtime sent!\nR${amountRand.toFixed(2)} airtime sent to ${recipientPhone}.\n\nNew balance: ${formatRand(Number(payerWallet.balance) - amountCents)}`;
+      return `Airtime sent!\n${formatRand(amountCents)} airtime sent to ${recipientPhone}.\n\nNew balance: ${formatRand(Number(payerWallet.balance) - amountCents)}`;
     }
 
     // Call Africa's Talking Airtime API
     const airtime = (AT as any).AIRTIME;
+    const amountZar = (amountCents / 100).toFixed(2);
     await airtime.send({
       recipients: [
         {
           phoneNumber: recipientPhone,
-          amount: amountRand,
+          amount: amountZar,
           currencyCode: "ZAR",
         },
       ],
     });
 
-    return `Airtime sent!\nR${amountRand.toFixed(2)} airtime sent to ${recipientPhone}.\n\nNew balance: ${formatRand(Number(payerWallet.balance) - amountCents)}`;
+    return `Airtime sent!\n${formatRand(amountCents)} airtime sent to ${recipientPhone}.\n\nNew balance: ${formatRand(Number(payerWallet.balance) - amountCents)}`;
   } catch (err) {
     console.error("[ussd-service] airtime error:", err);
     return "Airtime purchase failed. Please try again.";
@@ -409,8 +424,13 @@ async function processAirtime(
 // ROUTES
 // ─────────────────────────────────────────────────────────────────
 
-app.get("/health", (_req, res) => {
-  res.json(createSuccessResponse({ status: "ok", service: "ussd-service" }));
+app.get("/health", (req, res) => {
+  res.json(
+    createSuccessResponse(
+      { status: "ok", service: "ussd-service" },
+      (req as any).id,
+    ),
+  );
 });
 
 /**

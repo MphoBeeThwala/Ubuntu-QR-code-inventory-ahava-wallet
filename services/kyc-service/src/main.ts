@@ -23,13 +23,17 @@ const redisConnection = {
 
 app.use(express.json());
 app.use((req: Request, res: Response, next: NextFunction) => {
-  req.id = uuidv4();
+  const incoming = req.get("X-Request-ID");
+  req.id =
+    typeof incoming === "string" && incoming.length > 0 ? incoming : uuidv4();
   res.setHeader("X-Request-ID", req.id);
   next();
 });
 
 app.get("/health", (req, res) => {
-  res.json(createSuccessResponse({ status: "ok", service: "kyc-service" }));
+  res.json(
+    createSuccessResponse({ status: "ok", service: "kyc-service" }, req.id),
+  );
 });
 
 // GET /kyc/user/:userId - Get KYC status
@@ -56,7 +60,7 @@ app.get(
         );
       }
 
-      res.json(createSuccessResponse({ kyc: user }));
+      res.json(createSuccessResponse({ kyc: user }, req.id));
     } catch (error) {
       next(error);
     }
@@ -119,7 +123,7 @@ app.post(
           console.error("[kyc-service] notification publish failed:", e),
         );
 
-      res.status(201).json(createSuccessResponse({ document: doc }));
+      res.status(201).json(createSuccessResponse({ document: doc }, req.id));
     } catch (error) {
       next(error);
     }
@@ -192,7 +196,7 @@ app.post(
         serviceId: "kyc-service",
       });
 
-      res.json(createSuccessResponse({ user: updated }));
+      res.json(createSuccessResponse({ user: updated }, req.id));
     } catch (error) {
       next(error);
     }

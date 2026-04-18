@@ -77,7 +77,9 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 
 // Request ID tracking (must be first)
 app.use((req: Request, res: Response, next: NextFunction) => {
-  req.id = uuidv4();
+  const incoming = req.get("X-Request-ID");
+  req.id =
+    typeof incoming === "string" && incoming.length > 0 ? incoming : uuidv4();
   res.setHeader("X-Request-ID", req.id);
   next();
 });
@@ -91,9 +93,14 @@ app.use((req: Request, _res: Response, next: NextFunction) => {
 });
 
 // Helper function for log redaction
-function redactLog(data: any): any {
-  if (!data) return data;
-  const redacted = { ...data };
+function redactLog(data: unknown): unknown {
+  if (data == null) return data;
+  if (Array.isArray(data)) return data.map(redactLog);
+  if (typeof data !== "object") return data;
+
+  const redacted: Record<string, unknown> = {
+    ...(data as Record<string, unknown>),
+  };
   const sensitiveKeys = [
     "password",
     "pin",
@@ -162,12 +169,15 @@ app.use(jwtAuthMiddleware);
 // Health check — no auth required
 app.get("/health", (req: Request, res: Response) => {
   res.json(
-    createSuccessResponse({
-      status: "ok",
-      timestamp: new Date().toISOString(),
-      uptime: process.uptime(),
-      service: "api-gateway",
-    }),
+    createSuccessResponse(
+      {
+        status: "ok",
+        timestamp: new Date().toISOString(),
+        uptime: process.uptime(),
+        service: "api-gateway",
+      },
+      req.id,
+    ),
   );
 });
 

@@ -36,7 +36,9 @@ app.use(express.json());
 
 // Request ID middleware
 app.use((req: Request, res: Response, next: NextFunction) => {
-  req.id = uuidv4();
+  const incoming = req.get("X-Request-ID");
+  req.id =
+    typeof incoming === "string" && incoming.length > 0 ? incoming : uuidv4();
   res.setHeader("X-Request-ID", req.id);
   next();
 });
@@ -47,7 +49,9 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 
 // Health check
 app.get("/health", (req, res) => {
-  res.json(createSuccessResponse({ status: "ok", service: "auth-service" }));
+  res.json(
+    createSuccessResponse({ status: "ok", service: "auth-service" }, req.id),
+  );
 });
 
 // POST /auth/register
@@ -191,17 +195,20 @@ app.post(
       void sendSms(phoneNumber, welcomeMessage(walletNumber));
 
       res.status(201).json(
-        createSuccessResponse({
-          userId: user.id,
-          walletId: wallet.id,
-          accessToken,
-          refreshToken: refreshTokenString,
-          user: {
-            phoneNumber: user.phoneNumber,
-            kycTier: user.kycTier,
-            preferredLanguage: user.preferredLanguage,
+        createSuccessResponse(
+          {
+            userId: user.id,
+            walletId: wallet.id,
+            accessToken,
+            refreshToken: refreshTokenString,
+            user: {
+              phoneNumber: user.phoneNumber,
+              kycTier: user.kycTier,
+              preferredLanguage: user.preferredLanguage,
+            },
           },
-        }),
+          req.id,
+        ),
       );
     } catch (error) {
       next(error);
@@ -361,19 +368,22 @@ app.post(
       });
 
       res.json(
-        createSuccessResponse({
-          userId: user.id,
-          accessToken,
-          refreshToken: refreshTokenString,
-          user: {
-            phoneNumber: user.phoneNumber,
-            kycTier: user.kycTier,
+        createSuccessResponse(
+          {
+            userId: user.id,
+            accessToken,
+            refreshToken: refreshTokenString,
+            user: {
+              phoneNumber: user.phoneNumber,
+              kycTier: user.kycTier,
+            },
+            ...(wallet && {
+              walletId: wallet.id,
+              walletNumber: wallet.walletNumber,
+            }),
           },
-          ...(wallet && {
-            walletId: wallet.id,
-            walletNumber: wallet.walletNumber,
-          }),
-        }),
+          req.id,
+        ),
       );
     } catch (error) {
       next(error);
@@ -452,9 +462,12 @@ app.post(
       );
 
       res.json(
-        createSuccessResponse({
-          accessToken: newAccessToken,
-        }),
+        createSuccessResponse(
+          {
+            accessToken: newAccessToken,
+          },
+          req.id,
+        ),
       );
     } catch (error) {
       next(error);
@@ -498,7 +511,9 @@ app.post(
         serviceId: "auth-service",
       });
 
-      res.json(createSuccessResponse({ message: "Logged out successfully" }));
+      res.json(
+        createSuccessResponse({ message: "Logged out successfully" }, req.id),
+      );
     } catch (error) {
       next(error);
     }
@@ -557,7 +572,9 @@ app.post(
         deviceId,
       });
 
-      res.json(createSuccessResponse({ message: "Device bound successfully" }));
+      res.json(
+        createSuccessResponse({ message: "Device bound successfully" }, req.id),
+      );
     } catch (error) {
       next(error);
     }

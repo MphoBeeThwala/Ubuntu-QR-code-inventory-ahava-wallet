@@ -52,14 +52,18 @@ function serializeWallet(w: Record<string, unknown>) {
 app.use(express.json());
 
 app.use((req: Request, res: Response, next: NextFunction) => {
-  req.id = uuidv4();
+  const incoming = req.get("X-Request-ID");
+  req.id =
+    typeof incoming === "string" && incoming.length > 0 ? incoming : uuidv4();
   res.setHeader("X-Request-ID", req.id);
   next();
 });
 
 // Health check
 app.get("/health", (req, res) => {
-  res.json(createSuccessResponse({ status: "ok", service: "wallet-service" }));
+  res.json(
+    createSuccessResponse({ status: "ok", service: "wallet-service" }, req.id),
+  );
 });
 
 // POST /wallets - Create a new wallet for a user
@@ -157,7 +161,10 @@ app.post(
       res
         .status(201)
         .json(
-          createSuccessResponse({ wallet: serializeWallet(wallet as any) }),
+          createSuccessResponse(
+            { wallet: serializeWallet(wallet as any) },
+            req.id,
+          ),
         );
     } catch (error) {
       next(error);
@@ -196,13 +203,16 @@ app.get(
       }
 
       res.json(
-        createSuccessResponse({
-          wallet: {
-            id: wallet.id,
-            walletNumber: wallet.walletNumber,
-            holderName: wallet.user?.fullName ?? wallet.walletNumber,
+        createSuccessResponse(
+          {
+            wallet: {
+              id: wallet.id,
+              walletNumber: wallet.walletNumber,
+              holderName: wallet.user?.fullName ?? wallet.walletNumber,
+            },
           },
-        }),
+          req.id,
+        ),
       );
     } catch (error) {
       next(error);
@@ -228,7 +238,10 @@ app.get(
       }
 
       res.json(
-        createSuccessResponse({ wallet: serializeWallet(wallet as any) }),
+        createSuccessResponse(
+          { wallet: serializeWallet(wallet as any) },
+          req.id,
+        ),
       );
     } catch (error) {
       next(error);
@@ -266,16 +279,19 @@ app.get(
       });
 
       res.json(
-        createSuccessResponse({
-          transactions: transactions.map((t: any) => ({
-            ...t,
-            amount: t.amount?.toString(),
-            feeAmount: t.feeAmount?.toString(),
-            netAmount: t.netAmount?.toString(),
-            balanceBefore: t.balanceBefore?.toString(),
-            balanceAfter: t.balanceAfter?.toString(),
-          })),
-        }),
+        createSuccessResponse(
+          {
+            transactions: transactions.map((t: any) => ({
+              ...t,
+              amount: t.amount?.toString(),
+              feeAmount: t.feeAmount?.toString(),
+              netAmount: t.netAmount?.toString(),
+              balanceBefore: t.balanceBefore?.toString(),
+              balanceAfter: t.balanceAfter?.toString(),
+            })),
+          },
+          req.id,
+        ),
       );
     } catch (error) {
       next(error);
@@ -329,7 +345,10 @@ app.post(
       });
 
       res.json(
-        createSuccessResponse({ wallet: serializeWallet(updated as any) }),
+        createSuccessResponse(
+          { wallet: serializeWallet(updated as any) },
+          req.id,
+        ),
       );
     } catch (error) {
       next(error);
@@ -367,15 +386,18 @@ app.get(
         Number(wallet.reservedBalance);
 
       res.json(
-        createSuccessResponse({
-          balance: {
-            available: Math.max(0, available).toString(),
-            pending: wallet.pendingBalance.toString(),
-            reserved: wallet.reservedBalance.toString(),
-            total: wallet.balance.toString(),
-            currency: wallet.currency,
+        createSuccessResponse(
+          {
+            balance: {
+              available: Math.max(0, available).toString(),
+              pending: wallet.pendingBalance.toString(),
+              reserved: wallet.reservedBalance.toString(),
+              total: wallet.balance.toString(),
+              currency: wallet.currency,
+            },
           },
-        }),
+          req.id,
+        ),
       );
     } catch (error) {
       next(error);
@@ -410,7 +432,10 @@ app.post(
       });
 
       res.json(
-        createSuccessResponse({ wallet: serializeWallet(wallet as any) }),
+        createSuccessResponse(
+          { wallet: serializeWallet(wallet as any) },
+          req.id,
+        ),
       );
     } catch (error) {
       next(error);
@@ -436,7 +461,10 @@ app.post(
       });
 
       res.json(
-        createSuccessResponse({ wallet: serializeWallet(wallet as any) }),
+        createSuccessResponse(
+          { wallet: serializeWallet(wallet as any) },
+          req.id,
+        ),
       );
     } catch (error) {
       next(error);
@@ -520,15 +548,18 @@ app.post(
       });
 
       res.status(201).json(
-        createSuccessResponse({
-          qrId: qr.id,
-          qrHash: qr.qrHash,
-          qrType: qr.qrType,
-          qrPayload: qr.qrPayload,
-          amountCents: qr.amountCents ? Number(qr.amountCents) : null,
-          expiresAt: qr.expiresAt?.toISOString() ?? null,
-          deepLink: `ahava://pay?qr=${qr.qrHash}`,
-        }),
+        createSuccessResponse(
+          {
+            qrId: qr.id,
+            qrHash: qr.qrHash,
+            qrType: qr.qrType,
+            qrPayload: qr.qrPayload,
+            amountCents: qr.amountCents ? Number(qr.amountCents) : null,
+            expiresAt: qr.expiresAt?.toISOString() ?? null,
+            deepLink: `ahava://pay?qr=${qr.qrHash}`,
+          },
+          req.id,
+        ),
       );
     } catch (error) {
       next(error);
@@ -573,15 +604,18 @@ app.get(
       }
 
       res.json(
-        createSuccessResponse({
-          qrId: qr.id,
-          qrType: qr.qrType,
-          walletNumber: qr.wallet.walletNumber,
-          amountCents: qr.amountCents ? Number(qr.amountCents) : null,
-          description: qr.description,
-          expiresAt: qr.expiresAt?.toISOString() ?? null,
-          usageCount: qr.usageCount,
-        }),
+        createSuccessResponse(
+          {
+            qrId: qr.id,
+            qrType: qr.qrType,
+            walletNumber: qr.wallet.walletNumber,
+            amountCents: qr.amountCents ? Number(qr.amountCents) : null,
+            description: qr.description,
+            expiresAt: qr.expiresAt?.toISOString() ?? null,
+            usageCount: qr.usageCount,
+          },
+          req.id,
+        ),
       );
     } catch (error) {
       next(error);
@@ -759,12 +793,15 @@ app.post(
       ]);
 
       res.status(201).json(
-        createSuccessResponse({
-          transactionId: debitTxn.id,
-          amountCents: payAmount,
-          receiverWalletNumber: receiverWallet.walletNumber,
-          qrType: qr.qrType,
-        }),
+        createSuccessResponse(
+          {
+            transactionId: debitTxn.id,
+            amountCents: payAmount,
+            receiverWalletNumber: receiverWallet.walletNumber,
+            qrType: qr.qrType,
+          },
+          req.id,
+        ),
       );
 
       // Fire-and-forget SMS notifications — never blocks the response

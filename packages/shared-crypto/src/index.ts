@@ -50,6 +50,14 @@ export async function verifyPin(pin: string, hash: string): Promise<boolean> {
   }
 }
 
+export function parseBearerToken(authorizationHeader?: string): string | null {
+  if (!authorizationHeader) return null;
+  const match = authorizationHeader.match(/^Bearer\s+(.+)$/i);
+  if (!match) return null;
+  const token = match[1]?.trim();
+  return token && token.length > 0 ? token : null;
+}
+
 // ─────────────────────────────────────────────────────────────────
 // JWT SIGNING/VERIFICATION
 // ─────────────────────────────────────────────────────────────────
@@ -330,6 +338,7 @@ export function generateDeviceFingerprint(
 export default {
   hashPin,
   verifyPin,
+  parseBearerToken,
   generateAccessToken,
   generateRefreshToken,
   verifyJWT,

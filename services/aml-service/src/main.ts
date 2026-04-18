@@ -122,18 +122,23 @@ amlWorker.on("failed", (job, err) => {
 
 app.use(express.json());
 app.use((req: Request, res: Response, next: NextFunction) => {
-  req.id = uuidv4();
+  const incoming = req.get("X-Request-ID");
+  req.id =
+    typeof incoming === "string" && incoming.length > 0 ? incoming : uuidv4();
   res.setHeader("X-Request-ID", req.id);
   next();
 });
 
-app.get("/health", (_req, res) => {
+app.get("/health", (req, res) => {
   res.json(
-    createSuccessResponse({
-      status: "ok",
-      service: "aml-service",
-      worker: amlWorker.isRunning() ? "running" : "stopped",
-    }),
+    createSuccessResponse(
+      {
+        status: "ok",
+        service: "aml-service",
+        worker: amlWorker.isRunning() ? "running" : "stopped",
+      },
+      req.id,
+    ),
   );
 });
 
@@ -192,7 +197,7 @@ app.post(
         });
       }
 
-      res.status(201).json(createSuccessResponse({ flag }));
+      res.status(201).json(createSuccessResponse({ flag }, req.id));
     } catch (error) {
       next(error);
     }
@@ -214,7 +219,7 @@ app.get(
         take: 100,
       });
 
-      res.json(createSuccessResponse({ flags, total: flags.length }));
+      res.json(createSuccessResponse({ flags, total: flags.length }, req.id));
     } catch (error) {
       next(error);
     }
@@ -261,7 +266,7 @@ app.post(
 
       logger.warn("STR filed", { flagId, strReference });
 
-      res.json(createSuccessResponse({ flag, strReference }));
+      res.json(createSuccessResponse({ flag, strReference }, req.id));
     } catch (error) {
       next(error);
     }

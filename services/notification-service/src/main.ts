@@ -223,22 +223,24 @@ notificationWorker.on("failed", (job, err) => {
 
 const app = express();
 app.use(express.json());
-app.use((req: Request, _res: Response, next: NextFunction) => {
-  req.id = uuidv4();
-  next();
-});
-app.use((_req: Request, res: Response, next: NextFunction) => {
-  res.setHeader("X-Request-ID", _req.id || uuidv4());
+app.use((req: Request, res: Response, next: NextFunction) => {
+  const incoming = req.get("X-Request-ID");
+  req.id =
+    typeof incoming === "string" && incoming.length > 0 ? incoming : uuidv4();
+  res.setHeader("X-Request-ID", req.id);
   next();
 });
 
-app.get("/health", (_req: Request, res: Response) => {
+app.get("/health", (req: Request, res: Response) => {
   res.json(
-    createSuccessResponse({
-      status: "ok",
-      service: "notification-service",
-      worker: notificationWorker.isRunning() ? "running" : "stopped",
-    }),
+    createSuccessResponse(
+      {
+        status: "ok",
+        service: "notification-service",
+        worker: notificationWorker.isRunning() ? "running" : "stopped",
+      },
+      req.id,
+    ),
   );
 });
 
@@ -302,10 +304,13 @@ app.post(
       await queue.close();
 
       res.status(201).json(
-        createSuccessResponse({
-          notificationId: notification.id,
-          status: "PENDING",
-        }),
+        createSuccessResponse(
+          {
+            notificationId: notification.id,
+            status: "PENDING",
+          },
+          req.id,
+        ),
       );
     } catch (error) {
       next(error);

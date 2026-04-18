@@ -63,3 +63,9 @@ override.tf.json
 *_override.tf.json
 tfplan
 crash.log
+
+# Local logs
+auth-sms-*.log
+
+# Local backups
+ahava-backup*/

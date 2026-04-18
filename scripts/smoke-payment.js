@@ -2,38 +2,110 @@
 // scripts/smoke-payment.js
 // Smoke test for the Ahava backend payment flow (via API gateway).
 // Usage:
-//   SMOKE_SENDER_WALLET_NUMBER=AHV-0000-0001 \
-//   SMOKE_RECEIVER_WALLET_NUMBER=AHV-0000-0002 \
+//   SMOKE_SENDER_WALLET_NUMBER=AHV-TUMI-3321-8894 \
+//   SMOKE_RECEIVER_WALLET_NUMBER=AHV-GWED-7734-2291 \
 //   node scripts/smoke-payment.js
 
-const BASE_URL = process.env.SMOKE_API_BASE_URL || "http://localhost:6000";
-const senderWalletNumber = process.env.SMOKE_SENDER_WALLET_NUMBER;
-const receiverWalletNumber = process.env.SMOKE_RECEIVER_WALLET_NUMBER;
+const crypto = require("crypto");
+const axios = require("axios");
+
+function getBaseUrl() {
+  const raw = process.env.SMOKE_API_BASE_URL;
+  const fallback = "http://localhost:6000";
+  const trimmed = (raw && raw.length ? raw : fallback).trim();
+  const normalised = trimmed.replace(/\/+$/, "");
+  new URL(normalised);
+  return normalised;
+}
+
+const BASE_URL = getBaseUrl();
+const senderWalletNumber =
+  process.env.SMOKE_SENDER_WALLET_NUMBER || "AHV-TUMI-3321-8894";
+const receiverWalletNumber =
+  process.env.SMOKE_RECEIVER_WALLET_NUMBER || "AHV-GWED-7734-2291";
+const loginPhoneNumber = process.env.SMOKE_LOGIN_PHONE || "+27799999999";
+const loginPin = process.env.SMOKE_LOGIN_PIN || "1234";
+const deviceId = process.env.SMOKE_DEVICE_ID || "smoke-test";
 const amountCents = Number(process.env.SMOKE_AMOUNT_CENTS || "1000");
 const idempotencyKey = process.env.SMOKE_IDEMPOTENCY_KEY || crypto.randomUUID();
 
-if (!senderWalletNumber || !receiverWalletNumber) {
-  console.error(
-    "Missing required env vars. Set SMOKE_SENDER_WALLET_NUMBER and SMOKE_RECEIVER_WALLET_NUMBER."
-  );
-  process.exit(1);
+async function fetchJson(url, opts = {}) {
+  const method = opts.method || "GET";
+  const headers = opts.headers || {};
+  let data;
+  if (opts.body !== undefined) {
+    try {
+      data = typeof opts.body === "string" ? JSON.parse(opts.body) : opts.body;
+    } catch {
+      data = opts.body;
+    }
+  }
+  const response = await axios({
+    url,
+    method,
+    headers,
+    data,
+    timeout: 15000,
+    validateStatus: () => true,
+  });
+  const res = {
+    ok: response.status >= 200 && response.status < 300,
+    status: response.status,
+  };
+  const parsed =
+    typeof response.data === "string"
+      ? (() => {
+          try {
+            return JSON.parse(response.data);
+          } catch {
+            throw new Error(`Invalid JSON from ${url}: ${response.data}`);
+          }
+        })()
+      : response.data;
+  return { res, data: parsed };
 }
 
-async function fetchJson(url, opts = {}) {
-  const res = await fetch(url, opts);
-  const text = await res.text();
-  let data;
-  try {
-    data = JSON.parse(text);
-  } catch (err) {
-    throw new Error(`Invalid JSON from ${url}: ${text}`);
+async function login() {
+  const url = new URL("/auth/login", BASE_URL).toString();
+  const body = {
+    phoneNumber: loginPhoneNumber,
+    pin: loginPin,
+    deviceId,
+    deviceName: "smoke-test",
+    userAgent: "smoke-test",
+    ipAddress: "127.0.0.1",
+  };
+
+  const { res, data } = await fetchJson(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Device-Id": deviceId },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    throw new Error(`Login failed (${res.status}): ${JSON.stringify(data)}`);
   }
-  return { res, data };
+  const accessToken = data?.data?.accessToken;
+  if (!accessToken) {
+    throw new Error(
+      `Login response missing data.accessToken: ${JSON.stringify(data)}`,
+    );
+  }
+  return accessToken;
 }
 
 async function lookupWallet(walletNumber) {
-  const url = `${BASE_URL}/wallets/lookup?walletNumber=${encodeURIComponent(walletNumber)}`;
-  const { res, data } = await fetchJson(url, { method: "GET" });
+  const url = new URL(
+    `/wallets/lookup?walletNumber=${encodeURIComponent(walletNumber)}`,
+    BASE_URL,
+  ).toString();
+  const { res, data } = await fetchJson(url, {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${globalThis.__SMOKE_TOKEN}`,
+      "X-Device-Id": deviceId,
+    },
+  });
   if (!res.ok) {
     throw new Error(`Lookup failed (${res.status}): ${JSON.stringify(data)}`);
   }
@@ -44,21 +116,25 @@ async function lookupWallet(walletNumber) {
 }
 
 async function createPayment(senderId, receiverId) {
-  const url = `${BASE_URL}/payments`;
+  const url = new URL("/payments", BASE_URL).toString();
   const body = {
     senderWalletId: senderId,
     receiverWalletId: receiverId,
     amountCents,
     description: "Smoke test payment",
     idempotencyKey,
-    paymentMethod: "AHAVA_WALLET",
-    deviceId: "smoke-test",
+    paymentMethod: "UBUNTUPAY_WALLET",
+    deviceId,
     ipAddress: "127.0.0.1",
   };
 
   const { res, data } = await fetchJson(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${globalThis.__SMOKE_TOKEN}`,
+      "X-Device-Id": deviceId,
+    },
     body: JSON.stringify(body),
   });
 
@@ -69,7 +145,7 @@ async function createPayment(senderId, receiverId) {
   console.log(`Using gateway base URL: ${BASE_URL}`);
   console.log("1) Checking gateway health...");
   try {
-    const { res, data } = await fetchJson(`${BASE_URL}/health`);
+    const { res, data } = await fetchJson(new URL("/health", BASE_URL).toString());
     if (!res.ok) {
       throw new Error(`Health check failed (${res.status}): ${JSON.stringify(data)}`);
     }
@@ -79,15 +155,24 @@ async function createPayment(senderId, receiverId) {
     process.exit(1);
   }
 
-  console.log("\n2) Looking up sender wallet ID...");
+  console.log("\n2) Logging in to get access token...");
+  try {
+    globalThis.__SMOKE_TOKEN = await login();
+    console.log("✔ Logged in.");
+  } catch (err) {
+    console.error("✖ Login failed:", err);
+    process.exit(1);
+  }
+
+  console.log("\n3) Looking up sender wallet ID...");
   const sender = await lookupWallet(senderWalletNumber);
   console.log(`✔ Sender: ${sender.walletNumber} → ${sender.id}`);
 
-  console.log("\n3) Looking up receiver wallet ID...");
+  console.log("\n4) Looking up receiver wallet ID...");
   const receiver = await lookupWallet(receiverWalletNumber);
   console.log(`✔ Receiver: ${receiver.walletNumber} → ${receiver.id}`);
 
-  console.log("\n4) Sending payment (idempotencyKey =", idempotencyKey, ")...");
+  console.log("\n5) Sending payment (idempotencyKey =", idempotencyKey, ")...");
   const { res, data } = await createPayment(sender.id, receiver.id);
   console.log(`→ HTTP ${res.status}`);
   console.log(JSON.stringify(data, null, 2));

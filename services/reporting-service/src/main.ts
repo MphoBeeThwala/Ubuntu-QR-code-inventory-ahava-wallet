@@ -14,14 +14,19 @@ const PORT = process.env.PORT || 6006;
 
 app.use(express.json());
 app.use((req: Request, res: Response, next: NextFunction) => {
-  req.id = uuidv4();
+  const incoming = req.get("X-Request-ID");
+  req.id =
+    typeof incoming === "string" && incoming.length > 0 ? incoming : uuidv4();
   res.setHeader("X-Request-ID", req.id);
   next();
 });
 
 app.get("/health", (req, res) => {
   res.json(
-    createSuccessResponse({ status: "ok", service: "reporting-service" }),
+    createSuccessResponse(
+      { status: "ok", service: "reporting-service" },
+      req.id,
+    ),
   );
 });
 
@@ -55,20 +60,22 @@ app.get(
       });
 
       const totalAmountCents = agg._sum.amount ?? BigInt(0);
-      const vatCollectedCents = BigInt(
-        Math.round(Number(totalAmountCents) * 0.15),
-      );
+      const vatCollectedCents =
+        (totalAmountCents * BigInt(15) + BigInt(50)) / BigInt(100);
 
       res.json(
-        createSuccessResponse({
-          report: {
-            period: { start, end },
-            totalAmountCents: totalAmountCents.toString(),
-            transactionCount: agg._count.id,
-            vatCollectedCents: vatCollectedCents.toString(),
-            currency: "ZAR",
+        createSuccessResponse(
+          {
+            report: {
+              period: { start, end },
+              totalAmountCents: totalAmountCents.toString(),
+              transactionCount: agg._count.id,
+              vatCollectedCents: vatCollectedCents.toString(),
+              currency: "ZAR",
+            },
           },
-        }),
+          req.id,
+        ),
       );
     } catch (error) {
       next(error);
@@ -98,16 +105,19 @@ app.get(
       const totalCredits = credits._sum.amount ?? BigInt(0);
 
       res.json(
-        createSuccessResponse({
-          reconciliation: {
-            totalDebitsCents: totalDebits.toString(),
-            totalCreditsCents: totalCredits.toString(),
-            debitCount: debits._count.id,
-            creditCount: credits._count.id,
-            balanced: totalDebits === totalCredits,
-            discrepancyCents: (totalDebits - totalCredits).toString(),
+        createSuccessResponse(
+          {
+            reconciliation: {
+              totalDebitsCents: totalDebits.toString(),
+              totalCreditsCents: totalCredits.toString(),
+              debitCount: debits._count.id,
+              creditCount: credits._count.id,
+              balanced: totalDebits === totalCredits,
+              discrepancyCents: (totalDebits - totalCredits).toString(),
+            },
           },
-        }),
+          req.id,
+        ),
       );
     } catch (error) {
       next(error);
@@ -174,30 +184,33 @@ app.get(
       ]);
 
       res.json(
-        createSuccessResponse({
-          report: {
-            period: { year: y, month: m + 1, start, end },
-            totalAmountCents: (totalAgg._sum.amount ?? BigInt(0)).toString(),
-            totalTransactions: totalAgg._count.id,
-            uniqueWallets: uniqueUsers.length,
-            largeTransactionCount: largeTransactions.length,
-            largeTransactions: largeTransactions.map(
-              (t: {
-                id: string;
-                amount: bigint;
-                createdAt: Date;
-                wallet: { userId: string };
-              }) => ({
-                id: t.id,
-                amountCents: t.amount.toString(),
-                userId: t.wallet.userId,
-                createdAt: t.createdAt,
-              }),
-            ),
-            generatedAt: new Date().toISOString(),
-            currency: "ZAR",
+        createSuccessResponse(
+          {
+            report: {
+              period: { year: y, month: m + 1, start, end },
+              totalAmountCents: (totalAgg._sum.amount ?? BigInt(0)).toString(),
+              totalTransactions: totalAgg._count.id,
+              uniqueWallets: uniqueUsers.length,
+              largeTransactionCount: largeTransactions.length,
+              largeTransactions: largeTransactions.map(
+                (t: {
+                  id: string;
+                  amount: bigint;
+                  createdAt: Date;
+                  wallet: { userId: string };
+                }) => ({
+                  id: t.id,
+                  amountCents: t.amount.toString(),
+                  userId: t.wallet.userId,
+                  createdAt: t.createdAt,
+                }),
+              ),
+              generatedAt: new Date().toISOString(),
+              currency: "ZAR",
+            },
           },
-        }),
+          req.id,
+        ),
       );
     } catch (error) {
       next(error);

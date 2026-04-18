@@ -25,6 +25,7 @@ import {
   verifyPin,
   generateAccessToken,
   generateRefreshToken,
+  parseBearerToken,
   verifyJWT,
 } from "@ahava/shared-crypto";
 import { writeAuditLog } from "@ahava/shared-audit";
@@ -36,7 +37,9 @@ const PORT = process.env.PORT || 6009;
 app.use(express.json());
 
 app.use((req: Request, res: Response, next: NextFunction) => {
-  req.id = uuidv4();
+  const incoming = req.get("X-Request-ID");
+  req.id =
+    typeof incoming === "string" && incoming.length > 0 ? incoming : uuidv4();
   res.setHeader("X-Request-ID", req.id);
   next();
 });
@@ -62,8 +65,8 @@ async function requireAgentAuth(
   res: Response,
   next: NextFunction,
 ): Promise<void> {
-  const header = req.headers.authorization;
-  if (!header?.startsWith("Bearer ")) {
+  const token = parseBearerToken(req.headers.authorization);
+  if (!token) {
     const err = new AhavaError(
       AhavaErrorCode.AUTH_UNAUTHORIZED,
       "Authorization header missing",
@@ -72,8 +75,6 @@ async function requireAgentAuth(
     res.status(err.statusCode).json(createErrorResponse(err));
     return;
   }
-
-  const token = header.slice(7);
 
   try {
     const payload = await verifyJWT(token);
@@ -105,8 +106,10 @@ async function requireAgentAuth(
 // ROUTES
 // ─────────────────────────────────────────────────────────────────
 
-app.get("/health", (_req, res) => {
-  res.json(createSuccessResponse({ status: "ok", service: "agent-service" }));
+app.get("/health", (req, res) => {
+  res.json(
+    createSuccessResponse({ status: "ok", service: "agent-service" }, req.id),
+  );
 });
 
 // ─── POST /agents/auth/login ──────────────────────────────────────
@@ -189,15 +192,18 @@ app.post(
       });
 
       res.json(
-        createSuccessResponse({
-          accessToken,
-          refreshToken,
-          agentId: agent.id,
-          agentCode: agent.agentCode,
-          businessName: agent.businessName,
-          userId: user.id,
-          email: user.email,
-        }),
+        createSuccessResponse(
+          {
+            accessToken,
+            refreshToken,
+            agentId: agent.id,
+            agentCode: agent.agentCode,
+            businessName: agent.businessName,
+            userId: user.id,
+            email: user.email,
+          },
+          req.id,
+        ),
       );
     } catch (error) {
       next(error);
@@ -236,16 +242,19 @@ app.get(
       }
 
       res.json(
-        createSuccessResponse({
-          agent: {
-            ...serializeBigInts(agent as unknown as Record<string, unknown>),
-            floatWallet: agent.floatWallet
-              ? serializeBigInts(
-                  agent.floatWallet as unknown as Record<string, unknown>,
-                )
-              : null,
+        createSuccessResponse(
+          {
+            agent: {
+              ...serializeBigInts(agent as unknown as Record<string, unknown>),
+              floatWallet: agent.floatWallet
+                ? serializeBigInts(
+                    agent.floatWallet as unknown as Record<string, unknown>,
+                  )
+                : null,
+            },
           },
-        }),
+          req.id,
+        ),
       );
     } catch (error) {
       next(error);
@@ -311,14 +320,17 @@ app.get(
       });
 
       res.json(
-        createSuccessResponse({
-          totalCustomers: 0, // Would need agent-customer linking table
-          activeToday: todayTxns.length,
-          totalTransactionsCents: todayVolume,
-          transactionCount: allTimeTxns,
-          pendingKyc,
-          successRate,
-        }),
+        createSuccessResponse(
+          {
+            totalCustomers: 0, // Would need agent-customer linking table
+            activeToday: todayTxns.length,
+            totalTransactionsCents: todayVolume,
+            transactionCount: allTimeTxns,
+            pendingKyc,
+            successRate,
+          },
+          req.id,
+        ),
       );
     } catch (error) {
       next(error);
@@ -342,7 +354,9 @@ app.get(
       });
 
       if (!agent?.floatWalletId) {
-        return res.json(createSuccessResponse({ transactions: [], total: 0 }));
+        return res.json(
+          createSuccessResponse({ transactions: [], total: 0 }, req.id),
+        );
       }
 
       const [transactions, total] = await Promise.all([
@@ -358,18 +372,21 @@ app.get(
       ]);
 
       res.json(
-        createSuccessResponse({
-          transactions: transactions.map((t) => ({
-            id: t.id,
-            type: t.transactionType,
-            amountCents: Number(t.amount),
-            status: t.status,
-            description: t.description,
-            customerPhone: t.counterpartyWalletId ?? "—",
-            createdAt: t.createdAt.toISOString(),
-          })),
-          total,
-        }),
+        createSuccessResponse(
+          {
+            transactions: transactions.map((t) => ({
+              id: t.id,
+              type: t.transactionType,
+              amountCents: Number(t.amount),
+              status: t.status,
+              description: t.description,
+              customerPhone: t.counterpartyWalletId ?? "—",
+              createdAt: t.createdAt.toISOString(),
+            })),
+            total,
+          },
+          req.id,
+        ),
       );
     } catch (error) {
       next(error);
@@ -486,13 +503,16 @@ app.post(
       ]);
 
       res.status(201).json(
-        createSuccessResponse({
-          transactionId: debitTxn.id,
-          creditTransactionId: creditTxn.id,
-          amountCents,
-          commissionCents,
-          agentCode: agent.agentCode,
-        }),
+        createSuccessResponse(
+          {
+            transactionId: debitTxn.id,
+            creditTransactionId: creditTxn.id,
+            amountCents,
+            commissionCents,
+            agentCode: agent.agentCode,
+          },
+          req.id,
+        ),
       );
     } catch (error) {
       next(error);
@@ -608,13 +628,16 @@ app.post(
       ]);
 
       res.status(201).json(
-        createSuccessResponse({
-          transactionId: debitTxn.id,
-          creditTransactionId: creditTxn.id,
-          amountCents,
-          commissionCents,
-          agentCode: agent.agentCode,
-        }),
+        createSuccessResponse(
+          {
+            transactionId: debitTxn.id,
+            creditTransactionId: creditTxn.id,
+            amountCents,
+            commissionCents,
+            agentCode: agent.agentCode,
+          },
+          req.id,
+        ),
       );
     } catch (error) {
       next(error);
