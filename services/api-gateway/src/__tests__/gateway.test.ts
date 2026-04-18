@@ -73,7 +73,7 @@ describe("API Gateway", () => {
     );
 
     const token = jwt.sign(
-      { userId: "user-1", deviceId: "device-1" },
+      { sub: "user-1", deviceId: "device-1" },
       privateKey.export({ type: "pkcs1", format: "pem" }),
       {
         algorithm: "RS256",

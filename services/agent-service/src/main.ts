@@ -65,7 +65,8 @@ async function requireAgentAuth(
   res: Response,
   next: NextFunction,
 ): Promise<void> {
-  const token = parseBearerToken(req.headers.authorization);
+  const authHeaderValue = req.headers.authorization ?? req.get("Authorization");
+  const token = parseBearerToken(authHeaderValue);
   if (!token) {
     const err = new AhavaError(
       AhavaErrorCode.AUTH_UNAUTHORIZED,
@@ -78,7 +79,7 @@ async function requireAgentAuth(
 
   try {
     const payload = await verifyJWT(token);
-    const userId = payload.userId as string;
+    const userId = (payload.userId ?? payload.sub) as string;
 
     const user = await prisma.user.findUnique({
       where: { id: userId, isDeleted: false },
@@ -92,12 +93,14 @@ async function requireAgentAuth(
     req.userId = userId;
     req.agentId = user.agentProfile.id;
     next();
-  } catch {
-    const err = new AhavaError(
-      AhavaErrorCode.AUTH_UNAUTHORIZED,
-      "Invalid or expired agent session",
-      { requestId: req.id },
-    );
+  } catch (error) {
+    const message =
+      process.env.NODE_ENV === "test" && error instanceof Error
+        ? `Invalid or expired agent session: ${error.message}`
+        : "Invalid or expired agent session";
+    const err = new AhavaError(AhavaErrorCode.AUTH_UNAUTHORIZED, message, {
+      requestId: req.id,
+    });
     res.status(err.statusCode).json(createErrorResponse(err));
   }
 }

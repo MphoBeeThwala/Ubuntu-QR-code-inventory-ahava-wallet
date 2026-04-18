@@ -11,21 +11,36 @@
  */
 
 import request from "supertest";
+import crypto from "crypto";
+import * as jwt from "jsonwebtoken";
 
 // ─── Mocks ────────────────────────────────────────────────────────
 
 const mockVerifyPin = jest.fn();
 const mockGenerateAccessToken = jest.fn();
 const mockGenerateRefreshToken = jest.fn();
-const mockVerifyJWT = jest.fn();
 
-jest.mock("@ahava/shared-crypto", () => ({
-  verifyPin: (...args: unknown[]) => mockVerifyPin(...args),
-  generateAccessToken: (...args: unknown[]) => mockGenerateAccessToken(...args),
-  generateRefreshToken: (...args: unknown[]) =>
-    mockGenerateRefreshToken(...args),
-  verifyJWT: (...args: unknown[]) => mockVerifyJWT(...args),
-}));
+const keyPair = crypto.generateKeyPairSync("rsa", {
+  modulusLength: 2048,
+  publicKeyEncoding: { type: "pkcs1", format: "pem" },
+  privateKeyEncoding: { type: "pkcs1", format: "pem" },
+});
+
+process.env.JWT_PUBLIC_KEY = keyPair.publicKey;
+
+jest.mock("../../../../packages/shared-crypto/src/index.ts", () => {
+  const actual = jest.requireActual(
+    "../../../../packages/shared-crypto/src/index.ts",
+  );
+  return {
+    ...actual,
+    verifyPin: (...args: unknown[]) => mockVerifyPin(...args),
+    generateAccessToken: (...args: unknown[]) =>
+      mockGenerateAccessToken(...args),
+    generateRefreshToken: (...args: unknown[]) =>
+      mockGenerateRefreshToken(...args),
+  };
+});
 
 const mockAgent = {
   id: "agent-001",
@@ -103,7 +118,12 @@ import app from "../main";
 // ─── Helpers ──────────────────────────────────────────────────────
 
 function authHeader() {
-  return { Authorization: "Bearer valid-agent-token" };
+  const token = jwt.sign({ sub: "user-agent-001" }, keyPair.privateKey, {
+    algorithm: "RS256",
+    issuer: "ahava-ewallet",
+    expiresIn: "5m",
+  });
+  return { Authorization: `Bearer ${token}` };
 }
 
 beforeEach(() => {
@@ -112,7 +132,6 @@ beforeEach(() => {
   mockVerifyPin.mockResolvedValue(true);
   mockGenerateAccessToken.mockResolvedValue("agent-access-token");
   mockGenerateRefreshToken.mockResolvedValue("agent-refresh-token");
-  mockVerifyJWT.mockResolvedValue({ userId: "user-agent-001" });
 
   mockPrisma.user.findFirst.mockResolvedValue(mockUser);
   mockPrisma.user.findUnique.mockResolvedValue(mockUser);
@@ -248,8 +267,9 @@ describe("GET /agents/stats", () => {
   });
 
   it("returns 403 when JWT is invalid", async () => {
-    mockVerifyJWT.mockRejectedValue(new Error("invalid token"));
-    const res = await request(app).get("/agents/stats").set(authHeader());
+    const res = await request(app)
+      .get("/agents/stats")
+      .set({ Authorization: "Bearer invalid.jwt.token" });
     expect(res.status).toBe(403);
   });
 

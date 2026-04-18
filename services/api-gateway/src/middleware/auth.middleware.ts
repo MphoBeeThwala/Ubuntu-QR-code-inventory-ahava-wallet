@@ -101,7 +101,7 @@ export function jwtAuthMiddleware(
       audience: "ahava-api",
     }) as Record<string, unknown>;
 
-    req.userId = payload.userId as string;
+    req.userId = (payload.userId ?? payload.sub) as string;
     req.deviceId = payload.deviceId as string;
     next();
   } catch (error) {

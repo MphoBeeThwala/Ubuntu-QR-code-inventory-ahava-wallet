@@ -31,6 +31,8 @@ import { writeAuditLog } from "@ahava/shared-audit";
 const app = express();
 const prisma = new PrismaClient();
 const PORT = process.env.PORT || 6001;
+const getJwtPrivateKey = () =>
+  (process.env.JWT_PRIVATE_KEY || "").replace(/\\n/g, "\n");
 
 app.use(express.json());
 
@@ -147,7 +149,7 @@ app.post(
         user.id,
         deviceId,
         "30d",
-        process.env.JWT_PRIVATE_KEY || "",
+        getJwtPrivateKey(),
       );
 
       const refreshTokenHash = crypto
@@ -176,7 +178,7 @@ app.post(
           deviceId,
         },
         "15m",
-        process.env.JWT_PRIVATE_KEY || "",
+        getJwtPrivateKey(),
       );
 
       await writeAuditLog(prisma, {
@@ -305,7 +307,7 @@ app.post(
         user.id,
         deviceId,
         "30d",
-        process.env.JWT_PRIVATE_KEY || "",
+        getJwtPrivateKey(),
       );
 
       const refreshTokenHash = crypto
@@ -333,7 +335,7 @@ app.post(
           deviceId,
         },
         "15m",
-        process.env.JWT_PRIVATE_KEY || "",
+        getJwtPrivateKey(),
       );
 
       await writeAuditLog(prisma, {
@@ -458,7 +460,7 @@ app.post(
           deviceId,
         },
         "15m",
-        process.env.JWT_PRIVATE_KEY || "",
+        getJwtPrivateKey(),
       );
 
       res.json(

@@ -261,14 +261,20 @@ export async function fetchSecret(
         : null;
 
     if (!value) throw new Error("Empty secret value");
-    secretCache.set(secretName, value);
-    return value;
+    const normalized = value.includes("\\n")
+      ? value.replace(/\\n/g, "\n")
+      : value;
+    secretCache.set(secretName, normalized);
+    return normalized;
   } catch (awsError) {
     // In local/test environments AWS won't be reachable — fall back to env var
     const fallbackValue = envFallback ? process.env[envFallback] : undefined;
     if (fallbackValue) {
-      secretCache.set(secretName, fallbackValue);
-      return fallbackValue;
+      const normalized = fallbackValue.includes("\\n")
+        ? fallbackValue.replace(/\\n/g, "\n")
+        : fallbackValue;
+      secretCache.set(secretName, normalized);
+      return normalized;
     }
     throw new Error(
       `Failed to fetch secret '${secretName}' and no env fallback (${envFallback}) found: ` +

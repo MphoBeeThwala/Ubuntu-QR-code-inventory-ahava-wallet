@@ -5,6 +5,7 @@ import {
   PrismaClient,
   KycTier as PrismaKycTier,
   KycStatus as PrismaKycStatus,
+  DocumentType as PrismaDocumentType,
   WalletType as PrismaWalletType,
   WalletStatus as PrismaWalletStatus,
 } from "@prisma/client";
@@ -61,9 +62,21 @@ export class AuthService {
 
   private async getJwtKeys() {
     if (!this.jwtPrivateKey || !this.jwtPublicKey) {
-      // Keys loaded from AWS Secrets Manager — never from env vars or code
-      this.jwtPrivateKey = await this.secrets.get("/ahava/jwt/private-key");
-      this.jwtPublicKey = await this.secrets.get("/ahava/jwt/public-key");
+      const envPrivate = process.env.JWT_PRIVATE_KEY || process.env.PRIVATE_KEY;
+      const envPublic = process.env.JWT_PUBLIC_KEY || process.env.PUBLIC_KEY;
+
+      if (envPrivate && envPublic) {
+        this.jwtPrivateKey = envPrivate.replace(/\\n/g, "\n");
+        this.jwtPublicKey = envPublic.replace(/\\n/g, "\n");
+      } else {
+        const envName = process.env.NODE_ENV || "dev";
+        this.jwtPrivateKey = await this.secrets.get(
+          `/ahava/${envName}/jwt-private-key`,
+        );
+        this.jwtPublicKey = await this.secrets.get(
+          `/ahava/${envName}/jwt-public-key`,
+        );
+      }
     }
     return { privateKey: this.jwtPrivateKey!, publicKey: this.jwtPublicKey! };
   }
@@ -223,7 +236,7 @@ export class AuthService {
       data: {
         idNumber: encryptedId,
         idNumberHash: idHash,
-        idType: dto.idType as any,
+        idType: dto.idType as PrismaDocumentType,
         kycStatus: PrismaKycStatus.PENDING,
       },
     });
@@ -351,7 +364,7 @@ export class AuthService {
         preferredName: user.preferredName ?? undefined,
         fullName: user.fullName ?? undefined,
         kycTier: user.kycTier as KycTier,
-        kycStatus: user.kycStatus as any,
+        kycStatus: user.kycStatus as KycStatus,
         isMinor: user.isMinor,
         preferredLanguage: user.preferredLanguage,
         createdAt: user.createdAt.toISOString(),
@@ -359,8 +372,8 @@ export class AuthService {
       wallet: {
         id: wallet.id,
         walletNumber: wallet.walletNumber,
-        walletType: wallet.walletType as any,
-        status: wallet.status as any,
+        walletType: wallet.walletType as WalletType,
+        status: wallet.status as WalletStatus,
         kycTier: wallet.kycTier as KycTier,
         balanceCents: Number(wallet.balance),
         pendingBalanceCents: Number(wallet.pendingBalance),
@@ -387,13 +400,13 @@ export class AuthService {
       sub: userId,
       walletId,
       tier,
-      deviceId: deviceHash,
+      deviceId,
     };
 
     const accessToken = jwt.sign(payload, privateKey, {
       algorithm: "RS256",
       expiresIn: JWT_ACCESS_TTL,
-      issuer: "ahava-auth-service",
+      issuer: "ahava-ewallet",
       audience: "ahava-api",
     });
 
