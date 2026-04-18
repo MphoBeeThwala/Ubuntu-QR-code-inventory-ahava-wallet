@@ -165,7 +165,7 @@ export default function RegisterPage() {
             </div>
 
             <p className="text-xs text-gray-500 bg-gray-50 rounded-lg p-3">
-              By creating an account you agree to Ahava's{" "}
+              By creating an account you agree to Ahava&apos;s{" "}
               <a href="#" className="text-ahava-600 hover:underline">
                 Terms of Service
               </a>{" "}

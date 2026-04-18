@@ -165,8 +165,8 @@ export default function KycUpgradePage() {
               Document uploaded
             </h2>
             <p className="text-gray-500 text-sm">
-              We'll review your document within 24–48 hours and notify you when
-              your tier is upgraded.
+              We&apos;ll review your document within 24–48 hours and notify you
+              when your tier is upgraded.
             </p>
             <button
               onClick={() => router.replace("/dashboard")}

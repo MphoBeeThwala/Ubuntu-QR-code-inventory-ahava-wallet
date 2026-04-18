@@ -30,6 +30,7 @@ export default function ScanQrPage() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const rafRef = useRef<number>(0);
+  const startCameraRef = useRef<() => Promise<void>>(async () => {});
 
   const [step, setStep] = useState<Step>("scanning");
   const [cameraError, setCameraError] = useState("");
@@ -78,7 +79,7 @@ export default function ScanQrPage() {
         if (!res.success || !res.data) {
           setLookupError(res.error?.message ?? "QR code not found");
           setStep("scanning");
-          startCamera();
+          void startCameraRef.current();
           return;
         }
         setQrInfo({ qrHash, ...res.data });
@@ -89,7 +90,7 @@ export default function ScanQrPage() {
       } catch {
         setLookupError("Failed to look up QR code");
         setStep("scanning");
-        startCamera();
+        void startCameraRef.current();
       }
     },
     [stopCamera],
@@ -149,9 +150,13 @@ export default function ScanQrPage() {
       router.replace("/auth/login");
       return;
     }
+    startCameraRef.current = startCamera;
+  }, [router, startCamera]);
+
+  useEffect(() => {
     startCamera();
     return () => stopCamera();
-  }, [router, startCamera, stopCamera]); // eslint-disable-line -- startCamera is stable via useCallback
+  }, [router, startCamera, stopCamera]);
 
   // ── Toggle torch ──────────────────────────────────────────────
   const toggleTorch = async () => {
