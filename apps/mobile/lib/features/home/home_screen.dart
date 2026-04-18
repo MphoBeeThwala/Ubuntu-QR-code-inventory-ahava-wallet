@@ -112,7 +112,7 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
               Container(
                 decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.1),
+                  color: Colors.white.withValues(alpha: 26),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: IconButton(
@@ -155,7 +155,7 @@ class _HomeScreenState extends State<HomeScreen> {
               borderRadius: BorderRadius.circular(32),
               boxShadow: [
                 BoxShadow(
-                  color: AhavaColors.navy900.withOpacity(0.15),
+                  color: AhavaColors.navy900.withValues(alpha: 38),
                   blurRadius: 20,
                   offset: const Offset(0, 10),
                 ),
@@ -218,7 +218,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         icon: const Icon(Icons.add, size: 18),
                         label: const Text('Top Up'),
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.white.withOpacity(0.2),
+                          backgroundColor: Colors.white.withValues(alpha: 51),
                           foregroundColor: Colors.white,
                           elevation: 0,
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -233,7 +233,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         icon: const Icon(Icons.history, size: 18),
                         label: const Text('Details'),
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.white.withOpacity(0.1),
+                          backgroundColor: Colors.white.withValues(alpha: 26),
                           foregroundColor: Colors.white,
                           elevation: 0,
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -408,31 +408,6 @@ class _TabItem {
   final IconData activeIcon;
   final String label;
   const _TabItem({required this.icon, required this.activeIcon, required this.label});
-}
-
-class _WalletChip extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  const _WalletChip({required this.icon, required this.label});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-      decoration: BoxDecoration(
-        color: Colors.white12,
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 12, color: Colors.white60),
-          const SizedBox(width: 4),
-          Text(label, style: const TextStyle(color: Colors.white60, fontSize: 11)),
-        ],
-      ),
-    );
-  }
 }
 
 class _QuickActionButton extends StatelessWidget {

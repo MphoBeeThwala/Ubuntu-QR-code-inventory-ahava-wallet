@@ -81,7 +81,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                             borderRadius: BorderRadius.circular(20),
                             boxShadow: [
                               BoxShadow(
-                                color: Colors.black.withOpacity(0.2),
+                                color: Colors.black.withValues(alpha: 51),
                                 blurRadius: 20,
                                 offset: const Offset(0, 10),
                               )
@@ -109,7 +109,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                       Text(
                         'Sign in to Ahava Wallet',
                         style: AhavaTypography.body.copyWith(
-                          color: AhavaColors.white.withOpacity(0.8),
+                          color: AhavaColors.white.withValues(alpha: 204),
                         ),
                       ),
                       const SizedBox(height: 40),
@@ -118,11 +118,11 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                       Container(
                         padding: const EdgeInsets.all(AhavaSpacing.xxl),
                         decoration: BoxDecoration(
-                          color: AhavaColors.white.withOpacity(0.95),
+                          color: AhavaColors.white.withValues(alpha: 242),
                           borderRadius: BorderRadius.circular(32),
                           boxShadow: [
                             BoxShadow(
-                              color: Colors.black.withOpacity(0.1),
+                              color: Colors.black.withValues(alpha: 26),
                               blurRadius: 30,
                               offset: const Offset(0, 10),
                             )
@@ -142,10 +142,10 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                             TextField(
                               controller: _phoneController,
                               style: AhavaTypography.bodyLarge,
-                              decoration: InputDecoration(
+                              decoration: const InputDecoration(
                                 hintText: '083 123 4567',
                                 fillColor: AhavaColors.neutral050,
-                                prefixIcon: const Icon(Icons.phone_outlined, color: AhavaColors.neutral500),
+                                prefixIcon: Icon(Icons.phone_outlined, color: AhavaColors.neutral500),
                               ),
                               keyboardType: TextInputType.phone,
                             ),
@@ -263,11 +263,10 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                         children: [
                           Text(
                             "New to Ahava? ",
-                            style: AhavaTypography.body.copyWith(color: AhavaColors.white.withOpacity(0.8)),
+                            style: AhavaTypography.body.copyWith(color: AhavaColors.white.withValues(alpha: 204)),
                           ),
                           GestureDetector(
                             onTap: () {
-                              // TODO: Navigate to registration
                             },
                             child: Text(
                               'Create account',

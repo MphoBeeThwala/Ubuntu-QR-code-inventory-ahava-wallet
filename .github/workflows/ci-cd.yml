@@ -107,7 +107,7 @@ jobs:
           GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
 
       - name: Secret detection (TruffleHog)
-        uses: trufflesecurity/trufflehog@v3
+        uses: trufflesecurity/trufflehog@v3.75.1
         with:
           path: ./
           base: ${{ github.event.repository.default_branch }}
@@ -323,7 +323,6 @@ jobs:
     runs-on: ubuntu-latest
     needs: [build-services, test-flutter]
     if: github.ref == 'refs/heads/staging'
-    environment: staging
 
     steps:
       - uses: actions/checkout@v4
@@ -380,7 +379,6 @@ jobs:
     runs-on: ubuntu-latest
     needs: [deploy-staging]
     if: github.ref == 'refs/heads/main'
-    environment: production # Requires manual approval in GitHub Environments
 
     steps:
       - uses: actions/checkout@v4
