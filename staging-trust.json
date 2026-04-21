@@ -1,0 +1,24 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "Federated": "arn:aws:iam::354307071224:oidc-provider/token.actions.githubusercontent.com"
+      },
+      "Action": "sts:AssumeRoleWithWebIdentity",
+      "Condition": {
+        "StringEquals": {
+          "token.actions.githubusercontent.com:aud": "sts.amazonaws.com"
+        },
+        "StringLike": {
+          "token.actions.githubusercontent.com:sub": [
+            "repo:YourGitHubUsername/Ubuntu-QR-code-inventory-ahava-wallet:ref:refs/heads/main",
+            "repo:YourGitHubUsername/Ubuntu-QR-code-inventory-ahava-wallet:ref:refs/heads/staging",
+            "repo:YourGitHubUsername/Ubuntu-QR-code-inventory-ahava-wallet:ref:refs/heads/develop"
+          ]
+        }
+      }
+    }
+  ]
+}
