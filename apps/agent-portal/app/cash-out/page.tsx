@@ -101,6 +101,7 @@ export default function CashOutPage() {
         customerWalletId: wallet.id,
         amountCents: cents,
         reference: reference.trim() || undefined,
+        idempotencyKey: crypto.randomUUID(),
       });
       setTransactionId(res.data?.data?.transactionId ?? "");
       setStep("success");
@@ -139,7 +140,7 @@ export default function CashOutPage() {
         <div className="mb-6">
           <h2 className="text-2xl font-bold text-gray-900">Cash Out</h2>
           <p className="text-gray-500 text-sm mt-1">
-            Withdraw cash from a customer&apos;s Ahava wallet
+            Withdraw cash from a customer&apos;s Ubuntu wallet
           </p>
         </div>
 

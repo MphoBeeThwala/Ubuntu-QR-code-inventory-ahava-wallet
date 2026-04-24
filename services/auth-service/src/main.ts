@@ -201,6 +201,7 @@ app.post(
           {
             userId: user.id,
             walletId: wallet.id,
+            walletNumber: wallet.walletNumber,
             accessToken,
             refreshToken: refreshTokenString,
             user: {

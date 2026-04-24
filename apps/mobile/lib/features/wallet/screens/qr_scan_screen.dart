@@ -1,5 +1,5 @@
 // apps/mobile/lib/features/wallet/screens/qr_scan_screen.dart
-// QR code scanner — reads Ahava wallet QR codes, looks up details, and pays.
+// QR code scanner — reads Ubuntu wallet QR codes, looks up details, and pays.
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -73,10 +73,12 @@ class _QrScanScreenState extends State<QrScanScreen>
     HapticFeedback.mediumImpact();
     _controller.stop();
 
-    // Parse ahava://pay?qr=<hash>
+    // Parse ubuntu://pay?qr=<hash> and support older ahava://pay?qr=<hash>.
     final uri = Uri.tryParse(raw);
     String? qrHash;
-    if (uri != null && uri.scheme == 'ahava' && uri.host == 'pay') {
+    if (uri != null &&
+        (uri.scheme == 'ubuntu' || uri.scheme == 'ahava') &&
+        uri.host == 'pay') {
       qrHash = uri.queryParameters['qr'];
     }
 
@@ -225,7 +227,7 @@ class _QrScanScreenState extends State<QrScanScreen>
       builder: (ctx) => AlertDialog(
         title: const Text('Unrecognised QR code'),
         content: Text(
-          'This QR code is not an Ahava payment code.\n\n$raw',
+          'This QR code is not a Ubuntu payment code.\n\n$raw',
           maxLines: 4,
           overflow: TextOverflow.ellipsis,
         ),
@@ -269,7 +271,7 @@ class _QrScanScreenState extends State<QrScanScreen>
                 ),
                 const SizedBox(height: 8),
                 const Text(
-                  'Ahava needs camera access to scan QR codes.',
+                  'Ubuntu needs camera access to scan QR codes.',
                   textAlign: TextAlign.center,
                   style: TextStyle(color: Colors.grey),
                 ),
@@ -332,7 +334,7 @@ class _QrScanScreenState extends State<QrScanScreen>
                   borderRadius: BorderRadius.circular(20),
                 ),
                 child: const Text(
-                  'Point at an Ahava QR code to pay',
+                  'Point at a Ubuntu QR code to pay',
                   style: TextStyle(color: Colors.white, fontSize: 14),
                 ),
               ),

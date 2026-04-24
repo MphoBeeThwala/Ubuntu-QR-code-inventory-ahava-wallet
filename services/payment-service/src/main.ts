@@ -1,7 +1,7 @@
 import express, { Request, Response, NextFunction } from "express";
 import { v4 as uuidv4 } from "uuid";
 import { createHash } from "crypto";
-import { PrismaClient } from "@prisma/client";
+import { Prisma, PrismaClient } from "@prisma/client";
 import { Queue } from "bullmq";
 import {
   AhavaError,
@@ -155,6 +155,8 @@ app.post(
       const {
         senderWalletId,
         receiverWalletId,
+        recipientWalletNumber,
+        recipientPhone,
         amountCents,
         description,
         idempotencyKey,
@@ -163,15 +165,18 @@ app.post(
         ipAddress,
       } = req.body;
 
-      if (
-        !senderWalletId ||
-        !receiverWalletId ||
-        amountCents == null ||
-        !idempotencyKey
-      ) {
+      if (!senderWalletId || amountCents == null || !idempotencyKey) {
         throw new AhavaError(
           AhavaErrorCode.VAL_MISSING_REQUIRED_FIELD,
-          "Missing required fields",
+          "Missing required fields: senderWalletId, recipient, amountCents, idempotencyKey",
+          { requestId: req.id },
+        );
+      }
+
+      if (!receiverWalletId && !recipientWalletNumber && !recipientPhone) {
+        throw new AhavaError(
+          AhavaErrorCode.VAL_MISSING_REQUIRED_FIELD,
+          "Provide receiverWalletId, recipientWalletNumber, or recipientPhone",
           { requestId: req.id },
         );
       }
@@ -202,17 +207,56 @@ app.post(
         );
       }
 
+      const resolvedReceiverWalletId = receiverWalletId
+        ? receiverWalletId
+        : recipientWalletNumber
+          ? (
+              await prisma.wallet.findFirst({
+                where: {
+                  walletNumber: recipientWalletNumber,
+                  isDeleted: false,
+                  status: "ACTIVE",
+                },
+                select: { id: true },
+              })
+            )?.id
+          : (
+              await prisma.wallet.findFirst({
+                where: {
+                  user: {
+                    is: {
+                      phoneNumberHash: createHash("sha256")
+                        .update((recipientPhone as string).trim().toLowerCase())
+                        .digest("hex"),
+                    },
+                  },
+                  walletType: "PERSONAL",
+                  isDeleted: false,
+                  status: "ACTIVE",
+                },
+                select: { id: true },
+              })
+            )?.id;
+
+      if (!resolvedReceiverWalletId) {
+        throw new AhavaError(
+          AhavaErrorCode.PAY_COUNTERPARTY_NOT_FOUND,
+          "Recipient wallet not found",
+          { requestId: req.id },
+        );
+      }
+
       // ─────────────────────────────────────────────────────────────
       // ATOMIC TRANSACTION: all reads-with-lock + all writes in one unit
       // ─────────────────────────────────────────────────────────────
       const result = await prisma.$transaction(
-        async (tx) => {
+        async (tx: Prisma.TransactionClient) => {
           // Acquire row locks in deterministic UUID order to prevent deadlocks
           // when two concurrent payments involve the same pair of wallets.
           const [firstId, secondId] =
-            senderWalletId < receiverWalletId
-              ? [senderWalletId, receiverWalletId]
-              : [receiverWalletId, senderWalletId];
+            senderWalletId < resolvedReceiverWalletId
+              ? [senderWalletId, resolvedReceiverWalletId]
+              : [resolvedReceiverWalletId, senderWalletId];
 
           const lockedWallets = await tx.$queryRaw<WalletRow[]>`
         SELECT id, "userId" AS "userId", "isDeleted" AS "isDeleted", status, balance
@@ -223,10 +267,10 @@ app.post(
       `;
 
           const senderWallet = lockedWallets.find(
-            (w) => w.id === senderWalletId,
+            (w: WalletRow) => w.id === senderWalletId,
           );
           const receiverWallet = lockedWallets.find(
-            (w) => w.id === receiverWalletId,
+            (w: WalletRow) => w.id === resolvedReceiverWalletId,
           );
 
           if (!senderWallet || senderWallet.isDeleted) {
@@ -247,21 +291,22 @@ app.post(
               "Sender wallet is not active",
             );
           }
-          if (Number(senderWallet.balance) < amountCents) {
+          // Sender covers the transfer amount plus the platform fee.
+          const feeAmount = Math.max(Math.ceil(amountCents * 0.005), 25);
+          const totalDebitCents = amountCents + feeAmount;
+
+          if (Number(senderWallet.balance) < totalDebitCents) {
             throw new AhavaError(
               AhavaErrorCode.WAL_INSUFFICIENT_BALANCE,
-              `Insufficient balance. Available: ${senderWallet.balance} cents`,
+              `Insufficient balance. Available: ${senderWallet.balance} cents. Required: ${totalDebitCents} cents`,
               { statusCode: 402 },
             );
           }
 
-          // Fee calculation: 0.5%, minimum R0.25
-          const feeAmount = Math.max(Math.ceil(amountCents * 0.005), 25);
-          const netAmount = amountCents - feeAmount;
-
-          const senderBalanceAfter = senderWallet.balance - BigInt(amountCents);
+          const senderBalanceAfter =
+            senderWallet.balance - BigInt(totalDebitCents);
           const receiverBalanceAfter =
-            receiverWallet.balance + BigInt(netAmount);
+            receiverWallet.balance + BigInt(amountCents);
           const creditIdempotencyKey = `${idempotencyKey.slice(0, 35)}c`;
           const feeIdempotencyKey = `${idempotencyKey.slice(0, 35)}f`;
 
@@ -274,10 +319,10 @@ app.post(
               paymentMethod: paymentMethod || "UBUNTUPAY_WALLET",
               amount: amountCents,
               feeAmount,
-              netAmount,
+              netAmount: amountCents,
               balanceBefore: senderWallet.balance,
               balanceAfter: senderBalanceAfter,
-              counterpartyWalletId: receiverWalletId,
+              counterpartyWalletId: resolvedReceiverWalletId,
               description,
               idempotencyKey,
               deviceId,
@@ -288,13 +333,13 @@ app.post(
           // Create credit record (receiver)
           const creditTxn = await tx.walletTransaction.create({
             data: {
-              walletId: receiverWalletId,
+              walletId: resolvedReceiverWalletId,
               transactionType: "CREDIT",
               status: "COMPLETED",
               paymentMethod: paymentMethod || "UBUNTUPAY_WALLET",
-              amount: netAmount,
+              amount: amountCents,
               feeAmount: 0,
-              netAmount,
+              netAmount: amountCents,
               balanceBefore: receiverWallet.balance,
               balanceAfter: receiverBalanceAfter,
               counterpartyWalletId: senderWalletId,
@@ -306,11 +351,11 @@ app.post(
           // Update wallet balances atomically
           await tx.wallet.update({
             where: { id: senderWalletId },
-            data: { balance: { decrement: amountCents } },
+            data: { balance: { decrement: totalDebitCents } },
           });
           await tx.wallet.update({
-            where: { id: receiverWalletId },
-            data: { balance: { increment: netAmount } },
+            where: { id: resolvedReceiverWalletId },
+            data: { balance: { increment: amountCents } },
           });
 
           // Fee pool (best-effort — find inside tx to stay consistent)
@@ -360,6 +405,7 @@ app.post(
             debitTxn,
             creditTxn,
             feeAmount,
+            totalDebitCents,
             senderUserId: senderWallet.userId,
           };
         },
@@ -377,7 +423,7 @@ app.post(
           amountCents,
           feeAmountCents: result.feeAmount,
           paymentMethod: paymentMethod || "UBUNTUPAY_WALLET",
-          counterpartyWalletId: receiverWalletId,
+          counterpartyWalletId: resolvedReceiverWalletId,
           description,
           idempotencyKey,
           deviceId,
@@ -395,6 +441,7 @@ app.post(
               debit: result.debitTxn,
               credit: result.creditTxn,
               fee: result.feeAmount,
+              totalDebitedCents: result.totalDebitCents,
             },
           },
           req.id,

@@ -2,11 +2,7 @@
 // Senior banking-grade payment processor.
 // Every payment: idempotency check → limit validation → sanctions screen → atomic debit/credit → audit log → notify.
 
-import {
-  PrismaClient,
-  TransactionStatus,
-  TransactionType,
-} from "@prisma/client";
+import { Prisma, PrismaClient } from "@prisma/client";
 import crypto from "crypto";
 import Redis from "ioredis";
 import { Logger } from "winston";
@@ -119,7 +115,7 @@ export class PaymentService {
 
     // ── Step 7: Execute atomic database transaction ────────────────
     const result = await this.prisma.$transaction(
-      async (tx) => {
+      async (tx: Prisma.TransactionClient) => {
         // Lock sender wallet row — prevents concurrent race conditions
         const lockedSender = await tx.$queryRaw<
           Array<{
@@ -239,8 +235,8 @@ export class PaymentService {
         const senderTxn = await tx.walletTransaction.create({
           data: {
             walletId: senderWallet.id,
-            transactionType: TransactionType.DEBIT,
-            status: TransactionStatus.COMPLETED,
+            transactionType: "DEBIT",
+            status: "COMPLETED",
             paymentMethod: dto.paymentMethod,
             amount: BigInt(dto.amountCents),
             feeAmount: BigInt(feeCents),
@@ -267,8 +263,8 @@ export class PaymentService {
         await tx.walletTransaction.create({
           data: {
             walletId: recipientWallet.id,
-            transactionType: TransactionType.CREDIT,
-            status: TransactionStatus.COMPLETED,
+            transactionType: "CREDIT",
+            status: "COMPLETED",
             paymentMethod: dto.paymentMethod,
             amount: BigInt(dto.amountCents),
             feeAmount: BigInt(0),
@@ -315,7 +311,7 @@ export class PaymentService {
         return {
           transactionId: senderTxn.id,
           idempotencyKey: dto.idempotencyKey,
-          status: TransactionStatus.COMPLETED,
+          status: "COMPLETED",
           amountCents: dto.amountCents,
           feeAmountCents: feeCents,
           totalDebitedCents: totalDebitCents,

@@ -392,7 +392,7 @@ describe("POST /payments — fee calculation", () => {
     expect(res.body.data.transaction.fee).toBe(500);
   });
 
-  it("net amount sent to receiver = amountCents - fee", async () => {
+  it("tracks the fee separately while the transfer amount remains intact", async () => {
     const key = "fee-net-test";
     const amount = 10000; // R100 → fee = 50c
     setupWithAmount(amount, key);
@@ -401,10 +401,10 @@ describe("POST /payments — fee calculation", () => {
       .post("/payments")
       .send({ ...validPayload(), amountCents: amount, idempotencyKey: key });
 
-    // debitTxn created with correct netAmount
+    // debitTxn records the transfer amount while the fee is separate
     const debitCall = mockTx.walletTransaction.create.mock.calls[0][0];
     expect(debitCall.data.feeAmount).toBe(50);
-    expect(debitCall.data.netAmount).toBe(amount - 50);
+    expect(debitCall.data.netAmount).toBe(amount);
   });
 });
 
@@ -435,10 +435,11 @@ describe("POST /payments — balance enforcement", () => {
     expect(mockTx.walletTransaction.create).not.toHaveBeenCalled();
   });
 
-  it("allows payment when balance exactly equals amount", async () => {
+  it("allows payment when balance exactly equals amount plus fee", async () => {
     const amount = 10000;
+    const fee = 50;
     const key = "exact-balance-test";
-    const sender = makeSenderWallet({ balance: BigInt(amount) });
+    const sender = makeSenderWallet({ balance: BigInt(amount + fee) });
     const receiver = makeReceiverWallet();
     const debit = makeDebitTxn(key);
     const credit = makeCreditTxn(key);
@@ -592,8 +593,9 @@ describe("POST /payments — fee pool", () => {
 // ─── Double-entry accounting ──────────────────────────────────────────────────
 
 describe("POST /payments — double-entry accounting", () => {
-  it("debit.balanceBefore - amount === debit.balanceAfter", async () => {
+  it("debit.balanceBefore - totalDebit === debit.balanceAfter", async () => {
     const amount = 10000;
+    const fee = 50;
     const key = "double-entry-test";
     const balance = BigInt(50000);
     const sender = makeSenderWallet({ balance });
@@ -623,11 +625,12 @@ describe("POST /payments — double-entry accounting", () => {
 
     const debitCall = mockTx.walletTransaction.create.mock.calls[0][0];
     expect(debitCall.data.balanceBefore).toBe(balance);
-    expect(debitCall.data.balanceAfter).toBe(balance - BigInt(amount));
+    expect(debitCall.data.balanceAfter).toBe(balance - BigInt(amount + fee));
   });
 
-  it("wallet.update decrements sender balance by full amountCents", async () => {
+  it("wallet.update decrements sender balance by amount plus fee", async () => {
     const amount = 10000;
+    const fee = 50;
     const key = "wallet-decrement-test";
     setupSuccessfulTransaction({
       ...validPayload(),
@@ -643,13 +646,11 @@ describe("POST /payments — double-entry accounting", () => {
       (c: [{ where: { id: string } }]) => c[0].where.id === SENDER_ID,
     );
     expect(senderUpdate).toBeDefined();
-    expect(senderUpdate![0].data.balance).toEqual({ decrement: amount });
+    expect(senderUpdate![0].data.balance).toEqual({ decrement: amount + fee });
   });
 
-  it("wallet.update increments receiver balance by netAmount (amount - fee)", async () => {
+  it("wallet.update increments receiver balance by the purchase amount", async () => {
     const amount = 10000;
-    const fee = 50; // 0.5% of 10000
-    const net = amount - fee;
     const key = "wallet-increment-test";
     setupSuccessfulTransaction({
       ...validPayload(),
@@ -665,7 +666,7 @@ describe("POST /payments — double-entry accounting", () => {
       (c: [{ where: { id: string } }]) => c[0].where.id === RECEIVER_ID,
     );
     expect(receiverUpdate).toBeDefined();
-    expect(receiverUpdate![0].data.balance).toEqual({ increment: net });
+    expect(receiverUpdate![0].data.balance).toEqual({ increment: amount });
   });
 });
 

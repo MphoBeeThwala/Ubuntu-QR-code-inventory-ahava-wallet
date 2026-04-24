@@ -106,7 +106,7 @@ class AhavaApp extends StatelessWidget {
       child: BlocBuilder<AuthBloc, AuthState>(
         builder: (context, authState) {
           return MaterialApp.router(
-            title: 'Ahava eWallet',
+            title: 'Ubuntu Wallet',
             debugShowCheckedModeBanner: false,
 
             // Routing

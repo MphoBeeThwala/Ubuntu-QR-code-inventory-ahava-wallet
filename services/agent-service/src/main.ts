@@ -13,6 +13,7 @@
  */
 
 import express, { Request, Response, NextFunction } from "express";
+import crypto from "crypto";
 import { PrismaClient } from "@prisma/client";
 import { v4 as uuidv4 } from "uuid";
 import {
@@ -33,6 +34,14 @@ import { writeAuditLog } from "@ahava/shared-audit";
 const app = express();
 const prisma = new PrismaClient();
 const PORT = process.env.PORT || 6009;
+
+function compactIdempotencyKey(prefix: string, key: string): string {
+  return crypto
+    .createHash("sha256")
+    .update(`${prefix}:${key}`)
+    .digest("hex")
+    .slice(0, 36);
+}
 
 app.use(express.json());
 
@@ -175,11 +184,16 @@ app.post(
         generateRefreshToken(user.id, deviceId, "8h"),
       ]);
 
+      const refreshTokenHash = crypto
+        .createHash("sha256")
+        .update(refreshToken)
+        .digest("hex");
+
       // Store refresh token
       await prisma.refreshToken.create({
         data: {
           userId: user.id,
-          tokenHash: refreshToken,
+          tokenHash: refreshTokenHash,
           deviceId,
           expiresAt: new Date(Date.now() + 8 * 60 * 60 * 1000), // 8h agent session
         },
@@ -458,6 +472,14 @@ app.post(
       const commissionCents = Math.round(
         (amountCents * agent.cashInCommissionBps) / 10000,
       );
+      const debitIdempotencyKey = compactIdempotencyKey(
+        "agent-ci-debit",
+        idempotencyKey,
+      );
+      const creditIdempotencyKey = compactIdempotencyKey(
+        "agent-ci-credit",
+        idempotencyKey,
+      );
 
       // Atomic: debit agent float, credit customer wallet
       const [, , debitTxn, creditTxn] = await prisma.$transaction([
@@ -484,7 +506,7 @@ app.post(
             status: "COMPLETED",
             description: `Cash-in for customer wallet ${customerWalletId.slice(0, 8)}`,
             counterpartyWalletId: customerWalletId,
-            idempotencyKey: `agent-ci-debit-${idempotencyKey}`,
+            idempotencyKey: debitIdempotencyKey,
           },
         }),
         prisma.walletTransaction.create({
@@ -500,7 +522,7 @@ app.post(
             status: "COMPLETED",
             description: `Cash deposit via agent ${agent.agentCode}`,
             counterpartyWalletId: agent.floatWallet.id,
-            idempotencyKey: `agent-ci-credit-${idempotencyKey}`,
+            idempotencyKey: creditIdempotencyKey,
           },
         }),
       ]);
@@ -584,6 +606,14 @@ app.post(
       const commissionCents = Math.round(
         (amountCents * agent.cashOutCommissionBps) / 10000,
       );
+      const debitIdempotencyKey = compactIdempotencyKey(
+        "agent-co-debit",
+        idempotencyKey,
+      );
+      const creditIdempotencyKey = compactIdempotencyKey(
+        "agent-co-credit",
+        idempotencyKey,
+      );
 
       const [, , debitTxn, creditTxn] = await prisma.$transaction([
         prisma.wallet.update({
@@ -607,7 +637,7 @@ app.post(
             status: "COMPLETED",
             description: `Cash withdrawal via agent ${agent.agentCode}`,
             counterpartyWalletId: agent.floatWallet.id,
-            idempotencyKey: `agent-co-debit-${idempotencyKey}`,
+            idempotencyKey: debitIdempotencyKey,
           },
         }),
         prisma.walletTransaction.create({
@@ -625,7 +655,7 @@ app.post(
             status: "COMPLETED",
             description: `Cash-out from customer ${customerWalletId.slice(0, 8)}`,
             counterpartyWalletId: customerWalletId,
-            idempotencyKey: `agent-co-credit-${idempotencyKey}`,
+            idempotencyKey: creditIdempotencyKey,
           },
         }),
       ]);

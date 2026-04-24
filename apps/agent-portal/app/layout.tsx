@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Ahava Agent Portal",
-  description: "Agent management dashboard for Ahava eWallet",
+  title: "Ubuntu Agent Portal",
+  description: "Agent management dashboard for Ubuntu Wallet",
 };
 
 export default function RootLayout({

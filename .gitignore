@@ -69,3 +69,5 @@ auth-sms-*.log
 
 # Local backups
 ahava-backup*/
+
+runlogs/

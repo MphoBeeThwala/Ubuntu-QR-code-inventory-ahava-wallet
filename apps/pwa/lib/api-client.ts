@@ -81,7 +81,7 @@ class AhavaApiClient {
   async register(
     phone: string,
     pin: string,
-  ): Promise<ApiResponse<{ userId: string; accessToken: string }>> {
+  ): Promise<ApiResponse<AuthTokens & { userId: string }>> {
     const response = await this.client.post("/auth/register", {
       phoneNumber: phone,
       pin,
@@ -89,6 +89,7 @@ class AhavaApiClient {
     });
     const { data } = response.data;
     this.accessToken = data.accessToken;
+    this.refreshToken = data.refreshToken;
     return response.data;
   }
 
@@ -141,16 +142,34 @@ class AhavaApiClient {
 
   // Payment Methods
   async sendPayment(
-    recipientPhone: string,
+    recipient: string,
     amountCents: number,
     description?: string,
   ): Promise<ApiResponse<{ transactionId: string }>> {
+    const senderWalletId = localStorage.getItem("walletId");
+    if (!senderWalletId) {
+      throw new Error("Wallet session not found");
+    }
+    const normalizedRecipient = recipient.trim();
     const response = await this.client.post("/payments", {
-      recipientPhone,
+      senderWalletId,
+      ...(normalizedRecipient.toUpperCase().startsWith("AHV-")
+        ? { recipientWalletNumber: normalizedRecipient.toUpperCase() }
+        : { recipientPhone: normalizedRecipient.replace(/\s/g, "") }),
       amountCents,
       description,
+      idempotencyKey: uuidv4(),
     });
-    return response.data;
+    const raw = response.data;
+    if (raw.success && raw.data?.transaction?.debit?.id) {
+      return {
+        ...raw,
+        data: {
+          transactionId: raw.data.transaction.debit.id as string,
+        },
+      };
+    }
+    return raw;
   }
 
   // QR Code Methods
@@ -158,7 +177,9 @@ class AhavaApiClient {
     ApiResponse<{
       qrId: string;
       qrType: string;
+      recipientName: string | null;
       walletNumber: string;
+      walletType: string;
       amountCents: number | null;
       currency: string;
       description: string | null;

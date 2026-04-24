@@ -10,7 +10,9 @@ type Step = "scanning" | "confirm" | "processing" | "success" | "error";
 interface QrInfo {
   qrHash: string;
   qrType: string;
+  recipientName: string | null;
   walletNumber: string;
+  walletType: string;
   amountCents: number | null;
   currency: string;
   description: string | null;
@@ -46,6 +48,10 @@ export default function ScanQrPage() {
       ? (localStorage.getItem("walletId") ?? "")
       : "";
 
+  const payeeDisplayName =
+    qrInfo?.recipientName ??
+    (qrInfo?.walletType === "MERCHANT" ? "Merchant" : "Ubuntu user");
+
   // ── Stop camera ───────────────────────────────────────────────
   const stopCamera = useCallback(() => {
     cancelAnimationFrame(rafRef.current);
@@ -58,11 +64,12 @@ export default function ScanQrPage() {
     async (raw: string) => {
       stopCamera();
 
-      // Parse ahava://pay?qr=<hash>  OR  treat raw as hash directly
+      // Parse ubuntu://pay?qr=<hash> and older ahava://pay?qr=<hash>,
+      // or treat raw as the hash directly.
       let qrHash = raw;
       try {
         const url = new URL(raw);
-        if (url.protocol === "ahava:") {
+        if (url.protocol === "ubuntu:" || url.protocol === "ahava:") {
           qrHash = url.searchParams.get("qr") ?? raw;
         }
       } catch {
@@ -314,7 +321,7 @@ export default function ScanQrPage() {
             </div>
           )}
           <p className="text-white/50 text-sm mt-5 text-center px-8">
-            Point the camera at an Ahava QR code to pay
+            Point the camera at a Ubuntu QR code to pay
           </p>
         </div>
       )}
@@ -324,10 +331,18 @@ export default function ScanQrPage() {
         <div className="flex-1 px-5 pt-2 pb-8">
           {/* Recipient */}
           <div className="bg-white/5 rounded-2xl p-4 mb-4">
-            <p className="text-white/50 text-xs mb-1">Paying to wallet</p>
-            <p className="font-mono text-white font-semibold">
-              {qrInfo.walletNumber}
+            <p className="text-white/50 text-xs mb-1">Paying</p>
+            <p className="text-white font-semibold text-lg">
+              {payeeDisplayName}
             </p>
+            <div className="mt-2 flex items-center gap-2">
+              <span className="inline-flex items-center rounded-full bg-white/10 px-2.5 py-1 text-[11px] font-semibold text-white/80">
+                {qrInfo.walletType === "MERCHANT" ? "Merchant QR" : "Wallet QR"}
+              </span>
+              <p className="font-mono text-white/70 text-xs">
+                {qrInfo.walletNumber}
+              </p>
+            </div>
             {qrInfo.description && (
               <p className="text-white/60 text-sm mt-1">{qrInfo.description}</p>
             )}
@@ -442,7 +457,7 @@ export default function ScanQrPage() {
           <h2 className="text-2xl font-bold mb-2">Sent!</h2>
           <p className="text-white/60 text-sm mb-2">
             {fmtZAR(Math.round(parseFloat(amountRands) * 100))} sent to{" "}
-            {qrInfo?.walletNumber}
+            {payeeDisplayName}
           </p>
           {txId && (
             <p className="text-white/30 text-xs font-mono bg-white/5 rounded-lg px-3 py-1.5 mb-8">

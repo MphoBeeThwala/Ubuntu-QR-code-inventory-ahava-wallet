@@ -28,7 +28,7 @@ export default function Sidebar() {
   return (
     <aside className="w-60 bg-[#0f172a] text-white flex flex-col shrink-0">
       <div className="px-6 py-5 border-b border-white/10">
-        <h1 className="text-xl font-bold tracking-tight">Ahava</h1>
+        <h1 className="text-xl font-bold tracking-tight">Ubuntu</h1>
         <p className="text-xs text-gray-400 mt-0.5">Agent Portal</p>
       </div>
 

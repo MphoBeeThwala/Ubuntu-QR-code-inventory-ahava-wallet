@@ -107,7 +107,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                       ),
                       const SizedBox(height: AhavaSpacing.sm),
                       Text(
-                        'Sign in to Ahava Wallet',
+                        'Sign in to Ubuntu Wallet',
                         style: AhavaTypography.body.copyWith(
                           color: AhavaColors.white.withValues(alpha: 204),
                         ),
@@ -262,7 +262,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
                           Text(
-                            "New to Ahava? ",
+                            "New to Ubuntu? ",
                             style: AhavaTypography.body.copyWith(color: AhavaColors.white.withValues(alpha: 204)),
                           ),
                           GestureDetector(

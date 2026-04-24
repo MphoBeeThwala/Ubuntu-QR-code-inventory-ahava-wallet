@@ -166,7 +166,7 @@ export default function SendMoneyPage() {
 
               <div className="card space-y-2">
                 <label className="block text-sm font-bold text-gray-700 pl-1">
-                  Recipient phone number
+                  Recipient phone or wallet number
                 </label>
                 <input
                   type="tel"
@@ -174,13 +174,13 @@ export default function SendMoneyPage() {
                   onChange={(e) =>
                     setDraft((d) => ({ ...d, recipient: e.target.value }))
                   }
-                  placeholder="083 123 4567"
+                  placeholder="083 123 4567 or AHV-XXXX-XXXX-XXXX"
                   className="input-field text-lg font-medium"
                   inputMode="tel"
                   required
                 />
                 <p className="text-xs text-gray-500 pl-1">
-                  Must be a registered Ahava user
+                  Must be a registered Ubuntu user or wallet
                 </p>
               </div>
 
@@ -416,7 +416,7 @@ export default function SendMoneyPage() {
                     if (navigator.share) {
                       navigator
                         .share({
-                          title: "Ahava Payment Receipt",
+                          title: "Ubuntu Payment Receipt",
                           text: `Proof of Payment: ${fmtZAR(draft.amountCents)} sent to ${draft.recipient}. Ref: ${transactionId.slice(0, 8).toUpperCase()}`,
                         })
                         .catch(console.error);

@@ -40,7 +40,7 @@ class _LockScreenState extends State<LockScreen> {
       if (!canCheck || !isAvailable) return;
 
       final authenticated = await _localAuth.authenticate(
-        localizedReason: 'Unlock Ahava with biometrics',
+        localizedReason: 'Unlock Ubuntu with biometrics',
         options: const AuthenticationOptions(
           stickyAuth: true,
           biometricOnly: true,
@@ -84,7 +84,7 @@ class _LockScreenState extends State<LockScreen> {
               const Icon(Icons.lock, size: 56),
               const SizedBox(height: 16),
               Text(
-                'Unlock Ahava',
+                'Unlock Ubuntu',
                 style: Theme.of(context).textTheme.headlineSmall,
               ),
               const SizedBox(height: 8),

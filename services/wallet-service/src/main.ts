@@ -1,4 +1,5 @@
 import express, { Request, Response, NextFunction } from "express";
+import crypto from "crypto";
 import { v4 as uuidv4 } from "uuid";
 import { PrismaClient } from "@prisma/client";
 import {
@@ -26,6 +27,14 @@ const redisConnection = {
 function generateWalletNumber(): string {
   const seg = () => Math.random().toString(36).slice(2, 6).toUpperCase();
   return `AHV-${seg()}-${seg()}-${seg()}`;
+}
+
+function compactIdempotencyKey(prefix: string, key: string): string {
+  return crypto
+    .createHash("sha256")
+    .update(`${prefix}:${key}`)
+    .digest("hex")
+    .slice(0, 36);
 }
 
 /** Serialize BigInt fields to strings for JSON */
@@ -209,6 +218,8 @@ app.get(
               id: wallet.id,
               walletNumber: wallet.walletNumber,
               holderName: wallet.user?.fullName ?? wallet.walletNumber,
+              balance: wallet.balance.toString(),
+              status: wallet.status,
             },
           },
           req.id,
@@ -556,7 +567,7 @@ app.post(
             qrPayload: qr.qrPayload,
             amountCents: qr.amountCents ? Number(qr.amountCents) : null,
             expiresAt: qr.expiresAt?.toISOString() ?? null,
-            deepLink: `ahava://pay?qr=${qr.qrHash}`,
+            deepLink: `ubuntu://pay?qr=${qr.qrHash}`,
           },
           req.id,
         ),
@@ -577,7 +588,19 @@ app.get(
       const qr = await prisma.paymentQrCode.findFirst({
         where: { qrHash, isActive: true },
         include: {
-          wallet: { select: { walletNumber: true, status: true } },
+          wallet: {
+            select: {
+              walletNumber: true,
+              status: true,
+              walletType: true,
+              user: {
+                select: {
+                  preferredName: true,
+                  fullName: true,
+                },
+              },
+            },
+          },
         },
       });
 
@@ -608,8 +631,12 @@ app.get(
           {
             qrId: qr.id,
             qrType: qr.qrType,
+            recipientName:
+              qr.wallet.user?.preferredName ?? qr.wallet.user?.fullName ?? null,
             walletNumber: qr.wallet.walletNumber,
+            walletType: qr.wallet.walletType,
             amountCents: qr.amountCents ? Number(qr.amountCents) : null,
+            currency: qr.currency,
             description: qr.description,
             expiresAt: qr.expiresAt?.toISOString() ?? null,
             usageCount: qr.usageCount,
@@ -737,6 +764,14 @@ app.post(
       }
 
       const receiverWallet = qr.wallet;
+      const debitIdempotencyKey = compactIdempotencyKey(
+        "qr-debit",
+        idempotencyKey,
+      );
+      const creditIdempotencyKey = compactIdempotencyKey(
+        "qr-credit",
+        idempotencyKey,
+      );
 
       const [, , debitTxn] = await prisma.$transaction([
         prisma.wallet.update({
@@ -762,7 +797,7 @@ app.post(
               qr.description || `QR payment to ${receiverWallet.walletNumber}`,
             counterpartyWalletId: qr.walletId,
             paymentQrId: qr.id,
-            idempotencyKey: `qr-debit-${idempotencyKey}`,
+            idempotencyKey: debitIdempotencyKey,
           },
         }),
         prisma.walletTransaction.create({
@@ -779,7 +814,7 @@ app.post(
             description: qr.description || `QR payment received`,
             counterpartyWalletId: senderWalletId,
             paymentQrId: qr.id,
-            idempotencyKey: `qr-credit-${idempotencyKey}`,
+            idempotencyKey: creditIdempotencyKey,
           },
         }),
         prisma.paymentQrCode.update({

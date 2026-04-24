@@ -80,10 +80,10 @@ export default function Home() {
           </div>
 
           <h1 className="text-5xl font-bold text-white mb-3 tracking-tight">
-            Ahava
+            Ubuntu
           </h1>
           <p className="text-ahava-100 mb-12 text-center font-medium text-lg opacity-90">
-            South African Digital Wallet
+            South African digital wallet and QR commerce platform
           </p>
 
           <div className="space-y-4 w-full bg-white/10 backdrop-blur-md p-6 rounded-3xl border border-white/20">
@@ -119,7 +119,7 @@ export default function Home() {
             A
           </div>
           <h1 className="text-xl font-bold tracking-tight text-gray-900">
-            Ahava
+            Ubuntu
           </h1>
         </div>
         <button
