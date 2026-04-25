@@ -176,12 +176,8 @@ app.post(
         );
       }
 
-      if (amountCents <= 0) {
-        throw new AhavaError(
-          AhavaErrorCode.PAY_INVALID_AMOUNT,
-          "Amount must be positive",
-          { requestId: req.id },
-        );
+      if (isNaN(amountCents) || amountCents <= 0) {
+        throw new Error("Invalid amount");
       }
 
       // Idempotency check BEFORE opening transaction (read-only)
@@ -256,7 +252,7 @@ app.post(
           }
 
           // Fee calculation: 0.5%, minimum R0.25
-          const feeAmount = Math.max(Math.ceil(amountCents * 0.005), 25);
+          const feeAmount = Math.max(Math.ceil((amountCents * 5) / 1000), 25);
           const netAmount = amountCents - feeAmount;
 
           const senderBalanceAfter = senderWallet.balance - BigInt(amountCents);

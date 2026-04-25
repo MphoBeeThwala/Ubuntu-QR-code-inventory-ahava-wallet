@@ -40,9 +40,16 @@ export default function RegisterPage() {
 
     setLoading(true);
     try {
-      const res = await apiClient.register(cleaned, pin);
+      const res: ApiResponse<AuthResult> = await apiClient.register(
+        cleaned,
+        pin,
+      );
       if (res.success && res.data) {
         localStorage.setItem("accessToken", res.data.accessToken);
+        localStorage.setItem("refreshToken", res.data.refreshToken || "");
+        localStorage.setItem("walletId", res.data.walletId || "");
+        localStorage.setItem("walletNumber", res.data.walletNumber || "");
+        localStorage.setItem("kycTier", res.data.user?.kycTier || "");
         localStorage.setItem("deviceId", deviceId);
         router.replace("/dashboard");
       } else {

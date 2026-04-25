@@ -42,6 +42,14 @@ function timeAgo(dateStr: string): string {
   });
 }
 
+const updateKycTier = async () => {
+  const userRes = await apiClient.getUserDetails();
+  if (userRes.success && userRes.data) {
+    localStorage.setItem("kycTier", userRes.data.kycTier);
+    setKycTier(userRes.data.kycTier);
+  }
+};
+
 export default function DashboardPage() {
   const router = useRouter();
   const [balance, setBalance] = useState<WalletBalance | null>(null);
@@ -96,6 +104,10 @@ export default function DashboardPage() {
     }
     loadData(wId);
   }, [loadData, router]);
+
+  useEffect(() => {
+    updateKycTier();
+  }, []);
 
   const handleLogout = () => {
     apiClient.logout();
