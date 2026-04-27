@@ -42,20 +42,21 @@ function timeAgo(dateStr: string): string {
   });
 }
 
-const updateKycTier = async () => {
-  const userRes = await apiClient.getUserDetails();
-  if (userRes.success && userRes.data) {
-    localStorage.setItem("kycTier", userRes.data.kycTier);
-    setKycTier(userRes.data.kycTier);
-  }
-};
-
 export default function DashboardPage() {
   const router = useRouter();
   const [balance, setBalance] = useState<WalletBalance | null>(null);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
   const [balanceVisible, setBalanceVisible] = useState(true);
+  const [kycTier, setKycTier] = useState<string>("");
+
+  const updateKycTier = async () => {
+    const userRes = await apiClient.getUserDetails();
+    if (userRes.success && userRes.data) {
+      localStorage.setItem("kycTier", userRes.data.kycTier);
+      setKycTier(userRes.data.kycTier);
+    }
+  };
 
   const loadData = useCallback(
     async (wId: string) => {

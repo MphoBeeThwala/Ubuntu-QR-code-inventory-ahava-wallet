@@ -3,7 +3,7 @@
 import React, { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { apiClient } from "@/lib/api-client";
+import { apiClient, ApiResponse, AuthResult } from "@/lib/api-client";
 
 export default function RegisterPage() {
   const router = useRouter();
