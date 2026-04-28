@@ -1,0 +1,3 @@
+-- Placeholder migration for audit_logs_append_only
+-- This migration was referenced but the SQL file is missing
+-- Adding placeholder to allow migrations to proceed
