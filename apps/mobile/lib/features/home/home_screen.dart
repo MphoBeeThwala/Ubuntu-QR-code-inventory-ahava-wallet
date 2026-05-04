@@ -101,7 +101,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     },
                   ),
                   const Text(
-                    'Ahava Wallet',
+                    'Ubuntu Wallet',
                     style: TextStyle(
                       color: Colors.white,
                       fontSize: 22,
@@ -123,7 +123,7 @@ class _HomeScreenState extends State<HomeScreen> {
             ],
           ),
         ),
-        title: const Text('Ahava', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+        title: const Text('Ubuntu', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
         titlePadding: const EdgeInsets.only(left: 20, bottom: 16),
         collapseMode: CollapseMode.parallax,
       ),

@@ -42,7 +42,7 @@ export default function AgentLoginPage() {
     <div className="min-h-screen bg-navy-900 flex items-center justify-center p-4">
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-white">Ahava</h1>
+          <h1 className="text-3xl font-bold text-white">Ubuntu</h1>
           <p className="text-gray-400 text-sm mt-1">Agent Portal</p>
         </div>
 
@@ -66,7 +66,7 @@ export default function AgentLoginPage() {
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="agent@ahava.co.za"
+                placeholder="agent@ubuntu.co.za"
                 className="w-full border border-gray-300 rounded-xl px-4 py-3 text-base focus:outline-none focus:border-navy-800 focus:ring-2 focus:ring-navy-800/20"
                 required
               />

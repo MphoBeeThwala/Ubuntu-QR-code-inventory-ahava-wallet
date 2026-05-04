@@ -95,6 +95,7 @@ export default function CashInPage() {
         customerWalletId: wallet.id,
         amountCents: cents,
         reference: reference.trim() || undefined,
+        idempotencyKey: crypto.randomUUID(),
       });
       setTransactionId(res.data?.data?.transactionId ?? "");
       setStep("success");
@@ -128,7 +129,7 @@ export default function CashInPage() {
         <div className="mb-6">
           <h2 className="text-2xl font-bold text-gray-900">Cash In</h2>
           <p className="text-gray-500 text-sm mt-1">
-            Load cash onto a customer&apos;s Ahava wallet
+            Load cash onto a customer&apos;s Ubuntu wallet
           </p>
         </div>
 

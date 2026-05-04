@@ -96,7 +96,7 @@ export default function LoginPage() {
             Welcome back
           </h1>
           <p className="text-ahava-100 mt-2 font-medium opacity-90">
-            Sign in to Ahava Wallet
+            Sign in to Ubuntu Wallet
           </p>
         </div>
 
@@ -168,7 +168,7 @@ export default function LoginPage() {
           </form>
 
           <p className="text-center text-sm text-gray-500 font-medium mt-8">
-            New to Ahava?{" "}
+            New to Ubuntu?{" "}
             <Link
               href="/auth/register"
               className="text-ahava-600 font-bold hover:text-ahava-700 transition-colors"

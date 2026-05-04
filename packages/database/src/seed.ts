@@ -3,11 +3,19 @@
 // Creates realistic South African test accounts, wallets, and transaction history
 // RUN: npm run db:seed (NEVER run against production)
 
-import { PrismaClient, KycTier } from "@prisma/client";
+import { PrismaClient } from "@prisma/client";
 import * as crypto from "crypto";
 import { hashPin } from "@ahava/shared-crypto";
 
 const prisma = new PrismaClient();
+const KycTier = {
+  TIER_0: "TIER_0",
+  TIER_1: "TIER_1",
+  MERCHANT: "MERCHANT",
+} as const;
+const AgentStatus = {
+  ACTIVE: "ACTIVE",
+} as const;
 
 function hash(value: string): string {
   return crypto
@@ -147,6 +155,30 @@ async function main() {
     },
   });
 
+  const agentUser = await prisma.user.upsert({
+    where: { phoneNumberHash: hash("+27711112222") },
+    update: {
+      primaryDeviceId: null,
+      deviceBoundAt: null,
+      email: "agent@ubuntu.co.za",
+    },
+    create: {
+      phoneNumber: Buffer.from("+27711112222").toString("base64"),
+      phoneNumberHash: hash("+27711112222"),
+      email: "agent@ubuntu.co.za",
+      fullName: "Ubuntu Demo Agent",
+      preferredName: "Demo Agent",
+      kycTier: KycTier.TIER_1,
+      kycStatus: "VERIFIED",
+      preferredLanguage: "en",
+      pinHash,
+      pinChangedAt: new Date(),
+      popiConsentAt: new Date(),
+      termsAcceptedAt: new Date(),
+      termsVersion: "1.0",
+    },
+  });
+
   console.log("✅ Test users created");
 
   // ─────────────────────────────────────────────────────────────────
@@ -176,7 +208,10 @@ async function main() {
 
   const nnomsaWallet = await prisma.wallet.upsert({
     where: { walletNumber: "AHV-NOMS-3344-7721" },
-    update: { balance: centsFromRand(245.5) },
+    update: {
+      balance: centsFromRand(245.5),
+      walletType: "PERSONAL",
+    },
     create: {
       userId: tier0User.id,
       walletNumber: "AHV-NOMS-3344-7721",
@@ -267,6 +302,24 @@ async function main() {
     },
   });
 
+  const agentFloatWallet = await prisma.wallet.upsert({
+    where: { walletNumber: "AHV-AGNT-1100-2200" },
+    update: { balance: centsFromRand(15000.0) },
+    create: {
+      userId: agentUser.id,
+      walletNumber: "AHV-AGNT-1100-2200",
+      walletType: "AGENT",
+      status: "ACTIVE",
+      kycTier: KycTier.TIER_1,
+      balance: centsFromRand(15000.0),
+      dailyLimit: merchantLimits.daily,
+      monthlyLimit: merchantLimits.monthly,
+      maxBalance: merchantLimits.max,
+      perTransactionLimit: merchantLimits.txn,
+      currency: "ZAR",
+    },
+  });
+
   // Youth control settings
   await prisma.youthWalletControl.upsert({
     where: { walletId: siphoWallet.id },
@@ -292,7 +345,7 @@ async function main() {
     create: {
       userId: merchantUser.id, // Temporary — replace with system user
       walletNumber: "AHV-FEES-0000-0001",
-      walletType: "PERSONAL",
+      walletType: "FEE_POOL",
       status: "ACTIVE",
       kycTier: KycTier.MERCHANT,
       balance: BigInt(0),
@@ -307,6 +360,63 @@ async function main() {
   console.log("✅ Wallets created");
 
   // ─────────────────────────────────────────────────────────────────
+  await prisma.agent.upsert({
+    where: { userId: agentUser.id },
+    update: {
+      status: AgentStatus.ACTIVE,
+      businessName: "Ubuntu Demo Agent",
+      businessAddress: "Soweto Demo Corridor, Johannesburg",
+      floatWalletId: agentFloatWallet.id,
+    },
+    create: {
+      userId: agentUser.id,
+      agentCode: "AHV-AGT-00001",
+      businessName: "Ubuntu Demo Agent",
+      businessAddress: "Soweto Demo Corridor, Johannesburg",
+      status: AgentStatus.ACTIVE,
+      floatWalletId: agentFloatWallet.id,
+      cashInCommissionBps: 80,
+      cashOutCommissionBps: 70,
+      minFloatCents: centsFromRand(500),
+      maxFloatCents: centsFromRand(50000),
+      bondDepositCents: centsFromRand(1000),
+    },
+  });
+
+  const demoMerchantQrPayload = JSON.stringify({
+    walletId: thaandiWallet.id,
+    walletNumber: thaandiWallet.walletNumber,
+    qrType: "STATIC",
+    currency: "ZAR",
+    merchantName: "Mama Thandi",
+    description: "Ubuntu merchant payment for goods and services",
+    issuedAt: "2026-01-01T00:00:00.000Z",
+  });
+
+  const demoMerchantQrHash = crypto
+    .createHash("sha256")
+    .update(demoMerchantQrPayload)
+    .digest("hex");
+
+  const merchantDemoQr =
+    (await prisma.paymentQrCode.findFirst({
+      where: { qrHash: demoMerchantQrHash },
+    })) ??
+    (await prisma.paymentQrCode.create({
+      data: {
+        walletId: thaandiWallet.id,
+        qrType: "STATIC",
+        qrPayload: demoMerchantQrPayload,
+        qrHash: demoMerchantQrHash,
+        amountCents: null,
+        currency: "ZAR",
+        description: "Ubuntu merchant payment for goods and services",
+        expiresAt: null,
+        maxUsage: null,
+        isActive: true,
+      },
+    }));
+
   // SEED FEE RULES
   // ─────────────────────────────────────────────────────────────────
 
@@ -429,7 +539,13 @@ async function main() {
     `  Mama Thandi (Merch)  +27833456789   ${thaandiWallet.walletNumber}   PIN: 1234`,
   );
   console.log(
+    `  Merchant demo QR     ubuntu://pay?qr=${merchantDemoQr.qrHash}`,
+  );
+  console.log(
     `  Tumi (Tier 1)        +27799999999   ${tuumiWallet.walletNumber}   PIN: 1234`,
+  );
+  console.log(
+    `  Demo Agent           agent@ubuntu.co.za   ${agentFloatWallet.walletNumber}   PIN: 1234`,
   );
   console.log(
     `  Sipho (Youth)        +27611111111   ${siphoWallet.walletNumber}   PIN: 1234`,

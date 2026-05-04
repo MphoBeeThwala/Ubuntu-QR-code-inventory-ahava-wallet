@@ -188,7 +188,7 @@ class _MyQrScreenState extends State<MyQrScreen> {
                     ),
                     const SizedBox(width: 6),
                     const Text(
-                      'Ahava Wallet',
+                      'Ubuntu Wallet',
                       style: TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.w600,

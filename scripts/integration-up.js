@@ -78,6 +78,9 @@ async function waitForContainerHealthy(name, timeoutMs) {
     env,
   });
 
+  runNodeBin("prisma/build/index.js", ["generate", "--schema=prisma/schema.prisma"], {
+    env,
+  });
+
   runNodeBin("ts-node/dist/bin.js", ["packages/database/src/seed.ts"], { env });
 })();
-

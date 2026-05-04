@@ -1,5 +1,5 @@
 // apps/mobile/lib/l10n/app_localizations.dart
-// Minimal localisation support for Ahava mobile.
+// Minimal localisation support for Ubuntu mobile.
 
 import 'package:flutter/widgets.dart';
 
@@ -14,7 +14,7 @@ class AppLocalizations {
     return Localizations.of<AppLocalizations>(context, AppLocalizations)!;
   }
 
-  String get appTitle => 'Ahava eWallet';
+  String get appTitle => 'Ubuntu Wallet';
 }
 
 class _AppLocalizationsDelegate extends LocalizationsDelegate<AppLocalizations> {

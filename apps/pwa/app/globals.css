@@ -9,7 +9,13 @@
 
   body {
     @apply bg-gray-50 text-gray-900 antialiased selection:bg-ahava-200 selection:text-ahava-900;
-    font-family: var(--font-geist-sans), system-ui, sans-serif;
+    font-family:
+      "Aptos",
+      "Segoe UI Variable",
+      "Segoe UI",
+      "Trebuchet MS",
+      system-ui,
+      sans-serif;
   }
 
   input, select, textarea {

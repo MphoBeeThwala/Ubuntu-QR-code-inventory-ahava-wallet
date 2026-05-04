@@ -31,7 +31,7 @@ export default function MyQrPage() {
     // Check for a cached static QR hash first to avoid extra API calls
     const cachedHash = localStorage.getItem("staticQrHash");
     if (cachedHash) {
-      const deepLink = `ahava://pay?qr=${cachedHash}`;
+      const deepLink = `ubuntu://pay?qr=${cachedHash}`;
       setQrData({ qrHash: cachedHash, deepLink, walletNumber });
       renderQr(deepLink);
       setLoading(false);
@@ -85,10 +85,10 @@ export default function MyQrPage() {
     const canvas = canvasRef.current;
     canvas.toBlob(async (blob) => {
       if (!blob) return;
-      const file = new File([blob], "ahava-qr.png", { type: "image/png" });
+      const file = new File([blob], "ubuntu-qr.png", { type: "image/png" });
       if (navigator.canShare?.({ files: [file] })) {
         await navigator.share({
-          title: "Pay me via Ahava",
+          title: "Pay me via Ubuntu",
           text: `Scan to pay ${qrData.walletNumber}`,
           files: [file],
         });
@@ -97,7 +97,7 @@ export default function MyQrPage() {
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
-        a.download = "ahava-qr.png";
+        a.download = "ubuntu-qr.png";
         a.click();
         URL.revokeObjectURL(url);
       }
@@ -163,7 +163,7 @@ export default function MyQrPage() {
             </div>
 
             <p className="text-white/60 text-sm text-center mb-8 max-w-xs">
-              Ask someone to scan this code with their Ahava app to pay you
+              Ask someone to scan this code with their Ubuntu app to pay you
             </p>
 
             {/* Action buttons */}

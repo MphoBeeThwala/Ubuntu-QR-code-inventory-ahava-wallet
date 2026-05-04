@@ -1,8 +1,5 @@
 import type { ReactNode } from "react";
-import { Inter } from "next/font/google";
 import "./globals.css";
-
-const inter = Inter({ subsets: ["latin"] });
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
@@ -11,7 +8,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         <meta name="theme-color" content="#059669" />
         <meta
           name="description"
-          content="Ahava - South African Digital Wallet"
+          content="Ubuntu - South African digital wallet and QR commerce platform"
         />
         <meta
           name="viewport"
@@ -21,7 +18,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         <link rel="manifest" href="/manifest.json" />
         <link rel="apple-touch-icon" href="/icons/icon-192x192.svg" />
       </head>
-      <body className={inter.className}>
+      <body>
         <div id="root">{children}</div>
       </body>
     </html>

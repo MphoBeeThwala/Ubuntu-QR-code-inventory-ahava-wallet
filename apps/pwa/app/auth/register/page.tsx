@@ -67,9 +67,9 @@ export default function RegisterPage() {
     <div className="min-h-screen bg-gradient-to-br from-ahava-700 to-ahava-900 flex flex-col items-center justify-center p-4">
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
-          <h1 className="text-4xl font-bold text-white">Ahava</h1>
+          <h1 className="text-4xl font-bold text-white">Ubuntu</h1>
           <p className="text-ahava-200 mt-1 text-sm">
-            South African Digital Wallet
+            South African digital wallet and QR commerce platform
           </p>
         </div>
 
@@ -172,7 +172,7 @@ export default function RegisterPage() {
             </div>
 
             <p className="text-xs text-gray-500 bg-gray-50 rounded-lg p-3">
-              By creating an account you agree to Ahava&apos;s{" "}
+              By creating an account you agree to Ubuntu&apos;s{" "}
               <a href="#" className="text-ahava-600 hover:underline">
                 Terms of Service
               </a>{" "}

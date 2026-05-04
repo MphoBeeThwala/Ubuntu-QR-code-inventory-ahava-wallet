@@ -362,7 +362,7 @@ describe("POST /wallets/:walletId/qr", () => {
     expect(res.status).toBe(201);
     expect(res.body.data.qrId).toBe("qr-001");
     expect(res.body.data.qrType).toBe("STATIC");
-    expect(res.body.data.deepLink).toContain("ahava://pay?qr=");
+    expect(res.body.data.deepLink).toContain("ubuntu://pay?qr=");
   });
 
   it("generates a dynamic QR code with locked amount", async () => {
@@ -422,7 +422,15 @@ describe("GET /qr/:qrHash", () => {
   it("returns QR details for a valid static QR", async () => {
     mockPrisma.paymentQrCode.findFirst.mockResolvedValue(
       makeQr({
-        wallet: { walletNumber: "AHV-ABC1-DEF2-GHI3", status: "ACTIVE" },
+        wallet: {
+          walletNumber: "AHV-ABC1-DEF2-GHI3",
+          status: "ACTIVE",
+          walletType: "MERCHANT",
+          user: {
+            preferredName: "Mama Thandi",
+            fullName: "Thandi Zulu",
+          },
+        },
       }),
     );
 
@@ -430,6 +438,8 @@ describe("GET /qr/:qrHash", () => {
     expect(res.status).toBe(200);
     expect(res.body.data.qrType).toBe("STATIC");
     expect(res.body.data.walletNumber).toBe("AHV-ABC1-DEF2-GHI3");
+    expect(res.body.data.recipientName).toBe("Mama Thandi");
+    expect(res.body.data.walletType).toBe("MERCHANT");
     expect(res.body.data.amountCents).toBeNull();
   });
 
@@ -494,13 +504,11 @@ describe("POST /qr/:qrHash/pay", () => {
 
   it("returns 404 when QR not found", async () => {
     mockPrisma.paymentQrCode.findFirst.mockResolvedValue(null);
-    const res = await request(app)
-      .post(`/qr/${QR_HASH}/pay`)
-      .send({
-        senderWalletId: SENDER_ID,
-        amountCents: 5000,
-        idempotencyKey: "ik-1",
-      });
+    const res = await request(app).post(`/qr/${QR_HASH}/pay`).send({
+      senderWalletId: SENDER_ID,
+      amountCents: 5000,
+      idempotencyKey: "ik-1",
+    });
     expect(res.status).toBe(404);
   });
 
@@ -508,13 +516,11 @@ describe("POST /qr/:qrHash/pay", () => {
     mockPrisma.paymentQrCode.findFirst.mockResolvedValue(
       makeQr({ expiresAt: new Date(Date.now() - 1000), wallet: makeWallet() }),
     );
-    const res = await request(app)
-      .post(`/qr/${QR_HASH}/pay`)
-      .send({
-        senderWalletId: SENDER_ID,
-        amountCents: 5000,
-        idempotencyKey: "ik-1",
-      });
+    const res = await request(app).post(`/qr/${QR_HASH}/pay`).send({
+      senderWalletId: SENDER_ID,
+      amountCents: 5000,
+      idempotencyKey: "ik-1",
+    });
     expect(res.status).toBe(410);
   });
 
@@ -522,13 +528,11 @@ describe("POST /qr/:qrHash/pay", () => {
     mockPrisma.wallet.findUnique.mockResolvedValue(
       makeWallet({ id: SENDER_ID, balance: BigInt(100) }),
     );
-    const res = await request(app)
-      .post(`/qr/${QR_HASH}/pay`)
-      .send({
-        senderWalletId: SENDER_ID,
-        amountCents: 5000,
-        idempotencyKey: "ik-1",
-      });
+    const res = await request(app).post(`/qr/${QR_HASH}/pay`).send({
+      senderWalletId: SENDER_ID,
+      amountCents: 5000,
+      idempotencyKey: "ik-1",
+    });
     expect(res.status).toBe(402);
   });
 
@@ -536,13 +540,11 @@ describe("POST /qr/:qrHash/pay", () => {
     mockPrisma.paymentQrCode.findFirst.mockResolvedValue(
       makeQr({ walletId: SENDER_ID, wallet: makeWallet({ id: SENDER_ID }) }),
     );
-    const res = await request(app)
-      .post(`/qr/${QR_HASH}/pay`)
-      .send({
-        senderWalletId: SENDER_ID,
-        amountCents: 5000,
-        idempotencyKey: "ik-1",
-      });
+    const res = await request(app).post(`/qr/${QR_HASH}/pay`).send({
+      senderWalletId: SENDER_ID,
+      amountCents: 5000,
+      idempotencyKey: "ik-1",
+    });
     expect(res.status).toBe(400);
   });
 
@@ -554,13 +556,11 @@ describe("POST /qr/:qrHash/pay", () => {
         wallet: makeWallet(),
       }),
     );
-    const res = await request(app)
-      .post(`/qr/${QR_HASH}/pay`)
-      .send({
-        senderWalletId: SENDER_ID,
-        amountCents: 9999,
-        idempotencyKey: "ik-1",
-      });
+    const res = await request(app).post(`/qr/${QR_HASH}/pay`).send({
+      senderWalletId: SENDER_ID,
+      amountCents: 9999,
+      idempotencyKey: "ik-1",
+    });
     expect(res.status).toBe(400);
     expect(res.body.error.code).toBe("PAY_INVALID_AMOUNT");
   });

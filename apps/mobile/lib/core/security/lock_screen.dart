@@ -84,7 +84,7 @@ class _LockScreenState extends State<LockScreen> {
               const Icon(Icons.lock, size: 56),
               const SizedBox(height: 16),
               Text(
-                'Unlock Ahava',
+                'Unlock Ubuntu',
                 style: Theme.of(context).textTheme.headlineSmall,
               ),
               const SizedBox(height: 8),

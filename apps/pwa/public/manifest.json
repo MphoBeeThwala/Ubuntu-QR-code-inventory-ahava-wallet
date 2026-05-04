@@ -1,7 +1,7 @@
 {
-  "name": "Ahava eWallet",
-  "short_name": "Ahava",
-  "description": "Inclusive South African digital wallet",
+  "name": "Ubuntu Wallet",
+  "short_name": "Ubuntu",
+  "description": "South African digital wallet and QR commerce platform",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#0D1B2A",
