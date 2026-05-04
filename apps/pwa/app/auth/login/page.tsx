@@ -36,6 +36,7 @@ export default function LoginPage() {
     try {
       const res = await apiClient.login(cleaned, pin);
       if (res.success && res.data) {
+        if (res.data.userId) localStorage.setItem("userId", res.data.userId);
         localStorage.setItem("accessToken", res.data.accessToken);
         localStorage.setItem("refreshToken", res.data.refreshToken);
         if (res.data.walletId)

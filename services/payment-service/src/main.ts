@@ -145,6 +145,7 @@ type WalletRow = {
   isDeleted: boolean;
   status: string;
   balance: bigint;
+  walletNumber: string;
 };
 
 // POST /payments - Create payment transaction (atomic double-entry)
@@ -155,6 +156,8 @@ app.post(
       const {
         senderWalletId,
         receiverWalletId,
+        receiverWalletNumber,
+        recipientPhone,
         amountCents,
         description,
         idempotencyKey,
@@ -163,18 +166,53 @@ app.post(
         ipAddress,
       } = req.body;
 
-      if (
-        !senderWalletId ||
-        !receiverWalletId ||
-        amountCents == null ||
-        !idempotencyKey
-      ) {
+      if (!senderWalletId || amountCents == null || !idempotencyKey) {
         throw new AhavaError(
           AhavaErrorCode.VAL_MISSING_REQUIRED_FIELD,
           "Missing required fields",
           { requestId: req.id },
         );
       }
+
+      let resolvedReceiverWalletId = receiverWalletId as string | undefined;
+      if (!resolvedReceiverWalletId && receiverWalletNumber) {
+        const foundWallet = await prisma.wallet.findFirst({
+          where: { walletNumber: receiverWalletNumber, isDeleted: false },
+          select: { id: true },
+        });
+        resolvedReceiverWalletId = foundWallet?.id;
+      }
+
+      if (!resolvedReceiverWalletId && recipientPhone) {
+        const phoneNumberHash = createHash("sha256")
+          .update(String(recipientPhone).trim().toLowerCase())
+          .digest("hex");
+        const foundUser = await prisma.user.findUnique({
+          where: { phoneNumberHash },
+          select: { id: true },
+        });
+        if (foundUser) {
+          const foundWallet = await prisma.wallet.findFirst({
+            where: {
+              userId: foundUser.id,
+              status: "ACTIVE",
+              isDeleted: false,
+            },
+            orderBy: { createdAt: "asc" },
+            select: { id: true },
+          });
+          resolvedReceiverWalletId = foundWallet?.id;
+        }
+      }
+
+      if (!resolvedReceiverWalletId) {
+        throw new AhavaError(
+          AhavaErrorCode.PAY_COUNTERPARTY_NOT_FOUND,
+          "Receiver wallet not found",
+          { requestId: req.id },
+        );
+      }
+      const receiverWalletIdFinal = resolvedReceiverWalletId;
 
       if (isNaN(amountCents) || amountCents <= 0) {
         throw new Error("Invalid amount");
@@ -206,12 +244,12 @@ app.post(
           // Acquire row locks in deterministic UUID order to prevent deadlocks
           // when two concurrent payments involve the same pair of wallets.
           const [firstId, secondId] =
-            senderWalletId < receiverWalletId
-              ? [senderWalletId, receiverWalletId]
-              : [receiverWalletId, senderWalletId];
+            senderWalletId < receiverWalletIdFinal
+              ? [senderWalletId, receiverWalletIdFinal]
+              : [receiverWalletIdFinal, senderWalletId];
 
           const lockedWallets = await tx.$queryRaw<WalletRow[]>`
-        SELECT id, "userId" AS "userId", "isDeleted" AS "isDeleted", status, balance
+        SELECT id, "userId" AS "userId", "isDeleted" AS "isDeleted", status, balance, "walletNumber" AS "walletNumber"
         FROM wallets
         WHERE id IN (${firstId}::uuid, ${secondId}::uuid)
         ORDER BY id
@@ -222,7 +260,7 @@ app.post(
             (w) => w.id === senderWalletId,
           );
           const receiverWallet = lockedWallets.find(
-            (w) => w.id === receiverWalletId,
+            (w) => w.id === receiverWalletIdFinal,
           );
 
           if (!senderWallet || senderWallet.isDeleted) {
@@ -274,6 +312,7 @@ app.post(
               balanceBefore: senderWallet.balance,
               balanceAfter: senderBalanceAfter,
               counterpartyWalletId: receiverWalletId,
+              counterpartyName: receiverWallet.walletNumber,
               description,
               idempotencyKey,
               deviceId,
@@ -305,7 +344,7 @@ app.post(
             data: { balance: { decrement: amountCents } },
           });
           await tx.wallet.update({
-            where: { id: receiverWalletId },
+            where: { id: receiverWalletIdFinal },
             data: { balance: { increment: netAmount } },
           });
 
@@ -374,6 +413,7 @@ app.post(
           feeAmountCents: result.feeAmount,
           paymentMethod: paymentMethod || "UBUNTUPAY_WALLET",
           counterpartyWalletId: receiverWalletId,
+          receiverWalletId: receiverWalletIdFinal,
           description,
           idempotencyKey,
           deviceId,
