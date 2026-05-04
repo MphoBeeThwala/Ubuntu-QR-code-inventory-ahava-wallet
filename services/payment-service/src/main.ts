@@ -145,6 +145,7 @@ type WalletRow = {
   isDeleted: boolean;
   status: string;
   balance: bigint;
+  walletNumber: string;
 };
 
 // POST /payments - Create payment transaction (atomic double-entry)
@@ -155,7 +156,7 @@ app.post(
       const {
         senderWalletId,
         receiverWalletId,
-        recipientWalletNumber,
+        receiverWalletNumber,
         recipientPhone,
         amountCents,
         description,
@@ -173,13 +174,53 @@ app.post(
         );
       }
 
-      if (!receiverWalletId && !recipientWalletNumber && !recipientPhone) {
+      if (!receiverWalletId && !receiverWalletNumber && !recipientPhone) {
         throw new AhavaError(
           AhavaErrorCode.VAL_MISSING_REQUIRED_FIELD,
-          "Provide receiverWalletId, recipientWalletNumber, or recipientPhone",
+          "Provide receiverWalletId, receiverWalletNumber, or recipientPhone",
           { requestId: req.id },
         );
       }
+
+      let resolvedReceiverWalletId = receiverWalletId as string | undefined;
+      if (!resolvedReceiverWalletId && receiverWalletNumber) {
+        const foundWallet = await prisma.wallet.findFirst({
+          where: { walletNumber: receiverWalletNumber, isDeleted: false },
+          select: { id: true },
+        });
+        resolvedReceiverWalletId = foundWallet?.id;
+      }
+
+      if (!resolvedReceiverWalletId && recipientPhone) {
+        const phoneNumberHash = createHash("sha256")
+          .update(String(recipientPhone).trim().toLowerCase())
+          .digest("hex");
+        const foundUser = await prisma.user.findUnique({
+          where: { phoneNumberHash },
+          select: { id: true },
+        });
+        if (foundUser) {
+          const foundWallet = await prisma.wallet.findFirst({
+            where: {
+              userId: foundUser.id,
+              status: "ACTIVE",
+              isDeleted: false,
+            },
+            orderBy: { createdAt: "asc" },
+            select: { id: true },
+          });
+          resolvedReceiverWalletId = foundWallet?.id;
+        }
+      }
+
+      if (!resolvedReceiverWalletId) {
+        throw new AhavaError(
+          AhavaErrorCode.PAY_COUNTERPARTY_NOT_FOUND,
+          "Receiver wallet not found",
+          { requestId: req.id },
+        );
+      }
+      const receiverWalletIdFinal = resolvedReceiverWalletId;
 
       if (isNaN(amountCents) || amountCents <= 0) {
         throw new Error("Invalid amount");
@@ -203,44 +244,6 @@ app.post(
         );
       }
 
-      const resolvedReceiverWalletId = receiverWalletId
-        ? receiverWalletId
-        : recipientWalletNumber
-          ? (
-              await prisma.wallet.findFirst({
-                where: {
-                  walletNumber: recipientWalletNumber,
-                  isDeleted: false,
-                  status: "ACTIVE",
-                },
-                select: { id: true },
-              })
-            )?.id
-          : (
-              await prisma.wallet.findFirst({
-                where: {
-                  user: {
-                    is: {
-                      phoneNumberHash: createHash("sha256")
-                        .update((recipientPhone as string).trim().toLowerCase())
-                        .digest("hex"),
-                    },
-                  },
-                  walletType: "PERSONAL",
-                  isDeleted: false,
-                  status: "ACTIVE",
-                },
-                select: { id: true },
-              })
-            )?.id;
-
-      if (!resolvedReceiverWalletId) {
-        throw new AhavaError(
-          AhavaErrorCode.PAY_COUNTERPARTY_NOT_FOUND,
-          "Recipient wallet not found",
-          { requestId: req.id },
-        );
-      }
 
       // ─────────────────────────────────────────────────────────────
       // ATOMIC TRANSACTION: all reads-with-lock + all writes in one unit
@@ -250,12 +253,12 @@ app.post(
           // Acquire row locks in deterministic UUID order to prevent deadlocks
           // when two concurrent payments involve the same pair of wallets.
           const [firstId, secondId] =
-            senderWalletId < resolvedReceiverWalletId
-              ? [senderWalletId, resolvedReceiverWalletId]
-              : [resolvedReceiverWalletId, senderWalletId];
+            senderWalletId < receiverWalletIdFinal
+              ? [senderWalletId, receiverWalletIdFinal]
+              : [receiverWalletIdFinal, senderWalletId];
 
           const lockedWallets = await tx.$queryRaw<WalletRow[]>`
-        SELECT id, "userId" AS "userId", "isDeleted" AS "isDeleted", status, balance
+        SELECT id, "userId" AS "userId", "isDeleted" AS "isDeleted", status, balance, "walletNumber" AS "walletNumber"
         FROM wallets
         WHERE id IN (${firstId}::uuid, ${secondId}::uuid)
         ORDER BY id
@@ -265,60 +268,10 @@ app.post(
           const senderWallet = lockedWallets.find(
             (w: WalletRow) => w.id === senderWalletId,
           );
-          const receiverWallet = lockedWallets.find(
-            (w: WalletRow) => w.id === resolvedReceiverWalletId,
-          );
+                     const receiverWallet = lockedWallets.find(
+             (w) => w.id === receiverWalletIdFinal,
+           );
 
-          if (!senderWallet || senderWallet.isDeleted) {
-            throw new AhavaError(
-              AhavaErrorCode.WAL_NOT_FOUND,
-              "Sender wallet not found",
-            );
-          }
-          if (!receiverWallet || receiverWallet.isDeleted) {
-            throw new AhavaError(
-              AhavaErrorCode.PAY_COUNTERPARTY_NOT_FOUND,
-              "Receiver wallet not found",
-            );
-          }
-          if (senderWallet.status !== "ACTIVE") {
-            throw new AhavaError(
-              AhavaErrorCode.WAL_WALLET_SUSPENDED,
-              "Sender wallet is not active",
-            );
-          }
-          // Sender covers the transfer amount plus the platform fee.
-          const feeAmount = Math.max(Math.ceil(amountCents * 0.005), 25);
-          const totalDebitCents = amountCents + feeAmount;
-
-          if (Number(senderWallet.balance) < totalDebitCents) {
-            throw new AhavaError(
-              AhavaErrorCode.WAL_INSUFFICIENT_BALANCE,
-              `Insufficient balance. Available: ${senderWallet.balance} cents. Required: ${totalDebitCents} cents`,
-              { statusCode: 402 },
-            );
-          }
-
-          const senderBalanceAfter =
-            senderWallet.balance - BigInt(totalDebitCents);
-          const receiverBalanceAfter =
-            receiverWallet.balance + BigInt(amountCents);
-          const creditIdempotencyKey = `${idempotencyKey.slice(0, 35)}c`;
-          const feeIdempotencyKey = `${idempotencyKey.slice(0, 35)}f`;
-
-          // Create debit record (sender)
-          const debitTxn = await tx.walletTransaction.create({
-            data: {
-              walletId: senderWalletId,
-              transactionType: "DEBIT",
-              status: "COMPLETED",
-              paymentMethod: paymentMethod || "UBUNTUPAY_WALLET",
-              amount: amountCents,
-              feeAmount,
-              netAmount: amountCents,
-              balanceBefore: senderWallet.balance,
-              balanceAfter: senderBalanceAfter,
-              counterpartyWalletId: resolvedReceiverWalletId,
               description,
               idempotencyKey,
               deviceId,
@@ -350,8 +303,9 @@ app.post(
             data: { balance: { decrement: totalDebitCents } },
           });
           await tx.wallet.update({
-            where: { id: resolvedReceiverWalletId },
-            data: { balance: { increment: amountCents } },
+             where: { id: receiverWalletIdFinal },
+             data: { balance: { increment: amountCents } },
+
           });
 
           // Fee pool (best-effort — find inside tx to stay consistent)
@@ -419,7 +373,9 @@ app.post(
           amountCents,
           feeAmountCents: result.feeAmount,
           paymentMethod: paymentMethod || "UBUNTUPAY_WALLET",
-          counterpartyWalletId: resolvedReceiverWalletId,
+               counterpartyWalletId: receiverWalletIdFinal,
+               receiverWalletId: receiverWalletIdFinal,
+
           description,
           idempotencyKey,
           deviceId,
@@ -479,3 +435,4 @@ declare global {
     }
   }
 }
+

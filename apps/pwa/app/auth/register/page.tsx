@@ -45,6 +45,7 @@ export default function RegisterPage() {
         pin,
       );
       if (res.success && res.data) {
+        localStorage.setItem("userId", res.data.userId);
         localStorage.setItem("accessToken", res.data.accessToken);
         localStorage.setItem("refreshToken", res.data.refreshToken || "");
         localStorage.setItem("walletId", res.data.walletId || "");
