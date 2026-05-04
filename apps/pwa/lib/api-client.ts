@@ -5,7 +5,7 @@
 import axios, { AxiosInstance } from "axios";
 import { v4 as uuidv4 } from "uuid";
 
-interface ApiResponse<T = unknown> {
+export interface ApiResponse<T = unknown> {
   success: boolean;
   data?: T;
   error?: {
@@ -14,6 +14,15 @@ interface ApiResponse<T = unknown> {
     statusCode: number;
   };
 }
+
+export type AuthResult = {
+  userId: string;
+  accessToken: string;
+  refreshToken?: string;
+  walletId?: string;
+  walletNumber?: string;
+  user?: { kycTier?: string };
+};
 
 type AuthTokens = {
   accessToken: string;
@@ -230,6 +239,11 @@ class AhavaApiClient {
   // KYC Methods
   async getKycStatus(userId: string): Promise<ApiResponse> {
     const response = await this.client.get(`/kyc/user/${userId}`);
+    return response.data;
+  }
+
+  async getUserDetails(): Promise<ApiResponse<{ kycTier: string }>> {
+    const response = await this.client.get("/auth/me");
     return response.data;
   }
 

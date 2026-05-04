@@ -2,7 +2,8 @@
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE EXTENSION IF NOT EXISTS "pg_trgm";
-CREATE EXTENSION IF NOT EXISTS "timescaledb";
+-- TimescaleDB extension creation skipped due to Prisma shadow database version conflicts
+-- Run manually on production: CREATE EXTENSION IF NOT EXISTS "timescaledb";
 
 -- CreateEnum
 CREATE TYPE "public"."KycTier" AS ENUM ('TIER_0', 'TIER_1', 'TIER_2', 'MERCHANT');

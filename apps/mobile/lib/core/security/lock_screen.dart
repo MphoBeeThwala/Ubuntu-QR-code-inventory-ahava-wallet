@@ -40,7 +40,7 @@ class _LockScreenState extends State<LockScreen> {
       if (!canCheck || !isAvailable) return;
 
       final authenticated = await _localAuth.authenticate(
-        localizedReason: 'Unlock Ubuntu with biometrics',
+        localizedReason: 'Unlock Ubuntu Wallet with biometrics',
         options: const AuthenticationOptions(
           stickyAuth: true,
           biometricOnly: true,

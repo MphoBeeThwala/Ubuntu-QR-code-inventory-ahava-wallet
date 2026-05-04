@@ -3,7 +3,7 @@
 import React, { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { apiClient } from "@/lib/api-client";
+import { apiClient, ApiResponse, AuthResult } from "@/lib/api-client";
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -40,21 +40,16 @@ export default function RegisterPage() {
 
     setLoading(true);
     try {
-      const res = await apiClient.register(cleaned, pin);
+      const res: ApiResponse<AuthResult> = await apiClient.register(
+        cleaned,
+        pin,
+      );
       if (res.success && res.data) {
         localStorage.setItem("accessToken", res.data.accessToken);
-        if (res.data.refreshToken) {
-          localStorage.setItem("refreshToken", res.data.refreshToken);
-        }
-        if (res.data.walletId) {
-          localStorage.setItem("walletId", res.data.walletId);
-        }
-        if (res.data.walletNumber) {
-          localStorage.setItem("walletNumber", res.data.walletNumber);
-        }
-        if (res.data.user?.kycTier) {
-          localStorage.setItem("kycTier", res.data.user.kycTier);
-        }
+        localStorage.setItem("refreshToken", res.data.refreshToken || "");
+        localStorage.setItem("walletId", res.data.walletId || "");
+        localStorage.setItem("walletNumber", res.data.walletNumber || "");
+        localStorage.setItem("kycTier", res.data.user?.kycTier || "");
         localStorage.setItem("deviceId", deviceId);
         router.replace("/dashboard");
       } else {

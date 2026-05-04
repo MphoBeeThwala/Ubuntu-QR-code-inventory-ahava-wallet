@@ -181,12 +181,8 @@ app.post(
         );
       }
 
-      if (amountCents <= 0) {
-        throw new AhavaError(
-          AhavaErrorCode.PAY_INVALID_AMOUNT,
-          "Amount must be positive",
-          { requestId: req.id },
-        );
+      if (isNaN(amountCents) || amountCents <= 0) {
+        throw new Error("Invalid amount");
       }
 
       // Idempotency check BEFORE opening transaction (read-only)
