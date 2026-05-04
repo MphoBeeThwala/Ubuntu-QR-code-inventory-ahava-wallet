@@ -67,7 +67,14 @@ export default function SendMoneyPage() {
     setLoading(true);
     setError("");
     try {
+      const senderWalletId = localStorage.getItem("walletId") ?? "";
+      if (!senderWalletId) {
+        setError("Wallet not found. Please sign in again.");
+        setStep("error");
+        return;
+      }
       const res = await apiClient.sendPayment(
+        senderWalletId,
         draft.recipient,
         draft.amountCents,
         draft.description,

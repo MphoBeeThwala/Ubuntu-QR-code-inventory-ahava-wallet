@@ -25,6 +25,7 @@ export type AuthResult = {
 };
 
 type AuthTokens = {
+  userId?: string;
   accessToken: string;
   refreshToken: string;
   walletId?: string;
@@ -90,7 +91,7 @@ class AhavaApiClient {
   async register(
     phone: string,
     pin: string,
-  ): Promise<ApiResponse<{ userId: string; accessToken: string }>> {
+  ): Promise<ApiResponse<AuthResult>> {
     const response = await this.client.post("/auth/register", {
       phoneNumber: phone,
       pin,
@@ -102,8 +103,12 @@ class AhavaApiClient {
   }
 
   async refresh(): Promise<ApiResponse> {
+    const userId = localStorage.getItem("userId");
+    const deviceId = this.getDeviceId();
     const response = await this.client.post("/auth/refresh", {
+      userId,
       refreshToken: this.refreshToken,
+      deviceId,
     });
     const { data } = response.data;
     this.accessToken = data.accessToken;
@@ -145,21 +150,73 @@ class AhavaApiClient {
       `/wallets/${walletId}/transactions`,
       { params: { limit, offset } },
     );
-    return response.data;
+    const raw = response.data;
+    if (raw.success && Array.isArray(raw.data?.transactions)) {
+      return {
+        ...raw,
+        data: {
+          transactions: raw.data.transactions.map(
+            (t: {
+              id: string;
+              transactionType: "DEBIT" | "CREDIT";
+              amount: string;
+              description?: string;
+              createdAt: string;
+              status: string;
+              paymentMethod?: string;
+              balanceAfter?: string;
+            }) => ({
+              id: t.id,
+              type: t.transactionType,
+              amountCents: Number(t.amount ?? 0),
+              description: t.description ?? "",
+              createdAt: t.createdAt,
+              status: t.status,
+              channel: t.paymentMethod ?? "",
+              balanceAfter: Number(t.balanceAfter ?? 0),
+            }),
+          ),
+        },
+      };
+    }
+    return raw;
   }
 
   // Payment Methods
   async sendPayment(
+    senderWalletId: string,
     recipientPhone: string,
     amountCents: number,
     description?: string,
   ): Promise<ApiResponse<{ transactionId: string }>> {
-    const response = await this.client.post("/payments", {
-      recipientPhone,
+    const recipient = recipientPhone.trim();
+    const payload: Record<string, unknown> = {
+      senderWalletId,
       amountCents,
       description,
+      idempotencyKey: uuidv4(),
+      paymentMethod: "UBUNTUPAY_WALLET",
+      deviceId: this.getDeviceId(),
+    };
+    if (recipient.toUpperCase().startsWith("AHV-")) {
+      payload.receiverWalletNumber = recipient.toUpperCase();
+    } else {
+      payload.recipientPhone = recipient;
+    }
+    const response = await this.client.post("/payments", {
+      ...payload,
     });
-    return response.data;
+    const raw = response.data;
+    if (raw.success) {
+      return {
+        ...raw,
+        data: {
+          transactionId:
+            raw.data?.transactionId ?? raw.data?.transaction?.debit?.id ?? "",
+        },
+      };
+    }
+    return raw;
   }
 
   // QR Code Methods
@@ -223,7 +280,14 @@ class AhavaApiClient {
 
   async getUserDetails(): Promise<ApiResponse<{ kycTier: string }>> {
     const response = await this.client.get("/auth/me");
-    return response.data;
+    const raw = response.data;
+    if (raw.success && raw.data?.user) {
+      return {
+        ...raw,
+        data: { kycTier: raw.data.user.kycTier },
+      };
+    }
+    return raw;
   }
 
   async uploadKycDocument(

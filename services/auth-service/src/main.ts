@@ -13,6 +13,7 @@ import express, { Request, Response, NextFunction } from "express";
 import { v4 as uuidv4 } from "uuid";
 import { PrismaClient } from "@prisma/client";
 import * as crypto from "crypto";
+import * as jwt from "jsonwebtoken";
 import {
   AhavaError,
   AhavaErrorCode,
@@ -24,6 +25,7 @@ import {
   verifyPin,
   generateAccessToken,
   generateRefreshToken,
+  parseBearerToken,
 } from "@ahava/shared-crypto";
 import { sendSms, welcomeMessage, loginAlertMessage } from "./sms";
 import { writeAuditLog } from "@ahava/shared-audit";
@@ -54,6 +56,77 @@ app.get("/health", (req, res) => {
   res.json(
     createSuccessResponse({ status: "ok", service: "auth-service" }, req.id),
   );
+});
+
+// GET /auth/me - Return current authenticated user profile
+app.get("/auth/me", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const token = parseBearerToken(req.headers.authorization);
+    if (!token) {
+      throw new AhavaError(
+        AhavaErrorCode.AUTH_UNAUTHORIZED,
+        "Authorization header missing or malformed",
+        { requestId: req.id },
+      );
+    }
+
+    const publicKey = (process.env.JWT_PUBLIC_KEY || "").replace(/\\n/g, "\n");
+    if (!publicKey) {
+      throw new AhavaError(
+        AhavaErrorCode.INTERNAL_SERVER_ERROR,
+        "JWT public key not configured",
+        { requestId: req.id },
+      );
+    }
+
+    const payload = jwt.verify(token, publicKey, {
+      algorithms: ["RS256"],
+      issuer: "ahava-ewallet",
+      audience: "ahava-api",
+    }) as Record<string, unknown>;
+
+    const userId = (payload.userId ?? payload.sub) as string | undefined;
+    if (!userId) {
+      throw new AhavaError(
+        AhavaErrorCode.AUTH_INVALID_TOKEN,
+        "Invalid access token payload",
+        { requestId: req.id },
+      );
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        phoneNumber: true,
+        kycTier: true,
+        preferredLanguage: true,
+        isDeleted: true,
+      },
+    });
+
+    if (!user || user.isDeleted) {
+      throw new AhavaError(AhavaErrorCode.AUTH_UNAUTHORIZED, "User not found", {
+        requestId: req.id,
+      });
+    }
+
+    res.json(
+      createSuccessResponse(
+        {
+          user: {
+            id: user.id,
+            phoneNumber: user.phoneNumber,
+            kycTier: user.kycTier,
+            preferredLanguage: user.preferredLanguage,
+          },
+        },
+        req.id,
+      ),
+    );
+  } catch (error) {
+    next(error);
+  }
 });
 
 // POST /auth/register
