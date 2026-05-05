@@ -68,21 +68,7 @@
       },
       "build": {
         "builder": "NIXPACKS",
-        "buildCommand": "npx prisma generate && npm run build"
-      },
-      "deploy": {
-        "startCommand": "npm start"
-      },
-      "healthcheckPath": "/health"
-    },
-    {
-      "name": "kyc-service",
-      "source": {
-        "root": "services/kyc-service"
-      },
-      "build": {
-        "builder": "NIXPACKS",
-        "buildCommand": "npx prisma generate && npm run build"
+        "buildCommand": "npm run build"
       },
       "deploy": {
         "startCommand": "npm start"
@@ -104,9 +90,9 @@
       "healthcheckPath": "/health"
     },
     {
-      "name": "reporting-service",
+      "name": "kyc-service",
       "source": {
-        "root": "services/reporting-service"
+        "root": "services/kyc-service"
       },
       "build": {
         "builder": "NIXPACKS",
@@ -132,10 +118,49 @@
       "healthcheckPath": "/health"
     },
     {
-      "name": "ussd-service",
+      "name": "reporting-service",
       "source": {
-        "root": "services/ussd-service"
+        "root": "services/reporting-service"
       },
+      "build": {
+        "builder": "NIXPACKS",
+        "buildCommand": "npx prisma generate && npm run build"
+      },
+      "deploy": {
+        "startCommand": "npm start"
+      },
+      "healthcheckPath": "/health"
+    },
+    {
+      "name": "ussd-gateway",
+      "source": {
+        "root": "services/ussd-gateway"
+      },
+      "build": {
+        "builder": "NIXPACKS",
+        "buildCommand": "npm run build"
+      },
+      "deploy": {
+        "startCommand": "npm start"
+      },
+      "healthcheckPath": "/health"
+    },
+    {
+      "name": "agent-service",
+      "source": {
+        "root": "services/agent-service"
+      },
+      "build": {
+        "builder": "NIXPACKS",
+        "buildCommand": "npm run build"
+      },
+      "deploy": {
+        "startCommand": "npm start"
+      },
+      "healthcheckPath": "/health"
+    }
+  ]
+}
       "build": {
         "builder": "NIXPACKS",
         "buildCommand": "npx prisma generate && npm run build"
