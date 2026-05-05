@@ -132,38 +132,13 @@
       "healthcheckPath": "/health"
     },
     {
-      "name": "ussd-gateway",
+      "name": "ussd-service",
       "source": {
-        "root": "services/ussd-gateway"
+        "root": "services/ussd-service"
       },
       "build": {
         "builder": "NIXPACKS",
         "buildCommand": "npm run build"
-      },
-      "deploy": {
-        "startCommand": "npm start"
-      },
-      "healthcheckPath": "/health"
-    },
-    {
-      "name": "agent-service",
-      "source": {
-        "root": "services/agent-service"
-      },
-      "build": {
-        "builder": "NIXPACKS",
-        "buildCommand": "npm run build"
-      },
-      "deploy": {
-        "startCommand": "npm start"
-      },
-      "healthcheckPath": "/health"
-    }
-  ]
-}
-      "build": {
-        "builder": "NIXPACKS",
-        "buildCommand": "npx prisma generate && npm run build"
       },
       "deploy": {
         "startCommand": "npm start"
