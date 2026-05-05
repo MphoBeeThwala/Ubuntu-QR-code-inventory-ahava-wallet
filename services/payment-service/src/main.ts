@@ -268,10 +268,50 @@ app.post(
           const senderWallet = lockedWallets.find(
             (w: WalletRow) => w.id === senderWalletId,
           );
-                     const receiverWallet = lockedWallets.find(
-             (w) => w.id === receiverWalletIdFinal,
-           );
+          const receiverWallet = lockedWallets.find(
+            (w: WalletRow) => w.id === receiverWalletIdFinal,
+          );
 
+          if (!senderWallet || senderWallet.isDeleted) {
+            throw new AhavaError(
+              AhavaErrorCode.PAY_SENDER_NOT_FOUND,
+              "Sender wallet not found or deleted",
+              { requestId: req.id },
+            );
+          }
+          if (!receiverWallet || receiverWallet.isDeleted) {
+            throw new AhavaError(
+              AhavaErrorCode.PAY_COUNTERPARTY_NOT_FOUND,
+              "Receiver wallet not found or deleted",
+              { requestId: req.id },
+            );
+          }
+
+          const feeAmount = Math.max(0, Math.floor(amountCents * 0.01));
+          const totalDebitCents = amountCents + feeAmount;
+          const senderBalanceAfter = senderWallet.balance - BigInt(totalDebitCents);
+          const receiverBalanceAfter = receiverWallet.balance + BigInt(amountCents);
+
+          if (senderWallet.balance < BigInt(totalDebitCents)) {
+            throw new AhavaError(
+              AhavaErrorCode.PAY_INSUFFICIENT_FUNDS,
+              "Insufficient funds",
+              { requestId: req.id },
+            );
+          }
+
+          const debitTxn = await tx.walletTransaction.create({
+            data: {
+              walletId: senderWalletId,
+              transactionType: "DEBIT",
+              status: "COMPLETED",
+              paymentMethod: paymentMethod || "UBUNTUPAY_WALLET",
+              amount: amountCents,
+              feeAmount,
+              netAmount: amountCents - feeAmount,
+              balanceBefore: senderWallet.balance,
+              balanceAfter: senderBalanceAfter,
+              counterpartyWalletId: receiverWalletIdFinal,
               description,
               idempotencyKey,
               deviceId,
@@ -279,10 +319,10 @@ app.post(
             },
           });
 
-          // Create credit record (receiver)
+          const creditIdempotencyKey = `credit-${idempotencyKey}`;
           const creditTxn = await tx.walletTransaction.create({
             data: {
-              walletId: resolvedReceiverWalletId,
+              walletId: receiverWalletIdFinal,
               transactionType: "CREDIT",
               status: "COMPLETED",
               paymentMethod: paymentMethod || "UBUNTUPAY_WALLET",
@@ -297,31 +337,29 @@ app.post(
             },
           });
 
-          // Update wallet balances atomically
           await tx.wallet.update({
             where: { id: senderWalletId },
-            data: { balance: { decrement: totalDebitCents } },
+            data: { balance: { decrement: BigInt(totalDebitCents) } },
           });
           await tx.wallet.update({
-             where: { id: receiverWalletIdFinal },
-             data: { balance: { increment: amountCents } },
-
+            where: { id: receiverWalletIdFinal },
+            data: { balance: { increment: BigInt(amountCents) } },
           });
 
-          // Fee pool (best-effort — find inside tx to stay consistent)
+          const feeIdempotencyKey = `fee-${idempotencyKey}`;
           const feePoolWallet = await tx.wallet.findFirst({
             where: { walletType: "FEE_POOL" },
           });
-          if (feePoolWallet) {
+          if (feePoolWallet && feeAmount > 0) {
             await tx.walletTransaction.create({
               data: {
                 walletId: feePoolWallet.id,
                 transactionType: "FEE",
                 status: "COMPLETED",
                 paymentMethod: "UBUNTUPAY_WALLET",
-                amount: feeAmount,
+                amount: BigInt(feeAmount),
                 feeAmount: 0,
-                netAmount: feeAmount,
+                netAmount: BigInt(feeAmount),
                 balanceBefore: feePoolWallet.balance,
                 balanceAfter: feePoolWallet.balance + BigInt(feeAmount),
                 description: `Fee for ${idempotencyKey}`,
@@ -330,7 +368,7 @@ app.post(
             });
             await tx.wallet.update({
               where: { id: feePoolWallet.id },
-              data: { balance: { increment: feeAmount } },
+              data: { balance: { increment: BigInt(feeAmount) } },
             });
           }
 
@@ -373,9 +411,7 @@ app.post(
           amountCents,
           feeAmountCents: result.feeAmount,
           paymentMethod: paymentMethod || "UBUNTUPAY_WALLET",
-               counterpartyWalletId: receiverWalletIdFinal,
-               receiverWalletId: receiverWalletIdFinal,
-
+          counterpartyWalletId: receiverWalletIdFinal,
           description,
           idempotencyKey,
           deviceId,
