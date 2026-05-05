@@ -274,7 +274,7 @@ app.post(
 
           if (!senderWallet || senderWallet.isDeleted) {
             throw new AhavaError(
-              AhavaErrorCode.PAY_SENDER_NOT_FOUND,
+              AhavaErrorCode.WAL_NOT_FOUND,
               "Sender wallet not found or deleted",
               { requestId: req.id },
             );
@@ -294,7 +294,7 @@ app.post(
 
           if (senderWallet.balance < BigInt(totalDebitCents)) {
             throw new AhavaError(
-              AhavaErrorCode.PAY_INSUFFICIENT_FUNDS,
+              AhavaErrorCode.WAL_INSUFFICIENT_BALANCE,
               "Insufficient funds",
               { requestId: req.id },
             );
