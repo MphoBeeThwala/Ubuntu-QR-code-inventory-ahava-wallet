@@ -9,6 +9,7 @@
     "packages/*"
   ],
   "scripts": {
+    "start": "echo 'Ahava eWallet — use Railway service routing to access individual services'",
     "prepare": "husky install",
     "dev": "npm run dev:docker && npm run dev:services",
     "dev:docker": "docker-compose up -d postgres redis",

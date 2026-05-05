@@ -2,9 +2,6 @@
   "build": {
     "builder": "NIXPACKS"
   },
-  "deploy": {
-    "startCommand": "npm start"
-  },
   "services": [
     {
       "name": "pwa",
