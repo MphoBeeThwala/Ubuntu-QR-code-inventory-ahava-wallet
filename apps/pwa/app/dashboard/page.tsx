@@ -48,13 +48,13 @@ export default function DashboardPage() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
   const [balanceVisible, setBalanceVisible] = useState(true);
-  const [kycTier, setKycTier] = useState<string>("");
+  const [_kycTier, _setKycTier] = useState<string>("");
 
   const updateKycTier = async () => {
     const userRes = await apiClient.getUserDetails();
     if (userRes.success && userRes.data) {
       localStorage.setItem("kycTier", userRes.data.kycTier);
-      setKycTier(userRes.data.kycTier);
+      _setKycTier(userRes.data.kycTier);
     }
   };
 
