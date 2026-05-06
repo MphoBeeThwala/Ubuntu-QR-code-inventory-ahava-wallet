@@ -1,20 +1,13 @@
 {
   "$schema": "https://railway.com/railway.schema.json",
   "build": {
-    "builder": "RAILPACK",
-    "buildCommand": "npx turbo run build --filter=@ahava/notification-service..."
+    "builder": "NIXPACKS",
+    "buildCommand": "npx prisma generate --schema=../../prisma/schema.prisma && npm run build"
   },
   "deploy": {
-    "startCommand": "npm run start --workspace @ahava/notification-service",
+    "startCommand": "npm run start",
     "healthcheckPath": "/health",
     "restartPolicyType": "ON_FAILURE",
     "restartPolicyMaxRetries": 10
-  },
-  "watchPatterns": [
-    "/package.json",
-    "/package-lock.json",
-    "/turbo.json",
-    "/packages/shared-errors/**",
-    "/services/notification-service/**"
-  ]
+  }
 }

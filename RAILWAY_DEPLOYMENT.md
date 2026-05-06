@@ -16,24 +16,18 @@ This repo now passes:
 
 This is a **shared JavaScript monorepo**. Railway's current docs treat that differently from isolated subdirectory apps.
 
-- Do **not** deploy these services by setting the service root to `apps/...` or `services/...` and expecting shared packages to still work.
-- Do **not** rely on a single root `railway.json` to define multiple services. Railway config-as-code is resolved per deployment/service.
-- Keep each Railway service connected to the **repository root**.
-- Use the per-service config files that now live in each deployable package directory, for example:
-  - `/apps/pwa/railway.json`
-  - `/apps/agent-portal/railway.json`
-  - `/services/api-gateway/railway.json`
-  - `/services/auth-service/railway.json`
-  - `/services/wallet-service/railway.json`
-  - `/services/payment-service/railway.json`
-  - `/services/notification-service/railway.json`
-  - `/services/kyc-service/railway.json`
-  - `/services/aml-service/railway.json`
-  - `/services/reporting-service/railway.json`
-  - `/services/ussd-service/railway.json`
-  - `/services/agent-service/railway.json`
+- Remove the root deployment (e.g., "steadfast-harmony").
+- Create individual services in the Railway Dashboard for each backend and frontend component.
+- For each service, set the **Root Directory** to its respective path (e.g., `services/api-gateway`).
+- Use the simplified build/start commands:
+  - **Build**: `npm run build` (Note: Backend services will automatically run `prisma generate` via their `railway.json`).
+  - **Start**: `npm run start`
 
-Each of those files builds from the repo root with workspace-aware commands and scoped watch patterns.
+Each service now has a local `railway.json` that is optimized for being run from its own subdirectory.
+
+### Root Configuration
+
+A `railway.toml` file has been added to the repository root. This file defines all services and can be used by the Railway CLI to manage the project, or as a reference for manual setup.
 
 ## Recommended Railway Setup
 
@@ -41,8 +35,8 @@ Each of those files builds from the repo root with workspace-aware commands and 
 2. Add one Railway service per deployable app/service.
 3. For each Railway service:
    - Connect the same GitHub repository.
-   - Leave the source at the repository root.
-   - In service settings, set the Config as Code path to that service's `railway.json`.
+   - Set the **Root Directory** to the service's folder (e.g., `services/auth-service`).
+   - Railway will automatically detect the `railway.json` in that directory.
 4. Expose public domains only where needed:
    - `pwa`
    - `agent-portal` if you want the internal portal public

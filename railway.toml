@@ -1,0 +1,75 @@
+# Ahava eWallet — Root Railway Configuration
+# This file defines all services for the Railway monorepo.
+# Each service points to its respective directory and uses local npm commands.
+
+[services.api-gateway]
+name = "api-gateway"
+sourceDirectory = "services/api-gateway"
+buildCommand = "npm run build"
+startCommand = "npm run start"
+
+[services.auth-service]
+name = "auth-service"
+sourceDirectory = "services/auth-service"
+buildCommand = "npx prisma generate --schema=../../prisma/schema.prisma && npm run build"
+startCommand = "npm run start"
+
+[services.wallet-service]
+name = "wallet-service"
+sourceDirectory = "services/wallet-service"
+buildCommand = "npx prisma generate --schema=../../prisma/schema.prisma && npm run build"
+startCommand = "npm run start"
+
+[services.payment-service]
+name = "payment-service"
+sourceDirectory = "services/payment-service"
+buildCommand = "npx prisma generate --schema=../../prisma/schema.prisma && npm run build"
+startCommand = "npm run start"
+
+[services.notification-service]
+name = "notification-service"
+sourceDirectory = "services/notification-service"
+buildCommand = "npx prisma generate --schema=../../prisma/schema.prisma && npm run build"
+startCommand = "npm run start"
+
+[services.aml-service]
+name = "aml-service"
+sourceDirectory = "services/aml-service"
+buildCommand = "npx prisma generate --schema=../../prisma/schema.prisma && npm run build"
+startCommand = "npm run start"
+
+[services.kyc-service]
+name = "kyc-service"
+sourceDirectory = "services/kyc-service"
+buildCommand = "npx prisma generate --schema=../../prisma/schema.prisma && npm run build"
+startCommand = "npm run start"
+
+[services.reporting-service]
+name = "reporting-service"
+sourceDirectory = "services/reporting-service"
+buildCommand = "npx prisma generate --schema=../../prisma/schema.prisma && npm run build"
+startCommand = "npm run start"
+
+[services.ussd-service]
+name = "ussd-service"
+sourceDirectory = "services/ussd-service"
+buildCommand = "npx prisma generate --schema=../../prisma/schema.prisma && npm run build"
+startCommand = "npm run start"
+
+[services.agent-service]
+name = "agent-service"
+sourceDirectory = "services/agent-service"
+buildCommand = "npx prisma generate --schema=../../prisma/schema.prisma && npm run build"
+startCommand = "npm run start"
+
+[services.pwa]
+name = "pwa"
+sourceDirectory = "apps/pwa"
+buildCommand = "npm run build"
+startCommand = "npm run start"
+
+[services.agent-portal]
+name = "agent-portal"
+sourceDirectory = "apps/agent-portal"
+buildCommand = "npm run build"
+startCommand = "npm run start"
