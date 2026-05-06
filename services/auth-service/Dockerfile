@@ -8,6 +8,9 @@ RUN apk add --no-cache python3 make g++
 # Root workspace manifests
 COPY package.json package-lock.json turbo.json ./
 
+# Copy prisma files before npm ci (needed for postinstall script)
+COPY prisma/ prisma/
+
 # All shared-package manifests (npm workspaces need these for resolution)
 COPY packages/shared-errors/package.json  packages/shared-errors/
 COPY packages/shared-crypto/package.json  packages/shared-crypto/
@@ -17,8 +20,7 @@ COPY services/auth-service/package.json   services/auth-service/
 
 RUN npm ci
 
-# Prisma schema (generates client into node_modules)
-COPY prisma/ prisma/
+# Generate Prisma client after npm install
 RUN npx prisma generate
 
 # Shared package sources
