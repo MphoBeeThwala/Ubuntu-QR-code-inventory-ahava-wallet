@@ -71,3 +71,6 @@ auth-sms-*.log
 ahava-backup*/
 
 runlogs/
+
+# Accidental nested repo copy that can confuse Railway uploads
+Ubuntu-QR-code-inventory-ahava-wallet/

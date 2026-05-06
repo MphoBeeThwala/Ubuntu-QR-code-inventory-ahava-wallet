@@ -10,6 +10,7 @@ COPY package.json package-lock.json turbo.json ./
 
 # All shared-package manifests (npm workspaces need these for resolution)
 COPY packages/shared-errors/package.json  packages/shared-errors/
+COPY packages/shared-audit/package.json   packages/shared-audit/
 COPY packages/shared-crypto/package.json  packages/shared-crypto/
 COPY packages/shared-events/package.json  packages/shared-events/
 COPY packages/shared-types/package.json   packages/shared-types/
@@ -28,7 +29,7 @@ COPY packages/ packages/
 COPY services/auth-service/src/       services/auth-service/src/
 COPY services/auth-service/tsconfig.json services/auth-service/
 
-RUN npm run build --workspace=services/auth-service
+RUN npm run build --workspace=@ahava/auth-service
 
 # ─── Stage 2: Runner ─────────────────────────────────────────────
 FROM node:20-alpine AS runner
