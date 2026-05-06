@@ -72,6 +72,25 @@ dockerfilePath = "Dockerfile.service"
 buildCommand = "docker build -f Dockerfile.service --build-arg SERVICE_NAME=agent-service -t agent-service ."
 startCommand = "node dist/main.js"
 
+# ─── Shared Variables (available to ALL services) ─────────────────
+[variables]
+NODE_ENV = "production"
+PORT = "3000"
+
+# Inter-service URLs (Railway internal networking)
+AUTH_SERVICE_URL = "http://auth-service.railway.internal:3000"
+WALLET_SERVICE_URL = "http://wallet-service.railway.internal:3000"
+PAYMENT_SERVICE_URL = "http://payment-service.railway.internal:3000"
+KYC_SERVICE_URL = "http://kyc-service.railway.internal:3000"
+NOTIFICATION_SERVICE_URL = "http://notification-service.railway.internal:3000"
+AGENT_SERVICE_URL = "http://agent-service.railway.internal:3000"
+AML_SERVICE_URL = "http://aml-service.railway.internal:3000"
+REPORTING_SERVICE_URL = "http://reporting-service.railway.internal:3000"
+USSD_SERVICE_URL = "http://ussd-service.railway.internal:3000"
+API_GATEWAY_URL = "http://api-gateway.railway.internal:3000"
+LEDGER_SERVICE_URL = "http://ledger-service.railway.internal:3004"
+PAYMENT_ORCHESTRATOR_URL = "http://payment-orchestrator.railway.internal:3005"
+
 [services.pwa]
 name = "pwa"
 sourceDirectory = "apps/pwa"
