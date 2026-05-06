@@ -23,14 +23,8 @@ RUN npm ci
 # Generate Prisma client after npm install
 RUN npx prisma generate
 
-# Shared package sources
+# Shared package sources (TypeScript - compiled by auth-service)
 COPY packages/ packages/
-
-# Build shared packages first (required by auth-service)
-RUN npm run build --workspace=packages/shared-types
-RUN npm run build --workspace=packages/shared-errors
-RUN npm run build --workspace=packages/shared-crypto
-RUN npm run build --workspace=packages/shared-events
 
 # Service source + tsconfig
 COPY services/auth-service/src/       services/auth-service/src/
