@@ -14,6 +14,7 @@
 
 import express, { Express, Request, Response, NextFunction } from "express";
 import helmet from "helmet";
+import cors from "cors";
 import { v4 as uuidv4 } from "uuid";
 import {
   AhavaError,
@@ -40,6 +41,16 @@ app.set("trust proxy", 1);
 
 app.use(express.json({ limit: "1mb" }));
 app.use(express.urlencoded({ extended: true, limit: "1mb" }));
+
+// CORS for PWA and Flutter web
+app.use(
+  cors({
+    origin: process.env.CORS_ORIGINS?.split(",") || ["http://localhost:3000", "http://localhost:3010"],
+    credentials: true,
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization", "X-Request-ID", "X-Device-Fingerprint"],
+  })
+);
 
 app.use(
   helmet({
