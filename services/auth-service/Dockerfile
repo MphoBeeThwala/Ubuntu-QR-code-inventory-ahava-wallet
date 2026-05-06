@@ -26,6 +26,12 @@ RUN npx prisma generate
 # Shared package sources
 COPY packages/ packages/
 
+# Build shared packages first (required by auth-service)
+RUN npm run build --workspace=packages/shared-types
+RUN npm run build --workspace=packages/shared-errors
+RUN npm run build --workspace=packages/shared-crypto
+RUN npm run build --workspace=packages/shared-events
+
 # Service source + tsconfig
 COPY services/auth-service/src/       services/auth-service/src/
 COPY services/auth-service/tsconfig.json services/auth-service/
