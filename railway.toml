@@ -5,62 +5,72 @@
 [services.api-gateway]
 name = "api-gateway"
 sourceDirectory = "."
-buildCommand = "docker build -f services/api-gateway/Dockerfile -t api-gateway ."
-startCommand = "node services/api-gateway/dist/main.js"
+dockerfilePath = "Dockerfile.service"
+buildCommand = "docker build -f Dockerfile.service --build-arg SERVICE_NAME=api-gateway -t api-gateway ."
+startCommand = "node dist/main.js"
 
 [services.auth-service]
 name = "auth-service"
 sourceDirectory = "."
-buildCommand = "docker build -f services/auth-service/Dockerfile -t auth-service ."
-startCommand = "node services/auth-service/dist/main.js"
+dockerfilePath = "Dockerfile.service"
+buildCommand = "docker build -f Dockerfile.service --build-arg SERVICE_NAME=auth-service -t auth-service ."
+startCommand = "node dist/main.js"
 
 [services.wallet-service]
 name = "wallet-service"
 sourceDirectory = "."
-buildCommand = "docker build -f services/wallet-service/Dockerfile -t wallet-service ."
-startCommand = "node services/wallet-service/dist/main.js"
+dockerfilePath = "Dockerfile.service"
+buildCommand = "docker build -f Dockerfile.service --build-arg SERVICE_NAME=wallet-service -t wallet-service ."
+startCommand = "node dist/main.js"
 
 [services.payment-service]
 name = "payment-service"
 sourceDirectory = "."
-buildCommand = "docker build -f services/payment-service/Dockerfile -t payment-service ."
-startCommand = "node services/payment-service/dist/main.js"
+dockerfilePath = "Dockerfile.service"
+buildCommand = "docker build -f Dockerfile.service --build-arg SERVICE_NAME=payment-service -t payment-service ."
+startCommand = "node dist/main.js"
 
 [services.notification-service]
 name = "notification-service"
 sourceDirectory = "."
-buildCommand = "docker build -f services/notification-service/Dockerfile -t notification-service ."
-startCommand = "node services/notification-service/dist/main.js"
+dockerfilePath = "Dockerfile.service"
+buildCommand = "docker build -f Dockerfile.service --build-arg SERVICE_NAME=notification-service -t notification-service ."
+startCommand = "node dist/main.js"
 
 [services.aml-service]
 name = "aml-service"
 sourceDirectory = "."
-buildCommand = "docker build -f services/aml-service/Dockerfile -t aml-service ."
-startCommand = "node services/aml-service/dist/main.js"
+dockerfilePath = "Dockerfile.service"
+buildCommand = "docker build -f Dockerfile.service --build-arg SERVICE_NAME=aml-service -t aml-service ."
+startCommand = "node dist/main.js"
 
 [services.kyc-service]
 name = "kyc-service"
 sourceDirectory = "."
-buildCommand = "docker build -f services/kyc-service/Dockerfile -t kyc-service ."
-startCommand = "node services/kyc-service/dist/main.js"
+dockerfilePath = "Dockerfile.service"
+buildCommand = "docker build -f Dockerfile.service --build-arg SERVICE_NAME=kyc-service -t kyc-service ."
+startCommand = "node dist/main.js"
 
 [services.reporting-service]
 name = "reporting-service"
 sourceDirectory = "."
-buildCommand = "docker build -f services/reporting-service/Dockerfile -t reporting-service ."
-startCommand = "node services/reporting-service/dist/main.js"
+dockerfilePath = "Dockerfile.service"
+buildCommand = "docker build -f Dockerfile.service --build-arg SERVICE_NAME=reporting-service -t reporting-service ."
+startCommand = "node dist/main.js"
 
 [services.ussd-service]
 name = "ussd-service"
 sourceDirectory = "."
-buildCommand = "docker build -f services/ussd-service/Dockerfile -t ussd-service ."
-startCommand = "node services/ussd-service/dist/main.js"
+dockerfilePath = "Dockerfile.service"
+buildCommand = "docker build -f Dockerfile.service --build-arg SERVICE_NAME=ussd-service -t ussd-service ."
+startCommand = "node dist/main.js"
 
 [services.agent-service]
 name = "agent-service"
 sourceDirectory = "."
-buildCommand = "docker build -f services/agent-service/Dockerfile -t agent-service ."
-startCommand = "node services/agent-service/dist/main.js"
+dockerfilePath = "Dockerfile.service"
+buildCommand = "docker build -f Dockerfile.service --build-arg SERVICE_NAME=agent-service -t agent-service ."
+startCommand = "node dist/main.js"
 
 [services.pwa]
 name = "pwa"

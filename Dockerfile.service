@@ -1,0 +1,66 @@
+# Ahava eWallet — Unified Service Dockerfile
+# Usage: docker build -f Dockerfile.service --build-arg SERVICE_NAME=auth-service -t auth-service .
+
+ARG SERVICE_NAME=auth-service
+
+# ─── Stage 1: Builder ────────────────────────────────────────────
+FROM node:20-alpine AS builder
+ARG SERVICE_NAME
+
+WORKDIR /app
+
+# Install build tools
+RUN apk add --no-cache python3 make g++
+
+# Root workspace manifests
+COPY package.json package-lock.json turbo.json ./
+
+# Copy prisma files first (needed for postinstall)
+COPY prisma/ prisma/
+
+# All shared-package manifests
+COPY packages/shared-errors/package.json  packages/shared-errors/
+COPY packages/shared-crypto/package.json  packages/shared-crypto/
+COPY packages/shared-events/package.json  packages/shared-events/
+COPY packages/shared-types/package.json   packages/shared-types/
+COPY services/${SERVICE_NAME}/package.json   services/${SERVICE_NAME}/
+
+# Install deps (triggers postinstall → prisma generate)
+RUN npm ci
+
+# Generate Prisma client again to be safe
+RUN npx prisma generate
+
+# Shared package sources
+COPY packages/ packages/
+
+# Service source + tsconfig
+COPY services/${SERVICE_NAME}/src/       services/${SERVICE_NAME}/src/
+COPY services/${SERVICE_NAME}/tsconfig.json services/${SERVICE_NAME}/
+
+# Build the service
+RUN npm run build --workspace=services/${SERVICE_NAME}
+
+# ─── Stage 2: Runner ─────────────────────────────────────────────
+FROM node:20-alpine AS runner
+ARG SERVICE_NAME
+
+WORKDIR /app
+
+# Create non-root user
+RUN addgroup -g 1001 -S ahava && adduser -S ahava -u 1001 -G ahava
+
+# Copy built artifacts from builder
+COPY --from=builder --chown=ahava:ahava /app/node_modules          ./node_modules
+COPY --from=builder --chown=ahava:ahava /app/services/${SERVICE_NAME}/dist ./dist
+COPY --from=builder --chown=ahava:ahava /app/services/${SERVICE_NAME}/package.json ./
+
+# Switch to non-root user
+USER ahava
+
+# Default port (override with PORT env var)
+ENV PORT=3000
+EXPOSE ${PORT}
+
+# Run the service
+CMD ["node", "dist/main.js"]
