@@ -1,0 +1,25 @@
+{
+  "$schema": "https://railway.com/railway.schema.json",
+  "build": {
+    "builder": "RAILPACK",
+    "buildCommand": "npm run prisma:generate && npx turbo run build --filter=@ahava/aml-service..."
+  },
+  "deploy": {
+    "startCommand": "npm run start --workspace @ahava/aml-service",
+    "healthcheckPath": "/health",
+    "restartPolicyType": "ON_FAILURE",
+    "restartPolicyMaxRetries": 10
+  },
+  "watchPatterns": [
+    "/package.json",
+    "/package-lock.json",
+    "/turbo.json",
+    "/prisma/**",
+    "/packages/shared-audit/**",
+    "/packages/shared-crypto/**",
+    "/packages/shared-errors/**",
+    "/packages/shared-events/**",
+    "/packages/shared-types/**",
+    "/services/aml-service/**"
+  ]
+}

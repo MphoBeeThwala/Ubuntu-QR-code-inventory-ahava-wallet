@@ -25,11 +25,20 @@ jest.mock("@prisma/client", () => ({
 // ─── Mock BullMQ ─────────────────────────────────────────────────
 const mockQueueAdd = jest.fn().mockResolvedValue(undefined);
 const mockQueueClose = jest.fn().mockResolvedValue(undefined);
+const queueInstances: Array<{
+  add: jest.Mock;
+  close: jest.Mock;
+}> = [];
+
 jest.mock("bullmq", () => ({
-  Queue: jest.fn().mockImplementation(() => ({
-    add: mockQueueAdd.mockReturnValue(Promise.resolve().then(() => {})),
-    close: mockQueueClose,
-  })),
+  Queue: jest.fn().mockImplementation(() => {
+    const instance = {
+      add: jest.fn((...args: unknown[]) => mockQueueAdd(...args)),
+      close: jest.fn((...args: unknown[]) => mockQueueClose(...args)),
+    };
+    queueInstances.push(instance);
+    return instance;
+  }),
 }));
 
 jest.mock("@ahava/shared-events", () => ({
@@ -42,7 +51,14 @@ jest.mock("@ahava/shared-events", () => ({
 // ─── Import app AFTER all mocks ───────────────────────────────────
 import app from "../main";
 
-beforeEach(() => jest.clearAllMocks());
+const flushPromises = () => new Promise((resolve) => setImmediate(resolve));
+
+beforeEach(() => {
+  jest.clearAllMocks();
+  queueInstances.length = 0;
+  mockQueueAdd.mockResolvedValue(undefined);
+  mockQueueClose.mockResolvedValue(undefined);
+});
 
 // ─────────────────────────────────────────────────────────────────
 describe("GET /health", () => {
@@ -120,6 +136,45 @@ describe("POST /kyc/document/upload", () => {
       "kyc:document:uploaded",
       expect.anything(),
     );
+  });
+
+  it("closes both queues after successful event publication", async () => {
+    const doc = { id: "doc-2", createdAt: new Date() };
+    mockPrisma.kycDocument.create.mockResolvedValue(doc);
+
+    await request(app).post("/kyc/document/upload").send(validPayload);
+    await flushPromises();
+
+    expect(queueInstances).toHaveLength(2);
+    expect(queueInstances[0].close).toHaveBeenCalledTimes(1);
+    expect(queueInstances[1].close).toHaveBeenCalledTimes(1);
+  });
+
+  it("logs queue publish failures without failing the request", async () => {
+    const consoleSpy = jest
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
+    const doc = { id: "doc-3", createdAt: new Date() };
+    mockPrisma.kycDocument.create.mockResolvedValue(doc);
+    mockQueueAdd
+      .mockRejectedValueOnce(new Error("kyc queue down"))
+      .mockRejectedValueOnce(new Error("notif queue down"));
+
+    const res = await request(app)
+      .post("/kyc/document/upload")
+      .send(validPayload);
+    await flushPromises();
+
+    expect(res.status).toBe(201);
+    expect(consoleSpy).toHaveBeenCalledWith(
+      "[kyc-service] event publish failed:",
+      expect.any(Error),
+    );
+    expect(consoleSpy).toHaveBeenCalledWith(
+      "[kyc-service] notification publish failed:",
+      expect.any(Error),
+    );
+    consoleSpy.mockRestore();
   });
 
   it("returns 400 when required fields are missing", async () => {
@@ -221,6 +276,33 @@ describe("POST /kyc/tier-upgrade", () => {
     );
   });
 
+  it("falls back to TIER_0 limits for unknown tiers", async () => {
+    mockPrisma.user.findUnique.mockResolvedValue({
+      id: "user-uuid-1",
+      kycTier: "TIER_0",
+    });
+    mockPrisma.user.update.mockResolvedValue({
+      id: "user-uuid-1",
+      kycTier: "TIER_X",
+    });
+    mockPrisma.wallet.updateMany.mockResolvedValue({ count: 1 });
+    mockPrisma.auditLog.create.mockResolvedValue({});
+
+    await request(app)
+      .post("/kyc/tier-upgrade")
+      .send({ userId: "user-uuid-1", newTier: "TIER_X" });
+
+    expect(mockPrisma.wallet.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          dailyLimit: 50000,
+          monthlyLimit: 200000,
+          maxBalance: 250000,
+        }),
+      }),
+    );
+  });
+
   it("returns 400 when userId is missing", async () => {
     const res = await request(app)
       .post("/kyc/tier-upgrade")
@@ -241,5 +323,16 @@ describe("POST /kyc/tier-upgrade", () => {
       .post("/kyc/tier-upgrade")
       .send({ userId: "nonexistent", newTier: "TIER_1" });
     expect(res.status).toBe(403);
+  });
+
+  it("returns 500 on unexpected tier lookup errors", async () => {
+    mockPrisma.user.findUnique.mockRejectedValue(new Error("db down"));
+
+    const res = await request(app)
+      .post("/kyc/tier-upgrade")
+      .send({ userId: "user-uuid-1", newTier: "TIER_1" });
+
+    expect(res.status).toBe(500);
+    expect(res.body.error.code).toBe("INTERNAL_SERVER_ERROR");
   });
 });

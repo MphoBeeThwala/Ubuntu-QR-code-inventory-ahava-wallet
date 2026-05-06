@@ -679,11 +679,15 @@ app.use((err: Error, req: Request, res: Response, _next: NextFunction) => {
 // SERVER STARTUP
 // ─────────────────────────────────────────────────────────────────
 
-if (require.main === module) {
+export function startServer() {
   app.listen(PORT, () => {
     console.log(`✅ Auth Service listening on port ${PORT}`);
     console.log(`🏥 Health: http://localhost:${PORT}/health`);
   });
+}
+
+if (require.main === module) {
+  startServer();
 }
 
 export default app;

@@ -44,6 +44,7 @@ const mockHashPin = jest.fn();
 const mockVerifyPin = jest.fn();
 const mockGenerateAccessToken = jest.fn();
 const mockGenerateRefreshToken = jest.fn();
+const mockParseBearerToken = jest.fn();
 
 jest.mock("@ahava/shared-crypto", () => ({
   hashPin: (...args: unknown[]) => mockHashPin(...args),
@@ -51,10 +52,17 @@ jest.mock("@ahava/shared-crypto", () => ({
   generateAccessToken: (...args: unknown[]) => mockGenerateAccessToken(...args),
   generateRefreshToken: (...args: unknown[]) =>
     mockGenerateRefreshToken(...args),
+  parseBearerToken: (...args: unknown[]) => mockParseBearerToken(...args),
+}));
+
+const mockJwtVerify = jest.fn();
+
+jest.mock("jsonwebtoken", () => ({
+  verify: (...args: unknown[]) => mockJwtVerify(...args),
 }));
 
 // Import app AFTER mocks
-import app from "../main";
+import app, { startServer } from "../main";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -104,11 +112,14 @@ const registerPayload = () => ({
 
 beforeEach(() => {
   jest.clearAllMocks();
+  process.env.JWT_PUBLIC_KEY = "test-public-key";
 
   mockHashPin.mockResolvedValue("$argon2id$v=19$hashed");
   mockVerifyPin.mockResolvedValue(true);
   mockGenerateAccessToken.mockResolvedValue("access-token-mock");
   mockGenerateRefreshToken.mockResolvedValue("refresh-token-mock");
+  mockParseBearerToken.mockReturnValue("access-token-mock");
+  mockJwtVerify.mockReturnValue({ userId: "user-001" });
 
   mockPrisma.user.create.mockResolvedValue(makeUser());
   mockPrisma.wallet.create.mockResolvedValue({ id: "wallet-001" });
@@ -128,6 +139,98 @@ describe("GET /health", () => {
     expect(res.status).toBe(200);
     expect(res.body.data.status).toBe("ok");
     expect(res.body.data.service).toBe("auth-service");
+  });
+});
+
+describe("GET /auth/me", () => {
+  it("returns 403 when authorization header is missing", async () => {
+    mockParseBearerToken.mockReturnValue(null);
+
+    const res = await request(app).get("/auth/me");
+
+    expect(res.status).toBe(403);
+    expect(res.body.error.code).toBe("AUTH_UNAUTHORIZED");
+  });
+
+  it("returns 500 when JWT public key is not configured", async () => {
+    process.env.JWT_PUBLIC_KEY = "";
+
+    const res = await request(app)
+      .get("/auth/me")
+      .set("Authorization", "Bearer token");
+
+    expect(res.status).toBe(500);
+    expect(res.body.error.code).toBe("INTERNAL_SERVER_ERROR");
+  });
+
+  it("returns 401 when token payload has no user identifier", async () => {
+    mockJwtVerify.mockReturnValue({});
+
+    const res = await request(app)
+      .get("/auth/me")
+      .set("Authorization", "Bearer token");
+
+    expect(res.status).toBe(401);
+    expect(res.body.error.code).toBe("AUTH_INVALID_TOKEN");
+  });
+
+  it("returns 403 when the authenticated user is missing", async () => {
+    mockPrisma.user.findUnique.mockResolvedValue(null);
+
+    const res = await request(app)
+      .get("/auth/me")
+      .set("Authorization", "Bearer token");
+
+    expect(res.status).toBe(403);
+    expect(res.body.error.code).toBe("AUTH_UNAUTHORIZED");
+  });
+
+  it("returns 403 when the authenticated user is deleted", async () => {
+    mockPrisma.user.findUnique.mockResolvedValue(makeUser({ isDeleted: true }));
+
+    const res = await request(app)
+      .get("/auth/me")
+      .set("Authorization", "Bearer token");
+
+    expect(res.status).toBe(403);
+    expect(res.body.error.code).toBe("AUTH_UNAUTHORIZED");
+  });
+
+  it("returns the current user profile", async () => {
+    mockJwtVerify.mockReturnValue({ sub: "user-001" });
+    mockPrisma.user.findUnique.mockResolvedValue(makeUser());
+
+    const res = await request(app)
+      .get("/auth/me")
+      .set("Authorization", "Bearer token");
+
+    expect(res.status).toBe(200);
+    expect(mockPrisma.user.findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "user-001" },
+      }),
+    );
+    expect(res.body.data.user).toMatchObject({
+      id: "user-001",
+      phoneNumber: VALID_PHONE,
+      kycTier: "TIER_0",
+      preferredLanguage: "en",
+    });
+  });
+
+  it("returns 500 on unexpected lookup errors", async () => {
+    const consoleSpy = jest
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
+    mockPrisma.user.findUnique.mockRejectedValue(new Error("db down"));
+
+    const res = await request(app)
+      .get("/auth/me")
+      .set("Authorization", "Bearer token");
+
+    expect(res.status).toBe(500);
+    expect(res.body.error.code).toBe("INTERNAL_SERVER_ERROR");
+    consoleSpy.mockRestore();
   });
 });
 
@@ -585,5 +688,25 @@ describe("POST /auth/device-bind", () => {
       .send({ userId: "user-001" });
     expect(res.status).toBe(400);
     expect(res.body.error.code).toBe("VAL_MISSING_REQUIRED_FIELD");
+  });
+});
+
+describe("Server startup", () => {
+  it("starts the auth server without errors", () => {
+    const listenSpy = jest
+      .spyOn(app, "listen")
+      .mockImplementation((port, cb) => {
+        if (cb) cb();
+        return {} as any;
+      });
+    const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
+
+    startServer();
+
+    expect(listenSpy).toHaveBeenCalled();
+    expect(logSpy).toHaveBeenCalled();
+
+    logSpy.mockRestore();
+    listenSpy.mockRestore();
   });
 });

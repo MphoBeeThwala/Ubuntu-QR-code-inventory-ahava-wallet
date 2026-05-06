@@ -250,6 +250,34 @@ describe("POST /agents/auth/login", () => {
   });
 });
 
+describe("GET /agents/me", () => {
+  it("returns the authenticated agent profile", async () => {
+    mockPrisma.agent.findUnique.mockResolvedValue({
+      ...mockAgent,
+      user: {
+        email: "thabo@example.co.za",
+        fullName: "Thabo Dlamini",
+        phoneNumber: "+27821234567",
+      },
+    });
+
+    const res = await request(app).get("/agents/me").set(authHeader());
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.agent.id).toBe("agent-001");
+    expect(res.body.data.agent.floatWallet.balance).toBe("500000");
+  });
+
+  it("returns 403 when the authenticated agent profile is missing", async () => {
+    mockPrisma.agent.findUnique.mockResolvedValue(null);
+
+    const res = await request(app).get("/agents/me").set(authHeader());
+
+    expect(res.status).toBe(403);
+    expect(res.body.error.code).toBe("AUTH_UNAUTHORIZED");
+  });
+});
+
 // ─────────────────────────────────────────────────────────────────
 describe("GET /agents/stats", () => {
   it("returns stats for authenticated agent", async () => {
@@ -375,6 +403,21 @@ describe("POST /agents/cash-in", () => {
     expect(res.body.error.code).toBe("WAL_NOT_FOUND");
   });
 
+  it("returns 404 when agent float wallet is missing", async () => {
+    mockPrisma.agent.findUnique.mockResolvedValue({
+      ...mockAgent,
+      floatWallet: null,
+    });
+
+    const res = await request(app)
+      .post("/agents/cash-in")
+      .set(authHeader())
+      .send(payload());
+
+    expect(res.status).toBe(404);
+    expect(res.body.error.code).toBe("WAL_NOT_FOUND");
+  });
+
   it("returns 400 when required fields are missing", async () => {
     const res = await request(app)
       .post("/agents/cash-in")
@@ -439,6 +482,21 @@ describe("POST /agents/cash-out", () => {
     expect(res.status).toBe(404);
   });
 
+  it("returns 404 when agent float wallet is missing", async () => {
+    mockPrisma.agent.findUnique.mockResolvedValue({
+      ...mockAgent,
+      floatWallet: null,
+    });
+
+    const res = await request(app)
+      .post("/agents/cash-out")
+      .set(authHeader())
+      .send(payload());
+
+    expect(res.status).toBe(404);
+    expect(res.body.error.code).toBe("WAL_NOT_FOUND");
+  });
+
   it("returns 400 when required fields are missing", async () => {
     const res = await request(app)
       .post("/agents/cash-out")
@@ -446,5 +504,15 @@ describe("POST /agents/cash-out", () => {
       .send({ customerWalletId: "cust-wallet-001" });
 
     expect(res.status).toBe(400);
+  });
+
+  it("returns 400 for non-positive amountCents", async () => {
+    const res = await request(app)
+      .post("/agents/cash-out")
+      .set(authHeader())
+      .send({ ...payload(), amountCents: -1 });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe("VAL_INVALID_INPUT");
   });
 });

@@ -39,6 +39,9 @@ const mockPrisma = {
     findUnique: jest.fn(),
     create: jest.fn(),
   },
+  user: {
+    findUnique: jest.fn(),
+  },
   wallet: {
     findUnique: jest.fn(),
     findFirst: jest.fn(),
@@ -67,7 +70,7 @@ jest.mock("bullmq", () => ({
 jest.mock("@ahava/shared-crypto", () => ({}));
 
 // ─── Import app AFTER mocks are set up ────────────────────────────────────────
-import app from "../main";
+import app, { startServer } from "../main";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -131,7 +134,9 @@ function makeCreditTxn(idempotencyKey: string) {
  * Set up mockTx for a successful payment scenario.
  * The $transaction callback receives mockTx; we wire up its mocks here.
  */
-function setupSuccessfulTransaction(payload: ReturnType<typeof validPayload>) {
+function setupSuccessfulTransaction(
+  payload: Record<string, unknown> & { idempotencyKey: string },
+) {
   const sender = makeSenderWallet();
   const receiver = makeReceiverWallet();
   const debit = makeDebitTxn(payload.idempotencyKey);
@@ -162,6 +167,7 @@ function setupSuccessfulTransaction(payload: ReturnType<typeof validPayload>) {
 beforeEach(() => {
   jest.clearAllMocks();
   mockPrisma.walletTransaction.findUnique.mockResolvedValue(null); // no existing txn by default
+  mockPrisma.user.findUnique.mockResolvedValue(null);
 });
 
 // ─── Health ───────────────────────────────────────────────────────────────────
@@ -338,6 +344,56 @@ describe("POST /payments — successful payment", () => {
 
     const res = await request(app).post("/payments").send(payload);
     expect(res.headers["x-request-id"]).toBeDefined();
+  });
+
+  it("resolves the recipient by receiverWalletNumber when walletId is omitted", async () => {
+    const payload = {
+      ...validPayload(),
+      receiverWalletId: undefined,
+      receiverWalletNumber: "AHV-0000-0001",
+    };
+    mockPrisma.wallet.findFirst.mockResolvedValueOnce({ id: RECEIVER_ID });
+    setupSuccessfulTransaction(payload);
+
+    const res = await request(app).post("/payments").send(payload);
+
+    expect(res.status).toBe(201);
+    expect(mockPrisma.wallet.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { walletNumber: "AHV-0000-0001", isDeleted: false },
+      }),
+    );
+  });
+
+  it("resolves the recipient by recipientPhone when walletId is omitted", async () => {
+    const payload = {
+      ...validPayload(),
+      receiverWalletId: undefined,
+      recipientPhone: "+27821234567",
+    };
+    mockPrisma.user.findUnique.mockResolvedValue({ id: "user-002" });
+    mockPrisma.wallet.findFirst
+      .mockResolvedValueOnce({ id: RECEIVER_ID })
+      .mockResolvedValueOnce(null);
+    setupSuccessfulTransaction(payload);
+
+    const res = await request(app).post("/payments").send(payload);
+
+    expect(res.status).toBe(201);
+    expect(mockPrisma.user.findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { phoneNumberHash: expect.any(String) },
+      }),
+    );
+    expect(mockPrisma.wallet.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          userId: "user-002",
+          status: "ACTIVE",
+          isDeleted: false,
+        }),
+      }),
+    );
   });
 });
 
@@ -542,6 +598,60 @@ describe("POST /payments — wallet status validation", () => {
     expect(res.status).toBe(404);
     expect(res.body.error.code).toBe("PAY_COUNTERPARTY_NOT_FOUND");
   });
+
+  it("returns 403 when receiver wallet is not active", async () => {
+    const payload = validPayload();
+    mockTx.$queryRaw.mockResolvedValue(
+      [SENDER_ID, RECEIVER_ID]
+        .sort()
+        .map((id) =>
+          id === SENDER_ID
+            ? makeSenderWallet()
+            : { ...makeReceiverWallet(), status: "SUSPENDED" },
+        ),
+    );
+    mockPrisma.$transaction.mockImplementation(
+      async (fn: (tx: typeof mockTx) => unknown) => fn(mockTx),
+    );
+
+    const res = await request(app).post("/payments").send(payload);
+
+    expect(res.status).toBe(403);
+    expect(res.body.error.code).toBe("WAL_WALLET_SUSPENDED");
+  });
+
+  it("returns 404 when receiverWalletNumber does not resolve to a wallet", async () => {
+    mockPrisma.wallet.findFirst.mockResolvedValueOnce(null);
+
+    const res = await request(app)
+      .post("/payments")
+      .send({
+        ...validPayload(),
+        receiverWalletId: undefined,
+        receiverWalletNumber: "AHV-MISSING",
+      });
+
+    expect(res.status).toBe(404);
+    expect(res.body.error.code).toBe("PAY_COUNTERPARTY_NOT_FOUND");
+    expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("returns 404 when recipientPhone does not resolve to an active wallet", async () => {
+    mockPrisma.user.findUnique.mockResolvedValue({ id: "user-404" });
+    mockPrisma.wallet.findFirst.mockResolvedValueOnce(null);
+
+    const res = await request(app)
+      .post("/payments")
+      .send({
+        ...validPayload(),
+        receiverWalletId: undefined,
+        recipientPhone: "+27825550000",
+      });
+
+    expect(res.status).toBe(404);
+    expect(res.body.error.code).toBe("PAY_COUNTERPARTY_NOT_FOUND");
+    expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+  });
 });
 
 // ─── Fee pool ─────────────────────────────────────────────────────────────────
@@ -734,6 +844,37 @@ describe("POST /payments/qr — QR code generation", () => {
     expect(res.body.success).toBe(true);
     expect(res.body.data.qrCode.id).toBe("qr-123");
   });
+
+  it("successfully creates a static QR code without expiry or fixed amount", async () => {
+    mockPrisma.wallet.findUnique.mockResolvedValue(makeSenderWallet());
+    mockPrisma.paymentQrCode.create.mockResolvedValue({
+      id: "qr-static-123",
+      qrType: "STATIC",
+      qrPayload: "{}",
+      qrHash: "hash-static",
+      amountCents: null,
+      expiresAt: null,
+      isActive: true,
+    });
+
+    const res = await request(app).post("/payments/qr").send({
+      walletId: SENDER_ID,
+      qrType: "STATIC",
+      description: "Pay me",
+    });
+
+    expect(res.status).toBe(201);
+    expect(mockPrisma.paymentQrCode.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          qrType: "STATIC",
+          amountCents: null,
+          expiresAt: null,
+          maxUsage: null,
+        }),
+      }),
+    );
+  });
 });
 
 describe("POST /payments — error handling", () => {
@@ -774,15 +915,14 @@ describe("Server startup", () => {
         return {} as any;
       });
 
-    // Instead of messing with require.main, just call the listen block directly
-    // since we already tested the rest of main.ts
-    const PORT = 6003;
-    app.listen(PORT, () => {
-      console.log(`[payment-service] Mock listening on port ${PORT}`);
-    });
+    const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
 
-    expect(listenSpy).toHaveBeenCalledWith(PORT, expect.any(Function));
+    startServer();
 
+    expect(listenSpy).toHaveBeenCalledWith(6003, expect.any(Function));
+    expect(logSpy).toHaveBeenCalled();
+
+    logSpy.mockRestore();
     listenSpy.mockRestore();
   });
 });

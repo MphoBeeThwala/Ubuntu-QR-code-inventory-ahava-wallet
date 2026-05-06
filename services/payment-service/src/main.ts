@@ -148,6 +148,10 @@ type WalletRow = {
   walletNumber: string;
 };
 
+function calculateTransferFee(amountCents: number): number {
+  return Math.max(25, Math.floor(amountCents * 0.005));
+}
+
 // POST /payments - Create payment transaction (atomic double-entry)
 app.post(
   "/payments",
@@ -223,7 +227,11 @@ app.post(
       const receiverWalletIdFinal = resolvedReceiverWalletId;
 
       if (isNaN(amountCents) || amountCents <= 0) {
-        throw new Error("Invalid amount");
+        throw new AhavaError(
+          AhavaErrorCode.PAY_INVALID_AMOUNT,
+          "amountCents must be a positive integer",
+          { requestId: req.id },
+        );
       }
 
       // Idempotency check BEFORE opening transaction (read-only)
@@ -243,7 +251,6 @@ app.post(
           { requestId: req.id },
         );
       }
-
 
       // ─────────────────────────────────────────────────────────────
       // ATOMIC TRANSACTION: all reads-with-lock + all writes in one unit
@@ -287,10 +294,28 @@ app.post(
             );
           }
 
-          const feeAmount = Math.max(0, Math.floor(amountCents * 0.01));
+          if (senderWallet.status !== "ACTIVE") {
+            throw new AhavaError(
+              AhavaErrorCode.WAL_WALLET_SUSPENDED,
+              "Sender wallet is not active",
+              { requestId: req.id },
+            );
+          }
+
+          if (receiverWallet.status !== "ACTIVE") {
+            throw new AhavaError(
+              AhavaErrorCode.WAL_WALLET_SUSPENDED,
+              "Receiver wallet is not active",
+              { requestId: req.id },
+            );
+          }
+
+          const feeAmount = calculateTransferFee(amountCents);
           const totalDebitCents = amountCents + feeAmount;
-          const senderBalanceAfter = senderWallet.balance - BigInt(totalDebitCents);
-          const receiverBalanceAfter = receiverWallet.balance + BigInt(amountCents);
+          const senderBalanceAfter =
+            senderWallet.balance - BigInt(totalDebitCents);
+          const receiverBalanceAfter =
+            receiverWallet.balance + BigInt(amountCents);
 
           if (senderWallet.balance < BigInt(totalDebitCents)) {
             throw new AhavaError(
@@ -308,7 +333,7 @@ app.post(
               paymentMethod: paymentMethod || "UBUNTUPAY_WALLET",
               amount: amountCents,
               feeAmount,
-              netAmount: amountCents - feeAmount,
+              netAmount: amountCents,
               balanceBefore: senderWallet.balance,
               balanceAfter: senderBalanceAfter,
               counterpartyWalletId: receiverWalletIdFinal,
@@ -339,11 +364,11 @@ app.post(
 
           await tx.wallet.update({
             where: { id: senderWalletId },
-            data: { balance: { decrement: BigInt(totalDebitCents) } },
+            data: { balance: { decrement: totalDebitCents } },
           });
           await tx.wallet.update({
             where: { id: receiverWalletIdFinal },
-            data: { balance: { increment: BigInt(amountCents) } },
+            data: { balance: { increment: amountCents } },
           });
 
           const feeIdempotencyKey = `fee-${idempotencyKey}`;
@@ -368,7 +393,7 @@ app.post(
             });
             await tx.wallet.update({
               where: { id: feePoolWallet.id },
-              data: { balance: { increment: BigInt(feeAmount) } },
+              data: { balance: { increment: feeAmount } },
             });
           }
 
@@ -454,11 +479,15 @@ app.use((err: Error, req: Request, res: Response, _next: NextFunction) => {
   res.status(500).json(createErrorResponse(genericError));
 });
 
-if (require.main === module) {
+export function startServer() {
   app.listen(PORT, () => {
     console.log(`✅ Payment Service listening on port ${PORT}`);
     console.log(`🏥 Health: http://localhost:${PORT}/health`);
   });
+}
+
+if (require.main === module) {
+  startServer();
 }
 
 export default app;
@@ -471,4 +500,3 @@ declare global {
     }
   }
 }
-

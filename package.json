@@ -11,16 +11,18 @@
   "scripts": {
     "start": "echo 'Ahava eWallet — use Railway service routing to access individual services'",
     "prepare": "husky install",
+    "postinstall": "npm run prisma:generate",
     "dev": "npm run dev:docker && npm run dev:services",
     "dev:docker": "docker-compose up -d postgres redis",
     "dev:services": "turbo run dev --concurrency=15",
     "dev:kill-ports": "npx kill-port 3010 3020 6000 6001 6002 6003 6004 6005 6006 6007 6008 6009",
     "dev:clean": "npm run dev:kill-ports && npm run dev",
-    "build": "turbo run build",
-    "test": "turbo run test",
-    "test:coverage": "turbo run test:coverage",
+    "build": "npm run prisma:generate && turbo run build",
+    "test": "npm run prisma:generate && turbo run test",
+    "test:coverage": "npm run prisma:generate && turbo run test:coverage",
     "lint": "turbo run lint",
-    "typecheck": "turbo run typecheck",
+    "typecheck": "npm run prisma:generate && turbo run typecheck",
+    "prisma:generate": "npx prisma generate --schema=prisma/schema.prisma",
     "db:migrate": "npx prisma migrate dev --schema=prisma/schema.prisma",
     "db:migrate:prod": "npx prisma migrate deploy --schema=prisma/schema.prisma",
     "db:seed": "npx ts-node packages/database/src/seed.ts",
@@ -35,7 +37,7 @@
     "secrets:validate": "node scripts/validate-secrets.js",
     "audit:deps": "npm audit --audit-level=high",
     "test:check-coverage": "node scripts/check-coverage.js",
-    "test:all": "turbo run test:coverage && node scripts/check-coverage.js"
+    "test:all": "npm run prisma:generate && turbo run test:coverage && node scripts/check-coverage.js"
   },
   "devDependencies": {
     "@prisma/client": "^5.8.0",

@@ -49,16 +49,21 @@ function getFcmApp(): admin.app.App {
 }
 
 // Africa's Talking — SMS
+let atSmsClient: ReturnType<typeof AfricasTalking>["SMS"] | null = null;
 function getAtSms() {
   const apiKey = process.env.AFRICAS_TALKING_API_KEY;
   const username = process.env.AFRICAS_TALKING_USERNAME;
   if (!apiKey || !username) {
-    throw new Error(
-      "AFRICAS_TALKING_API_KEY / AFRICAS_TALKING_USERNAME env vars not set",
+    console.warn(
+      "[notification] AFRICAS_TALKING_API_KEY / AFRICAS_TALKING_USERNAME not set — SMS dispatch disabled",
     );
+    return null;
   }
-  const at = AfricasTalking({ apiKey, username });
-  return at.SMS;
+  if (!atSmsClient) {
+    const at = AfricasTalking({ apiKey, username });
+    atSmsClient = at.SMS;
+  }
+  return atSmsClient;
 }
 
 // AWS SES — Email
@@ -89,6 +94,10 @@ async function sendPush(
 
 async function sendSms(phoneNumber: string, message: string): Promise<void> {
   const sms = getAtSms();
+  if (!sms) {
+    console.warn("[notification] SMS disabled; skipping SMS to", phoneNumber);
+    return;
+  }
   await sms.send({
     to: [phoneNumber],
     message,

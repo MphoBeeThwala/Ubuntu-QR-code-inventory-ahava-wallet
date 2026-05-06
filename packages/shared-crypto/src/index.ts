@@ -6,10 +6,29 @@
  * - AWS Secrets Manager integration
  */
 
-import * as argon2 from "argon2";
+import type * as Argon2Module from "argon2";
 import * as jwt from "jsonwebtoken";
 import * as crypto from "crypto";
 import { SecretsManager } from "@aws-sdk/client-secrets-manager";
+
+let argon2Module: typeof Argon2Module | null = null;
+
+function getArgon2(): typeof Argon2Module {
+  if (argon2Module) {
+    return argon2Module;
+  }
+
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    argon2Module = require("argon2") as typeof Argon2Module;
+    return argon2Module;
+  } catch (error) {
+    throw new Error(
+      "Argon2 native module is unavailable. Reinstall dependencies or rebuild argon2 before using PIN hashing. " +
+        (error instanceof Error ? error.message : String(error)),
+    );
+  }
+}
 
 // ─────────────────────────────────────────────────────────────────
 // PIN HASHING
@@ -23,6 +42,7 @@ export async function hashPin(pin: string): Promise<string> {
   // TODO: You'll configure these parameters based on your security requirements
   // Typical: memory: 64 MB, time: 3 iterations, parallelism: 4
   try {
+    const argon2 = getArgon2();
     return await argon2.hash(pin, {
       type: argon2.argon2id,
       memoryCost: 65536, // 64 MB
@@ -42,6 +62,7 @@ export async function hashPin(pin: string): Promise<string> {
  */
 export async function verifyPin(pin: string, hash: string): Promise<boolean> {
   try {
+    const argon2 = getArgon2();
     return await argon2.verify(hash, pin);
   } catch (error) {
     throw new Error(
