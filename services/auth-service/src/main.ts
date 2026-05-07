@@ -1,3 +1,6 @@
+// IMPORTANT: Import Sentry instrumentation FIRST (before anything else)
+import "./instrument";
+
 /**
  * Auth Service — User Authentication & Device Management
  * Port: 3001
@@ -9,6 +12,7 @@
  * - Sessions & token revocation
  */
 
+import * as Sentry from "@sentry/node";
 import express, { Request, Response, NextFunction } from "express";
 import { v4 as uuidv4 } from "uuid";
 import { PrismaClient } from "@prisma/client";
@@ -657,9 +661,19 @@ app.post(
   },
 );
 
+// Test route for Sentry (Step 5)
+app.get("/debug-sentry", function mainHandler(_req, _res) {
+  throw new Error("My first Sentry error!");
+});
+
 // ─────────────────────────────────────────────────────────────────
 // ERROR HANDLER
 // ─────────────────────────────────────────────────────────────────
+
+// Sentry Express error handler must be registered BEFORE other error middleware
+// For Sentry v7.x, we use the requestHandler and errorHandler middlewares
+app.use(Sentry.Handlers.requestHandler());
+app.use(Sentry.Handlers.errorHandler());
 
 app.use((err: Error, req: Request, res: Response, _next: NextFunction) => {
   if (err instanceof AhavaError) {
