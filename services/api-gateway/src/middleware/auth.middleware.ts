@@ -15,14 +15,33 @@ import {
   createErrorResponse,
 } from "@ahava/shared-errors";
 
-// Routes that do NOT require a JWT (auth bootstrap + health)
-const PUBLIC_PATHS = new Set([
+const PUBLIC_EXACT_PATHS = new Set([
+  "/",
   "/health",
   "/auth/register",
   "/auth/login",
   "/auth/refresh",
   "/agents/auth/login",
 ]);
+
+function normalizePath(path: string): string {
+  if (!path) return "/";
+  if (path === "/") return path;
+  return path.endsWith("/") ? path.slice(0, -1) : path;
+}
+
+function isPublicPath(req: Request): boolean {
+  if (req.method === "OPTIONS") {
+    return true;
+  }
+
+  const path = normalizePath(req.path);
+  if (PUBLIC_EXACT_PATHS.has(path)) {
+    return true;
+  }
+
+  return path.startsWith("/auth/") || path.startsWith("/agents/auth/");
+}
 
 let cachedPublicKey: string | null = null;
 
@@ -69,7 +88,7 @@ export function jwtAuthMiddleware(
   next: NextFunction,
 ): void {
   // Pass through public paths
-  if (PUBLIC_PATHS.has(req.path)) {
+  if (isPublicPath(req)) {
     return next();
   }
 
