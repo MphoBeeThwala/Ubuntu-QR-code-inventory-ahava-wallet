@@ -321,7 +321,7 @@ if (require.main === module) {
         console.log(`🏥 Health check: http://localhost:${PORT}/health`);
       });
     })
-    .catch((err) => {
+    .catch((err: unknown) => {
       console.error("Failed to start API Gateway:", err);
       process.exit(1);
     });
