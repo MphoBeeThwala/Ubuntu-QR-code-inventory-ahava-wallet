@@ -30,7 +30,8 @@ WORKDIR /app
 RUN addgroup -g 1001 -S ahava && adduser -S ahava -u 1001 -G ahava
 
 COPY --from=builder --chown=ahava:ahava /app/node_modules             ./node_modules
-COPY --from=builder --chown=ahava:ahava /app/prisma                    ./prisma
+COPY --from=builder --chown=ahava:ahava /app/packages                 ./packages
+COPY --from=builder --chown=ahava:ahava /app/prisma                   ./prisma
 COPY --from=builder --chown=ahava:ahava /app/services/api-gateway/dist ./dist
 COPY --from=builder --chown=ahava:ahava /app/services/api-gateway/package.json ./
 
