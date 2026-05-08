@@ -8,7 +8,7 @@ Sentry.init({
   sendDefaultPii: true,
   tracesSampleRate: 1.0,
   // Optional: Filter out sensitive data
-  beforeSend(event: Sentry.ErrorEvent) {
+  beforeSend(event: { request?: { headers?: Record<string, string> } }) {
     // Remove sensitive headers if present
     if (event.request?.headers) {
       delete event.request.headers["authorization"];
