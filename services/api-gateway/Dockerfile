@@ -5,6 +5,7 @@ WORKDIR /app
 RUN apk add --no-cache python3 make g++
 
 COPY package.json package-lock.json turbo.json ./
+COPY prisma/ prisma/
 COPY packages/shared-errors/package.json packages/shared-errors/
 COPY packages/shared-crypto/package.json packages/shared-crypto/
 COPY packages/shared-events/package.json packages/shared-events/
@@ -14,7 +15,6 @@ COPY services/api-gateway/package.json   services/api-gateway/
 RUN npm ci
 
 COPY packages/ packages/
-COPY prisma/ prisma/
 COPY services/api-gateway/src/        services/api-gateway/src/
 COPY services/api-gateway/tsconfig.json services/api-gateway/
 
