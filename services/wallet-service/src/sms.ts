@@ -4,16 +4,31 @@
  * Falls back to a no-op when credentials are absent (CI / unit tests).
  */
 
-import AfricasTalking from "africastalking";
+type AfricasTalkingFactory = typeof import("africastalking");
+
+function loadAfricasTalking(): AfricasTalkingFactory | null {
+  try {
+    return require("africastalking") as AfricasTalkingFactory;
+  } catch (error) {
+    console.warn(
+      "[sms] africastalking module unavailable — SMS sending disabled",
+      error instanceof Error ? error.message : String(error),
+    );
+    return null;
+  }
+}
 
 const username = process.env.AT_USERNAME;
 const apiKey = process.env.AT_API_KEY;
 const senderId = process.env.AT_SENDER_ID || "AFRICASTALKING";
 
-let smsClient: ReturnType<typeof AfricasTalking>["SMS"] | null = null;
+let smsClient: ReturnType<AfricasTalkingFactory>["SMS"] | null = null;
 
 if (username && apiKey) {
-  smsClient = AfricasTalking({ username, apiKey }).SMS;
+  const africasTalking = loadAfricasTalking();
+  if (africasTalking) {
+    smsClient = africasTalking({ username, apiKey }).SMS;
+  }
 } else {
   console.warn("[sms] AT_USERNAME / AT_API_KEY not set — SMS sending disabled");
 }
