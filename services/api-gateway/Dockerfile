@@ -18,7 +18,10 @@ COPY packages/ packages/
 COPY services/api-gateway/src/        services/api-gateway/src/
 COPY services/api-gateway/tsconfig.json services/api-gateway/
 
-RUN npm run build --workspace=services/api-gateway
+RUN npm run build --workspace=packages/shared-errors \
+ && npm run build --workspace=packages/shared-crypto \
+ && npm run build --workspace=packages/shared-events \
+ && npm run build --workspace=services/api-gateway
 
 # ─── Stage 2: Runner ─────────────────────────────────────────────
 FROM node:20-alpine AS runner
