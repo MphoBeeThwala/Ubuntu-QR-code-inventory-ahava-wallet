@@ -1,5 +1,4 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
-import { v4 as uuidv4 } from "uuid";
 import * as crypto from "crypto";
 
 export type AuditLogWriteInput = {
@@ -22,7 +21,7 @@ export async function writeAuditLog(
   client: AuditClient,
   input: AuditLogWriteInput,
 ) {
-  const id = uuidv4();
+  const id = crypto.randomUUID();
   const createdAt = new Date();
   const secret = process.env.AUDIT_LOG_HMAC_KEY || process.env.HASH_SALT || "";
   const lockId = 913_502_771;
