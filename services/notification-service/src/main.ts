@@ -7,6 +7,7 @@ import {
   createSuccessResponse,
   createErrorResponse,
 } from "@ahava/shared-errors";
+import { getRedisConnectionConfig } from "@ahava/shared-events";
 import { Queue, Worker, Job } from "bullmq";
 import * as admin from "firebase-admin";
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -26,11 +27,7 @@ const PORT = process.env.PORT || 6005;
 
 const prisma = new PrismaClient();
 
-const redisConnection = {
-  host: process.env.REDIS_HOST || "localhost",
-  port: parseInt(process.env.REDIS_PORT || "6379"),
-  password: process.env.REDIS_PASSWORD,
-};
+const redisConnection = getRedisConnectionConfig();
 
 // FCM — initialise only when service account credentials are available
 let fcmInitialised = false;

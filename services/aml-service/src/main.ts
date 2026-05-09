@@ -8,7 +8,7 @@ import {
   createErrorResponse,
 } from "@ahava/shared-errors";
 import { Worker, Job } from "bullmq";
-import { QUEUE_NAMES } from "@ahava/shared-events";
+import { QUEUE_NAMES, getRedisConnectionConfig } from "@ahava/shared-events";
 import { createLogger, transports, format } from "winston";
 import { AmlFlagSeverity } from "@ahava/shared-types";
 import { AmlEngine } from "./aml.engine";
@@ -24,11 +24,7 @@ const app = express();
 const prisma = new PrismaClient();
 const PORT = process.env.PORT || 6007;
 
-const redisConnection = {
-  host: process.env.REDIS_HOST || "localhost",
-  port: parseInt(process.env.REDIS_PORT || "6379"),
-  password: process.env.REDIS_PASSWORD,
-};
+const redisConnection = getRedisConnectionConfig();
 
 const logger = createLogger({
   level: process.env.LOG_LEVEL || "info",
@@ -36,9 +32,9 @@ const logger = createLogger({
   transports: [new transports.Console()],
 });
 
-const complyAdvantage = new ComplyAdvantageClient(
-  process.env.COMPLY_ADVANTAGE_API_KEY,
-);
+const complyAdvantageApiKey =
+  process.env.COMPLYADVANTAGE_API_KEY || process.env.COMPLY_ADVANTAGE_API_KEY;
+const complyAdvantage = new ComplyAdvantageClient(complyAdvantageApiKey);
 const mlroNotifier = new MlroNotifier();
 const amlEngine = new AmlEngine(
   prisma,
@@ -136,6 +132,7 @@ app.get("/health", (req, res) => {
         status: "ok",
         service: "aml-service",
         worker: amlWorker.isRunning() ? "running" : "stopped",
+        sanctionsProvider: complyAdvantageApiKey ? "configured" : "degraded",
       },
       req.id,
     ),

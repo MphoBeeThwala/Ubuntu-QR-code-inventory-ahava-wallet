@@ -1,16 +1,12 @@
 import { Queue } from "bullmq";
-import { QUEUE_NAMES } from "@ahava/shared-events";
+import { QUEUE_NAMES, getRedisConnectionConfig } from "@ahava/shared-events";
 
 export class KycQueue {
   private queue: Queue;
 
   constructor() {
     this.queue = new Queue(QUEUE_NAMES.KYC_DOCUMENT_UPLOADED, {
-      connection: {
-        host: process.env.REDIS_HOST || "localhost",
-        port: parseInt(process.env.REDIS_PORT || "6379"),
-        password: process.env.REDIS_PASSWORD,
-      },
+      connection: getRedisConnectionConfig(),
     });
   }
 

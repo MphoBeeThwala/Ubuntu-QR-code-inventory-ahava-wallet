@@ -1,7 +1,9 @@
-FROM node:20-alpine AS builder
+FROM node:20-slim AS builder
 WORKDIR /app
 
-RUN apk add --no-cache python3 make g++
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends python3 make g++ openssl ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
 
 COPY package.json package-lock.json turbo.json ./
 COPY prisma/ prisma/
@@ -26,10 +28,14 @@ RUN npm run build --workspace=packages/shared-errors \
  && npm run build --workspace=packages/shared-audit \
  && npm run build --workspace=services/aml-service
 
-FROM node:20-alpine AS runner
+FROM node:20-slim AS runner
 WORKDIR /app
 
-RUN addgroup -g 1001 -S ahava && adduser -S ahava -u 1001 -G ahava
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends openssl ca-certificates wget \
+  && rm -rf /var/lib/apt/lists/*
+
+RUN groupadd --gid 1001 ahava && useradd --uid 1001 --gid ahava --create-home ahava
 
 COPY --from=builder --chown=ahava:ahava /app/node_modules ./node_modules
 COPY --from=builder --chown=ahava:ahava /app/packages ./packages

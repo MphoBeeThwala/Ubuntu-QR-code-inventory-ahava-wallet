@@ -52,7 +52,7 @@ Set shared variables at the environment level where possible.
 ```env
 NODE_ENV=production
 DATABASE_URL=postgresql://...
-REDIS_URL=redis://...
+REDIS_URL=redis://<redis-host>:6379
 HASH_SALT=...
 AUDIT_LOG_HMAC_KEY=...
 PII_ENCRYPTION_KEY=<64 hex chars>
@@ -87,7 +87,7 @@ Only set these for services that use them:
 AT_API_KEY=...
 AT_USERNAME=...
 AFRICAS_TALKING_SENDER_ID=AHAVA
-COMPLY_ADVANTAGE_API_KEY=...
+COMPLYADVANTAGE_API_KEY=...
 FIREBASE_SERVICE_ACCOUNT_JSON={...}
 SES_FROM_ADDRESS=noreply@example.com
 ```
@@ -161,7 +161,7 @@ Set these only on services that need them:
   Services: `notification-service`
 - `SES_FROM_ADDRESS`
   Services: `notification-service`
-- `COMPLY_ADVANTAGE_API_KEY`
+- `COMPLYADVANTAGE_API_KEY`
   Services: `aml-service`
 
 ## Database Migrations

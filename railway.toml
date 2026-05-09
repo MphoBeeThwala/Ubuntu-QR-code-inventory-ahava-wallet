@@ -73,6 +73,11 @@ buildCommand = "docker build -f Dockerfile.service --build-arg SERVICE_NAME=agen
 startCommand = "node dist/main.js"
 
 # ─── Shared Variables (available to ALL services) ─────────────────
+# Required backend secrets in Railway:
+# - DATABASE_URL
+# - REDIS_URL
+# - COMPLYADVANTAGE_API_KEY (aml-service)
+# - FIREBASE_SERVICE_ACCOUNT_JSON / AFRICAS_TALKING_* / SES_FROM_ADDRESS as needed
 [variables]
 NODE_ENV = "production"
 PORT = "3000"

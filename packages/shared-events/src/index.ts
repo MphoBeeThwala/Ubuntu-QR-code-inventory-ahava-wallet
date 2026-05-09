@@ -412,3 +412,6 @@ export default {
   QUEUE_NAMES,
   QUEUE_SETTINGS,
 };
+
+export { getRedisConnectionConfig } from "./redis";
+export type { RedisConnectionConfig } from "./redis";

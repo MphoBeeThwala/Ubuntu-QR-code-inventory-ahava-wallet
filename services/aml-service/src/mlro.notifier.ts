@@ -1,17 +1,13 @@
 import { AmlFlag } from "@prisma/client";
 import { Queue } from "bullmq";
-import { QUEUE_NAMES } from "@ahava/shared-events";
+import { QUEUE_NAMES, getRedisConnectionConfig } from "@ahava/shared-events";
 
 export class MlroNotifier {
   private queue: Queue;
 
   constructor() {
     this.queue = new Queue(QUEUE_NAMES.NOTIFICATION_QUEUED, {
-      connection: {
-        host: process.env.REDIS_HOST || "localhost",
-        port: parseInt(process.env.REDIS_PORT || "6379"),
-        password: process.env.REDIS_PASSWORD,
-      },
+      connection: getRedisConnectionConfig(),
     });
   }
 

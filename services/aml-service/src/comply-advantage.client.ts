@@ -10,7 +10,9 @@ export class ComplyAdvantageClient {
 
   constructor(private readonly apiKey?: string) {
     if (!this.apiKey && process.env.NODE_ENV === "production") {
-      console.warn("ComplyAdvantage API key missing in production!");
+      console.warn(
+        "COMPLYADVANTAGE_API_KEY is not set. AML sanctions screening will run in degraded mode.",
+      );
     }
   }
 

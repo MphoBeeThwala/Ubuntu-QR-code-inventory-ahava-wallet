@@ -9,17 +9,14 @@ import {
   createSuccessResponse,
   createErrorResponse,
 } from "@ahava/shared-errors";
-import { QUEUE_NAMES } from "@ahava/shared-events";
+import { QUEUE_NAMES, getRedisConnectionConfig } from "@ahava/shared-events";
 import { writeAuditLog } from "@ahava/shared-audit";
 
 const app = express();
 const prisma = new PrismaClient();
 const PORT = process.env.PORT || 6003;
 
-const redisConnection = {
-  host: process.env.REDIS_HOST || "localhost",
-  port: parseInt(process.env.REDIS_PORT || "6379"),
-};
+const redisConnection = getRedisConnectionConfig();
 
 const paymentCreatedQueue = new Queue(QUEUE_NAMES.PAYMENTS_CREATED, {
   connection: redisConnection,

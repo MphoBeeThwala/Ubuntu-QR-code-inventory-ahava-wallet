@@ -43,6 +43,10 @@ jest.mock("bullmq", () => ({
 
 jest.mock("@ahava/shared-events", () => ({
   QUEUE_NAMES: { PAYMENTS_CREATED: "payments:created" },
+  getRedisConnectionConfig: jest.fn(() => ({
+    host: "127.0.0.1",
+    port: 6379,
+  })),
 }));
 
 // ─── Mock winston ─────────────────────────────────────────────────

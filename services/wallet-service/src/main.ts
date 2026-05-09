@@ -9,7 +9,7 @@ import {
   createErrorResponse,
 } from "@ahava/shared-errors";
 import { Queue } from "bullmq";
-import { QUEUE_NAMES } from "@ahava/shared-events";
+import { QUEUE_NAMES, getRedisConnectionConfig } from "@ahava/shared-events";
 import { sendSms, txSentMessage, txReceivedMessage } from "./sms";
 import { writeAuditLog } from "@ahava/shared-audit";
 
@@ -17,11 +17,7 @@ const app = express();
 const prisma = new PrismaClient();
 const PORT = process.env.PORT || 6002;
 
-const redisConnection = {
-  host: process.env.REDIS_HOST || "localhost",
-  port: parseInt(process.env.REDIS_PORT || "6379"),
-  password: process.env.REDIS_PASSWORD,
-};
+const redisConnection = getRedisConnectionConfig();
 
 /** Generate wallet number: AHV-XXXX-XXXX-XXXX */
 function generateWalletNumber(): string {

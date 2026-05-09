@@ -4,13 +4,15 @@
 ARG SERVICE_NAME=auth-service
 
 # ─── Stage 1: Builder ────────────────────────────────────────────
-FROM node:20-alpine AS builder
+FROM node:20-slim AS builder
 ARG SERVICE_NAME
 
 WORKDIR /app
 
-# Install build tools
-RUN apk add --no-cache python3 make g++
+# Install build tools and OpenSSL for Prisma native engines
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends python3 make g++ openssl ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
 
 # Root workspace manifests
 COPY package.json package-lock.json turbo.json ./
@@ -42,13 +44,18 @@ COPY services/${SERVICE_NAME}/tsconfig.json services/${SERVICE_NAME}/
 RUN npm run build --workspace=services/${SERVICE_NAME}
 
 # ─── Stage 2: Runner ─────────────────────────────────────────────
-FROM node:20-alpine AS runner
+FROM node:20-slim AS runner
 ARG SERVICE_NAME
 
 WORKDIR /app
 
+# Install runtime OpenSSL for Prisma
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends openssl ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
+
 # Create non-root user
-RUN addgroup -g 1001 -S ahava && adduser -S ahava -u 1001 -G ahava
+RUN groupadd --gid 1001 ahava && useradd --uid 1001 --gid ahava --create-home ahava
 
 # Copy built artifacts from builder
 COPY --from=builder --chown=ahava:ahava /app/node_modules          ./node_modules
