@@ -1,5 +1,5 @@
 import express, { Request, Response, NextFunction } from "express";
-import { v4 as uuidv4 } from "uuid";
+import * as crypto from "crypto";
 import { PrismaClient } from "@prisma/client";
 import {
   AhavaError,
@@ -13,16 +13,16 @@ import * as admin from "firebase-admin";
 const AfricasTalking = require("africastalking");
 import { SESClient, SendEmailCommand } from "@aws-sdk/client-ses";
 
-// ─────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
 // CONSTANTS
-// ─────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
 
 const QUEUE_NAME = "notifications_dispatch";
 const PORT = process.env.PORT || 6005;
 
-// ─────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
 // CLIENTS (lazily initialised — only when credentials present)
-// ─────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
 
 const prisma = new PrismaClient();
 
@@ -71,9 +71,9 @@ const sesClient = new SESClient({
   region: process.env.AWS_REGION || "af-south-1",
 });
 
-// ─────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
 // CHANNEL DISPATCHERS
-// ─────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
 
 async function sendPush(
   fcmToken: string,
@@ -124,9 +124,9 @@ async function sendEmail(
   );
 }
 
-// ─────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
 // BULLMQ WORKER
-// ─────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
 
 interface DispatchJobData {
   notificationId: string;
@@ -226,16 +226,18 @@ notificationWorker.on("failed", (job, err) => {
   );
 });
 
-// ─────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
 // EXPRESS APP
-// ─────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
 
 const app = express();
 app.use(express.json());
 app.use((req: Request, res: Response, next: NextFunction) => {
   const incoming = req.get("X-Request-ID");
   req.id =
-    typeof incoming === "string" && incoming.length > 0 ? incoming : uuidv4();
+    typeof incoming === "string" && incoming.length > 0
+      ? incoming
+      : crypto.randomUUID();
   res.setHeader("X-Request-ID", req.id);
   next();
 });
@@ -340,9 +342,9 @@ app.use((err: Error, req: Request, res: Response, _next: NextFunction) => {
   res.status(500).json(createErrorResponse(genericError));
 });
 
-// ─────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
 // SERVER STARTUP
-// ─────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
 
 if (require.main === module) {
   app.listen(PORT, () => {
