@@ -10,8 +10,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@prisma/client": "^5.8.0",
-    "uuid": "^9.0.1"
+    "@prisma/client": "^5.8.0"
   },
   "devDependencies": {
     "typescript": "^5.3.3"
