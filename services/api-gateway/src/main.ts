@@ -45,11 +45,19 @@ app.use(express.urlencoded({ extended: true, limit: "1mb" }));
 // CORS for PWA and Flutter web
 app.use(
   cors({
-    origin: process.env.CORS_ORIGINS?.split(",") || ["http://localhost:3000", "http://localhost:3010"],
+    origin: process.env.CORS_ORIGINS?.split(",") || [
+      "http://localhost:3000",
+      "http://localhost:3010",
+    ],
     credentials: true,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization", "X-Request-ID", "X-Device-Fingerprint"],
-  })
+    allowedHeaders: [
+      "Content-Type",
+      "Authorization",
+      "X-Request-ID",
+      "X-Device-Fingerprint",
+    ],
+  }),
 );
 
 app.use(
@@ -89,9 +97,10 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 // Request ID tracking (must be first)
 app.use((req: Request, res: Response, next: NextFunction) => {
   const incoming = req.get("X-Request-ID");
-  req.id =
+  const requestId =
     typeof incoming === "string" && incoming.length > 0 ? incoming : uuidv4();
-  res.setHeader("X-Request-ID", req.id);
+  req.id = requestId;
+  res.setHeader("X-Request-ID", requestId);
   next();
 });
 

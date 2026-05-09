@@ -37,9 +37,10 @@ app.use(express.urlencoded({ extended: false }));
 app.use(express.json());
 app.use((req: Request, res: Response, next: NextFunction) => {
   const incoming = req.get("X-Request-ID");
-  (req as any).id =
+  const requestId =
     typeof incoming === "string" && incoming.length > 0 ? incoming : uuidv4();
-  res.setHeader("X-Request-ID", (req as any).id);
+  (req as any).id = requestId;
+  res.setHeader("X-Request-ID", requestId);
   next();
 });
 

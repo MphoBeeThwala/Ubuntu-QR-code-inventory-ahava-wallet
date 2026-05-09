@@ -231,11 +231,12 @@ const app = express();
 app.use(express.json());
 app.use((req: Request, res: Response, next: NextFunction) => {
   const incoming = req.get("X-Request-ID");
-  req.id =
+  const requestId =
     typeof incoming === "string" && incoming.length > 0
       ? incoming
       : crypto.randomUUID();
-  res.setHeader("X-Request-ID", req.id);
+  req.id = requestId;
+  res.setHeader("X-Request-ID", requestId);
   next();
 });
 

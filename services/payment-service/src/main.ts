@@ -25,9 +25,10 @@ const paymentCreatedQueue = new Queue(QUEUE_NAMES.PAYMENTS_CREATED, {
 app.use(express.json());
 app.use((req: Request, res: Response, next: NextFunction) => {
   const incoming = req.get("X-Request-ID");
-  req.id =
+  const requestId =
     typeof incoming === "string" && incoming.length > 0 ? incoming : uuidv4();
-  res.setHeader("X-Request-ID", req.id);
+  req.id = requestId;
+  res.setHeader("X-Request-ID", requestId);
   next();
 });
 
