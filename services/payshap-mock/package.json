@@ -1,0 +1,22 @@
+{
+  "name": "@ubuntu/payshap-mock",
+  "version": "1.0.0",
+  "description": "PayShap Mock Service for Ubuntu Pay - Simulates SARB PayShap API",
+  "main": "dist/main.js",
+  "scripts": {
+    "dev": "ts-node src/main.ts",
+    "build": "tsc",
+    "start": "node dist/main.js"
+  },
+  "dependencies": {
+    "@ahava/shared-errors": "*",
+    "@prisma/client": "^5.0.0",
+    "express": "^4.18.2",
+    "uuid": "^9.0.0"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.17",
+    "@types/uuid": "^9.0.2",
+    "typescript": "^5.2.2"
+  }
+}
