@@ -211,6 +211,7 @@ const SERVICE_URLS = {
   notifications: process.env.NOTIFICATION_SERVICE_URL || "http://localhost:6005",
   agents: process.env.AGENT_SERVICE_URL || "http://localhost:6009",
   inventory: process.env.INVENTORY_SERVICE_URL || "http://localhost:6010",
+  payshap: process.env.PAYSHAP_SERVICE_URL || "http://localhost:6011",
 };
 
 function serviceBaseUrlForPath(path: string): string | null {
@@ -222,6 +223,7 @@ function serviceBaseUrlForPath(path: string): string | null {
   if (path.startsWith("/agents")) return SERVICE_URLS.agents;
   if (path.startsWith("/qr")) return SERVICE_URLS.wallets;
   if (path.startsWith("/inventory")) return SERVICE_URLS.inventory;
+  if (path.startsWith("/payshap")) return SERVICE_URLS.payshap;
   return null;
 }
 
