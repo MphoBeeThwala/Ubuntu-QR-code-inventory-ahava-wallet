@@ -1,5 +1,5 @@
 /**
- * API Gateway — Ahava eWallet
+ * API Gateway — Ubuntu Pay
  * Central ingress for all client requests
  *
  * Responsibilities:
@@ -48,6 +48,7 @@ app.use(
     origin: process.env.CORS_ORIGINS?.split(",") || [
       "http://localhost:3000",
       "http://localhost:3010",
+      "http://localhost:3011",
     ],
     credentials: true,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
@@ -207,9 +208,10 @@ const SERVICE_URLS = {
   wallets: process.env.WALLET_SERVICE_URL || "http://localhost:6002",
   payments: process.env.PAYMENT_SERVICE_URL || "http://localhost:6003",
   kyc: process.env.KYC_SERVICE_URL || "http://localhost:6004",
-  notifications:
-    process.env.NOTIFICATION_SERVICE_URL || "http://localhost:6005",
+  notifications: process.env.NOTIFICATION_SERVICE_URL || "http://localhost:6005",
   agents: process.env.AGENT_SERVICE_URL || "http://localhost:6009",
+  inventory: process.env.INVENTORY_SERVICE_URL || "http://localhost:6010",
+  payshap: process.env.PAYSHAP_SERVICE_URL || "http://localhost:6011",
 };
 
 function serviceBaseUrlForPath(path: string): string | null {
@@ -220,6 +222,8 @@ function serviceBaseUrlForPath(path: string): string | null {
   if (path.startsWith("/notifications")) return SERVICE_URLS.notifications;
   if (path.startsWith("/agents")) return SERVICE_URLS.agents;
   if (path.startsWith("/qr")) return SERVICE_URLS.wallets;
+  if (path.startsWith("/inventory")) return SERVICE_URLS.inventory;
+  if (path.startsWith("/payshap")) return SERVICE_URLS.payshap;
   return null;
 }
 

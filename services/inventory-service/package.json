@@ -1,0 +1,30 @@
+{
+  "name": "@ubuntu/inventory-service",
+  "version": "1.0.0",
+  "description": "Ubuntu Pay Inventory Management Service",
+  "main": "dist/main.js",
+  "scripts": {
+    "dev": "ts-node src/main.ts",
+    "build": "tsc",
+    "start": "node dist/main.js",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage"
+  },
+  "dependencies": {
+    "@ahava/shared-audit": "*",
+    "@ahava/shared-errors": "*",
+    "@prisma/client": "^5.0.0",
+    "express": "^4.18.2",
+    "uuid": "^9.0.0"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.17",
+    "@types/jest": "^29.5.4",
+    "@types/node": "^20.5.9",
+    "@types/uuid": "^9.0.2",
+    "jest": "^29.6.4",
+    "ts-jest": "^29.1.1",
+    "typescript": "^5.2.2"
+  }
+}
