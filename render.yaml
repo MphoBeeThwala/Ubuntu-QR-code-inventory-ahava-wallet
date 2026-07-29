@@ -1,0 +1,388 @@
+services:
+  - type: pserv
+    name: ahava-postgres
+    runtime: docker
+    repo: https://github.com/MphoBeeThwala/Ubuntu-QR-code-inventory-ahava-wallet
+    branch: main
+    dockerfilePath: ./docker/postgres.Dockerfile
+    plan: standard
+    envVars:
+      - key: POSTGRES_USER
+        value: ahava
+      - key: POSTGRES_PASSWORD
+        generateValue: true
+      - key: POSTGRES_DB
+        value: ahava_prod
+      - key: PGDATA
+        value: /var/lib/postgresql/data/pgdata
+    disk:
+      name: postgres-data
+      mountPath: /var/lib/postgresql/data
+      sizeGB: 50
+
+  - type: redis
+    name: ahava-redis
+    plan: standard
+    ipAllowList: []
+
+  - type: web
+    name: ahava-api-gateway
+    runtime: docker
+    repo: https://github.com/MphoBeeThwala/Ubuntu-QR-code-inventory-ahava-wallet
+    branch: main
+    dockerfilePath: Dockerfile.service
+    dockerContext: .
+    envVars:
+      - key: SERVICE_NAME
+        value: api-gateway
+      - key: PORT
+        value: 3000
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromService:
+          name: ahava-postgres
+          type: pserv
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          name: ahava-redis
+          type: redis
+          property: connectionString
+      - key: JWT_PUBLIC_KEY
+        sync: false
+      - key: AUTH_SERVICE_URL
+        fromService:
+          name: ahava-auth-service
+          type: web
+          property: host
+      - key: WALLET_SERVICE_URL
+        fromService:
+          name: ahava-wallet-service
+          type: web
+          property: host
+      - key: PAYMENT_SERVICE_URL
+        fromService:
+          name: ahava-payment-service
+          type: web
+          property: host
+      - key: KYC_SERVICE_URL
+        fromService:
+          name: ahava-kyc-service
+          type: web
+          property: host
+      - key: NOTIFICATION_SERVICE_URL
+        fromService:
+          name: ahava-notification-service
+          type: web
+          property: host
+      - key: AML_SERVICE_URL
+        fromService:
+          name: ahava-aml-service
+          type: web
+          property: host
+      - key: LEDGER_SERVICE_URL
+        fromService:
+          name: ahava-ledger-service
+          type: web
+          property: host
+      - key: PAYMENT_ORCHESTRATOR_URL
+        fromService:
+          name: ahava-payment-orchestrator
+          type: web
+          property: host
+    healthCheckPath: /health
+    plan: standard
+
+  - type: web
+    name: ahava-auth-service
+    runtime: docker
+    repo: https://github.com/MphoBeeThwala/Ubuntu-QR-code-inventory-ahava-wallet
+    branch: main
+    dockerfilePath: Dockerfile.service
+    dockerContext: .
+    envVars:
+      - key: SERVICE_NAME
+        value: auth-service
+      - key: PORT
+        value: 3000
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromService:
+          name: ahava-postgres
+          type: pserv
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          name: ahava-redis
+          type: redis
+          property: connectionString
+      - key: JWT_PRIVATE_KEY
+        sync: false
+      - key: JWT_PUBLIC_KEY
+        sync: false
+      - key: AT_USERNAME
+        sync: false
+      - key: AT_API_KEY
+        sync: false
+    healthCheckPath: /health
+    plan: starter
+
+  - type: web
+    name: ahava-wallet-service
+    runtime: docker
+    repo: https://github.com/MphoBeeThwala/Ubuntu-QR-code-inventory-ahava-wallet
+    branch: main
+    dockerfilePath: Dockerfile.service
+    dockerContext: .
+    envVars:
+      - key: SERVICE_NAME
+        value: wallet-service
+      - key: PORT
+        value: 3000
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromService:
+          name: ahava-postgres
+          type: pserv
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          name: ahava-redis
+          type: redis
+          property: connectionString
+    healthCheckPath: /health
+    plan: starter
+
+  - type: web
+    name: ahava-payment-service
+    runtime: docker
+    repo: https://github.com/MphoBeeThwala/Ubuntu-QR-code-inventory-ahava-wallet
+    branch: main
+    dockerfilePath: Dockerfile.service
+    dockerContext: .
+    envVars:
+      - key: SERVICE_NAME
+        value: payment-service
+      - key: PORT
+        value: 3000
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromService:
+          name: ahava-postgres
+          type: pserv
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          name: ahava-redis
+          type: redis
+          property: connectionString
+    healthCheckPath: /health
+    plan: standard
+
+  - type: web
+    name: ahava-kyc-service
+    runtime: docker
+    repo: https://github.com/MphoBeeThwala/Ubuntu-QR-code-inventory-ahava-wallet
+    branch: main
+    dockerfilePath: Dockerfile.service
+    dockerContext: .
+    envVars:
+      - key: SERVICE_NAME
+        value: kyc-service
+      - key: PORT
+        value: 3000
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromService:
+          name: ahava-postgres
+          type: pserv
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          name: ahava-redis
+          type: redis
+          property: connectionString
+    healthCheckPath: /health
+    plan: starter
+
+  - type: web
+    name: ahava-notification-service
+    runtime: docker
+    repo: https://github.com/MphoBeeThwala/Ubuntu-QR-code-inventory-ahava-wallet
+    branch: main
+    dockerfilePath: Dockerfile.service
+    dockerContext: .
+    envVars:
+      - key: SERVICE_NAME
+        value: notification-service
+      - key: PORT
+        value: 3000
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromService:
+          name: ahava-postgres
+          type: pserv
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          name: ahava-redis
+          type: redis
+          property: connectionString
+      - key: AFRICAS_TALKING_API_KEY
+        sync: false
+      - key: AFRICAS_TALKING_USERNAME
+        sync: false
+      - key: FIREBASE_SERVICE_ACCOUNT_JSON
+        sync: false
+      - key: SES_FROM_ADDRESS
+        value: noreply@ahava.co.za
+    healthCheckPath: /health
+    plan: starter
+
+  - type: web
+    name: ahava-aml-service
+    runtime: docker
+    repo: https://github.com/MphoBeeThwala/Ubuntu-QR-code-inventory-ahava-wallet
+    branch: main
+    dockerfilePath: Dockerfile.service
+    dockerContext: .
+    envVars:
+      - key: SERVICE_NAME
+        value: aml-service
+      - key: PORT
+        value: 3000
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromService:
+          name: ahava-postgres
+          type: pserv
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          name: ahava-redis
+          type: redis
+          property: connectionString
+      - key: COMPLYADVANTAGE_API_KEY
+        sync: false
+    healthCheckPath: /health
+    plan: starter
+
+  - type: web
+    name: ahava-ledger-service
+    runtime: docker
+    repo: https://github.com/MphoBeeThwala/Ubuntu-QR-code-inventory-ahava-wallet
+    branch: main
+    dockerfilePath: Dockerfile.service
+    dockerContext: .
+    envVars:
+      - key: SERVICE_NAME
+        value: ledger-service
+      - key: PORT
+        value: 3000
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromService:
+          name: ahava-postgres
+          type: pserv
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          name: ahava-redis
+          type: redis
+          property: connectionString
+    healthCheckPath: /health
+    plan: starter
+
+  - type: web
+    name: ahava-payment-orchestrator
+    runtime: docker
+    repo: https://github.com/MphoBeeThwala/Ubuntu-QR-code-inventory-ahava-wallet
+    branch: main
+    dockerfilePath: Dockerfile.service
+    dockerContext: .
+    envVars:
+      - key: SERVICE_NAME
+        value: payment-orchestrator
+      - key: PORT
+        value: 3000
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromService:
+          name: ahava-postgres
+          type: pserv
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          name: ahava-redis
+          type: redis
+          property: connectionString
+      - key: WALLET_SERVICE_URL
+        fromService:
+          name: ahava-wallet-service
+          type: web
+          property: host
+      - key: PAYMENT_SERVICE_URL
+        fromService:
+          name: ahava-payment-service
+          type: web
+          property: host
+      - key: LEDGER_SERVICE_URL
+        fromService:
+          name: ahava-ledger-service
+          type: web
+          property: host
+      - key: NOTIFICATION_SERVICE_URL
+        fromService:
+          name: ahava-notification-service
+          type: web
+          property: host
+      - key: AML_SERVICE_URL
+        fromService:
+          name: ahava-aml-service
+          type: web
+          property: host
+    healthCheckPath: /health
+    plan: standard
+
+  - type: web
+    name: ahava-pwa
+    runtime: node
+    repo: https://github.com/MphoBeeThwala/Ubuntu-QR-code-inventory-ahava-wallet
+    branch: main
+    buildCommand: cd apps/pwa && npm install && npm run build
+    startCommand: cd apps/pwa && npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NEXT_PUBLIC_API_URL
+        fromService:
+          name: ahava-api-gateway
+          type: web
+          property: url
+    plan: starter
+
+  - type: web
+    name: ahava-agent-portal
+    runtime: node
+    repo: https://github.com/MphoBeeThwala/Ubuntu-QR-code-inventory-ahava-wallet
+    branch: main
+    buildCommand: cd apps/agent-portal && npm install && npm run build
+    startCommand: cd apps/agent-portal && npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NEXT_PUBLIC_API_URL
+        fromService:
+          name: ahava-api-gateway
+          type: web
+          property: url
+    plan: starter
