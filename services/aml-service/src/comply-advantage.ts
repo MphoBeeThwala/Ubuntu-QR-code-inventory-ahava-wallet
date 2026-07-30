@@ -75,7 +75,7 @@ export async function screenForAML(
     }
   }
 
-  throw new AhavaError(AhavaErrorCode.INTERNAL_SERVER_ERROR, "Invalid AML provider", { provider });
+  throw new AhavaError(AhavaErrorCode.INTERNAL_SERVER_ERROR, "Invalid AML provider", { details: { provider } });
 }
 
 export async function screenAddress(address: { street: string; city: string; country: string }): Promise<AmlResult> {
