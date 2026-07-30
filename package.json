@@ -34,7 +34,8 @@
     "prisma:studio": "pnpm --filter ./services/* exec npx prisma studio"
   },
   "devDependencies": {
-    "concurrently": "^8.2.0"
+    "concurrently": "^8.2.0",
+    "@types/node": "^20.0.0"
   },
   "engines": {
     "node": ">=18.0.0",
