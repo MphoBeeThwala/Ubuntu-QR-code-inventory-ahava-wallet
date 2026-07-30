@@ -31,7 +31,7 @@ import {
 } from "@ahava/shared-crypto";
 import { writeAuditLog } from "@ahava/shared-audit";
 
-const app = express();
+const app: express.Application = express();
 const prisma = new PrismaClient();
 const PORT = process.env.PORT || 6009;
 
@@ -326,7 +326,7 @@ app.get(
       ]);
 
       const todayVolume = todayTxns.reduce(
-        (sum: number, t: { amount: number }) => sum + Number(t.amount),
+        (sum: number, t: any) => sum + Number(t.amount),
         0,
       );
       const completed = todayTxns.length;
@@ -392,7 +392,7 @@ app.get(
       res.json(
         createSuccessResponse(
           {
-            transactions: transactions.map((t: { amount: number }) => ({
+            transactions: transactions.map((t: any) => ({
               id: t.id,
               type: t.transactionType,
               amountCents: Number(t.amount),
