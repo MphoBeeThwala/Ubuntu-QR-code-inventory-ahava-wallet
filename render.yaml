@@ -358,8 +358,8 @@ services:
     runtime: node
     repo: https://github.com/MphoBeeThwala/Ubuntu-QR-code-inventory-ahava-wallet
     branch: main
-    buildCommand: cd apps/pwa && npm install && npm run build
-    startCommand: cd apps/pwa && npm start
+    buildCommand: cd apps/pwa && pnpm install && pnpm run build
+    startCommand: cd apps/pwa && pnpm start
     envVars:
       - key: NODE_ENV
         value: production
@@ -369,14 +369,16 @@ services:
           type: web
           property: url
     plan: starter
+    nodeVersion: 18
+    pnpmVersion: 8
 
   - type: web
     name: ahava-agent-portal
     runtime: node
     repo: https://github.com/MphoBeeThwala/Ubuntu-QR-code-inventory-ahava-wallet
     branch: main
-    buildCommand: cd apps/agent-portal && npm install && npm run build
-    startCommand: cd apps/agent-portal && npm start
+    buildCommand: cd apps/agent-portal && pnpm install && pnpm run build
+    startCommand: cd apps/agent-portal && pnpm start
     envVars:
       - key: NODE_ENV
         value: production
@@ -386,3 +388,5 @@ services:
           type: web
           property: url
     plan: starter
+    nodeVersion: 18
+    pnpmVersion: 8
