@@ -5,47 +5,40 @@
   "description": "Ubuntu Pay / Ahava Wallet - Complete Digital Payment Platform",
   "author": "Mpho Thwala, CEO of Ahava on 88 Pty Ltd",
   "license": "Proprietary",
-  "workspaces": [
-    "packages/*",
-    "services/*",
-    "apps/*"
-  ],
   "scripts": {
-    "install:all": "npm install",
-    "bootstrap": "npm install",
-    "build": "turbo run build --parallel",
-    "build:all": "npm run build",
-    "build:services": "turbo run build --filter=./services/* --parallel",
-    "build:apps": "turbo run build --filter=./apps/* --parallel",
-    "build:packages": "turbo run build --filter=./packages/* --parallel",
-    "dev": "concurrently \"npm run dev:services\" \"npm run dev:apps\"",
-    "dev:services": "turbo run dev --filter=./services/* --parallel",
-    "dev:apps": "turbo run dev --filter=./apps/* --parallel",
-    "start": "npm run start:gateway",
-    "start:all": "concurrently \"npm run start:services\" \"npm run start:apps\"",
-    "start:gateway": "cd services/api-gateway && npm run start",
-    "start:services": "turbo run start --filter=./services/* --parallel",
-    "start:apps": "turbo run start --filter=./apps/* --parallel",
-    "lint": "turbo run lint --parallel",
-    "test": "turbo run test --parallel",
-    "clean": "turbo run clean --parallel && rm -rf node_modules",
+    "install:all": "pnpm install --recursive",
+    "bootstrap": "pnpm install --recursive",
+    "build": "pnpm --filter \"!./apps/*\" run build",
+    "build:all": "pnpm run build",
+    "build:services": "pnpm --filter ./services/* run build",
+    "build:apps": "pnpm --filter ./apps/* run build",
+    "build:packages": "pnpm --filter ./packages/* run build",
+    "dev": "concurrently \"pnpm --filter ./services/* run dev\" \"pnpm --filter ./apps/* run dev\"",
+    "dev:services": "pnpm --filter ./services/* run dev",
+    "dev:apps": "pnpm --filter ./apps/* run dev",
+    "start": "pnpm --filter ahava-api-gateway run start",
+    "start:all": "concurrently \"pnpm --filter ./services/* run start\" \"pnpm --filter ./apps/* run start\"",
+    "start:gateway": "pnpm --filter ahava-api-gateway run start",
+    "start:services": "pnpm --filter ./services/* run start",
+    "start:apps": "pnpm --filter ./apps/* run start",
+    "lint": "pnpm --filter ./services/* run lint",
+    "test": "pnpm --filter ./services/* run test",
+    "clean": "pnpm --filter ./services/* run clean && rm -rf node_modules",
     "docker:build": "docker-compose -f docker-compose.yml build",
     "docker:up": "docker-compose -f docker-compose.yml up -d",
     "docker:down": "docker-compose -f docker-compose.yml down",
-    "migrate": "npx prisma migrate deploy",
-    "migrate:dev": "npx prisma migrate dev",
-    "generate": "npx prisma generate",
-    "seed": "npx prisma db seed",
-    "prisma:studio": "npx prisma studio"
+    "migrate": "pnpm --filter ./services/* exec npx prisma migrate deploy",
+    "migrate:dev": "pnpm --filter ./services/* exec npx prisma migrate dev",
+    "generate": "pnpm --filter ./services/* exec npx prisma generate",
+    "seed": "pnpm --filter ./services/* exec npx prisma db seed",
+    "prisma:studio": "pnpm --filter ./services/* exec npx prisma studio"
   },
   "devDependencies": {
-    "concurrently": "^8.2.0",
-    "turbo": "^2.0.0",
-    "typescript": "^5.3.0"
+    "concurrently": "^8.2.0"
   },
   "engines": {
     "node": ">=18.0.0",
-    "npm": ">=8.0.0"
+    "pnpm": ">=8.0.0"
   },
-  "packageManager": "npm@8.19.4"
+  "packageManager": "pnpm@8.15.0"
 }
