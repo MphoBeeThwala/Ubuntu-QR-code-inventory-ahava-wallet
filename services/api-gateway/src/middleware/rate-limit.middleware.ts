@@ -23,7 +23,7 @@ function createLimiter(options: Partial<Options>): RateLimitRequestHandler {
   return rateLimit({
     standardHeaders: true,
     legacyHeaders: false,
-    store: new RedisStore({ sendCommand: (...args: string[]) => redisClient.call(...args) as Promise<any> }),
+    store: new RedisStore({ sendCommand: (...args: [string, ...string[]]) => redisClient.call(...args) as Promise<any> }),
     keyGenerator,
     handler: rateLimitHandler,
     skip: (req: Request) => req.path === "/health",
