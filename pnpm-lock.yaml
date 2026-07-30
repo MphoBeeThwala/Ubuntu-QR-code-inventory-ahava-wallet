@@ -417,6 +417,12 @@ importers:
       '@ahava/shared-errors':
         specifier: '*'
         version: link:../../packages/shared-errors
+      '@ahava/shared-events':
+        specifier: workspace:^
+        version: link:../../packages/shared-events
+      '@ahava/shared-types':
+        specifier: workspace:^
+        version: link:../../packages/shared-types
       '@prisma/client':
         specifier: ^5.8.0
         version: 5.22.0(prisma@5.22.0)
@@ -426,12 +432,24 @@ importers:
       africastalking:
         specifier: ^0.7.9
         version: 0.7.9
+      argon2:
+        specifier: ^0.31.1
+        version: 0.31.2
+      bullmq:
+        specifier: ^5.0.0
+        version: 5.81.3
       express:
         specifier: ^4.18.2
         version: 4.22.2
+      jsonwebtoken:
+        specifier: ^9.0.2
+        version: 9.0.3
       uuid:
         specifier: ^9.0.1
         version: 9.0.1
+      winston:
+        specifier: ^3.11.0
+        version: 3.19.0
     devDependencies:
       '@types/africastalking':
         specifier: ^0.6.2
@@ -440,8 +458,11 @@ importers:
         specifier: ^4.17.21
         version: 4.17.25
       '@types/jest':
-        specifier: ^29.5.10
+        specifier: ^29.5.14
         version: 29.5.14
+      '@types/jsonwebtoken':
+        specifier: ^9.0.5
+        version: 9.0.10
       '@types/node':
         specifier: ^20.10.6
         version: 20.19.43
