@@ -1,387 +1,121 @@
-# 🚀 QUICK START GUIDE — Ahava eWallet
+# Ubuntu Pay / Ahava Wallet - Quick Start Guide
 
-## What You Have
+**Developed by: Mpho Thwala, CEO of Ahava on 88 Pty Ltd**
+**Version: 1.0.0**
+**Date: July 2026**
 
-**A complete, production-ready South African digital wallet monorepo** with:
+## Overview
 
-- 8 backend microservices (Node.js + TypeScript)
-- Flutter mobile app (iOS/Android)
-- Next.js PWA (web)
-- USSD CLI (feature phones)
-- Full infrastructure as code (Terraform)
-- Automated CI/CD pipelines (GitHub Actions)
+Ubuntu Pay is a next-generation digital wallet and payment platform built for the African market.
 
----
+## Prerequisites
 
-## 5-Minute Startup
+- Node.js 18+
+- Docker and Docker Compose
+- PostgreSQL 14+
+- Redis 6+
+- Git
 
-### **1. Install Dependencies**
+## Local Development Setup
 
-```bash
-cd Ubuntu-QR-code-inventory-ahava-wallet\repo-main
+### 1. Clone the Repository
+
+git clone https://github.com/MphoBeeThwala/Ubuntu-QR-code-inventory-ahava-wallet.git
+cd Ubuntu-QR-code-inventory-ahava-wallet
+
+### 2. Install Dependencies
+
 npm install
-```
+npm run bootstrap
 
-### **2. Create Local Env File**
+### 3. Configure Environment
 
-Create `.env` from `.env.example` and populate:
+Create a .env file in the root directory:
 
-- `JWT_PRIVATE_KEY`
-- `JWT_PUBLIC_KEY`
-- `PII_ENCRYPTION_KEY`
-- `HASH_SALT`
+cp .env.example .env
 
-### **3. Start Database & Cache**
+Edit .env with your local configurations:
 
-```bash
-npm run docker:up
-# Waits for Postgres + Redis to be healthy
-```
-
-### **4. Run Database Migrations**
-
-```bash
-npm run db:migrate
-```
-
-### **5. Start Services**
-
-```bash
-npm run dev
-```
-
-### **6. Test Registration API**
-
-```bash
-curl -X POST http://localhost:6000/auth/register \
-  -H "Content-Type: application/json" \
-  -d '{
-    "phoneNumber": "+27823456789",
-    "pin": "1234",
-    "deviceId": "quickstart"
-  }'
-```
-
-**Expected response:**
-
-```json
-{
-  "success": true,
-  "data": {
-    "userId": "user_uuid",
-    "accessToken": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...",
-    "refreshToken": "refresh_token_uuid"
-  }
-}
-```
-
-### **6. Test Payment API**
-
-```bash
-# Use accessToken from registration
-BEARER="Bearer eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9..."
-
-curl -X POST http://localhost:6000/payments \
-  -H "Content-Type: application/json" \
-  -H "Authorization: $BEARER" \
-  -d '{
-    "senderWalletId": "uuid",
-    "receiverWalletId": "uuid",
-    "amountCents": 5000,
-    "description": "Lunch money",
-    "idempotencyKey": "your-idempotency-key",
-    "paymentMethod": "UBUNTUPAY_WALLET",
-    "deviceId": "quickstart",
-    "ipAddress": "127.0.0.1"
-  }'
-```
-
----
-
-## Project Structure
-
-```
-ahava_ewallet/
-├── apps/
-│   ├── mobile/              # Flutter (iOS/Android)
-│   ├── pwa/                 # Next.js 14 (web)
-│   └── ussd/                # Node.js USSD CLI
-├── services/                # 8 microservices
-│   ├── api-gateway/         # Port 3000 (JWT, rate limiting)
-│   ├── auth-service/        # Port 3001 (register, login, device bind)
-│   ├── wallet-service/      # Port 3002 (balance, limits, suspend)
-│   ├── payment-service/     # Port 3003 (send money, fees, accounting)
-│   ├── kyc-service/         # Port 3004 (tier progression, documents)
-│   ├── notification-service/# Port 3005 (FCM, SMS, email)
-│   ├── reporting-service/   # Port 3006 (VAT, reconciliation)
-│   └── aml-service/         # Port 3007 (flags, STR filing)
-├── packages/                # Shared code
-│   ├── shared-errors/       # Error codes + HTTP mapping
-│   ├── shared-crypto/       # PIN hashing, JWT, AES-256
-│   ├── shared-events/       # BullMQ queues
-│   └── database/            # Prisma client + migrations
-├── infrastructure/
-│   ├── terraform/           # AWS IaC (VPC, EKS, RDS, Redis)
-│   ├── docker/              # Docker configs
-│   └── k8s/                 # Kubernetes manifests
-├── .github/
-│   └── workflows/           # GitHub Actions CI/CD
-├── prisma/
-│   └── schema.prisma        # Database schema
-├── docker-compose.yml       # Local dev (Postgres + Redis)
-├── package.json             # Root monorepo
-├── turbo.json               # Turborepo configuration
-├── CLAUDE.md                # Project context (READ FIRST)
-├── PROJECT_COMPLETION.md    # This session's work summary
-└── PRODUCTION_ROADMAP.md    # 27-week timeline to production
-
-```
-
----
-
-## Key Commands
-
-```bash
-# Install + setup
-npm install                   # Install all dependencies
-npm run db:migrate           # Run Prisma migrations
-npm run db:seed              # Seed test data
-
-# Docker
-npm run docker:up            # Start Postgres + Redis
-npm run docker:down          # Stop containers
-npm run docker:logs          # View container logs
-
-# Development
-npm run dev                  # Start all services in watch mode
-npm run build               # Build all services (TypeScript → JavaScript)
-
-# Testing
-npm run test                # Run Jest (all services)
-npm run test:coverage       # Generate coverage reports
-npm run test:smoke          # Smoke tests (API flow validation)
-
-# Linting
-npm run lint                # ESLint check
-npm run lint:fix            # Auto-fix lint issues
-
-# Infrastructure
-cd infrastructure/terraform
-terraform init -backend-config="key=dev/terraform.tfstate"
-terraform plan -var-file=dev.tfvars
-terraform apply -var-file=dev.tfvars
-```
-
----
-
-## API Endpoints Quick Reference
-
-| Service     | Endpoint                    | Method | Purpose              |
-| ----------- | --------------------------- | ------ | -------------------- |
-| **Auth**    | `/auth/register`            | POST   | Create account       |
-| **Auth**    | `/auth/login`               | POST   | Login with PIN       |
-| **Auth**    | `/auth/refresh`             | POST   | Get new access token |
-| **Auth**    | `/auth/logout`              | POST   | Revoke token         |
-| **Wallet**  | `/wallet/{id}`              | GET    | Get wallet details   |
-| **Wallet**  | `/wallet/{id}/balance`      | GET    | Check balance        |
-| **Wallet**  | `/wallet/{id}/transactions` | GET    | Transaction history  |
-| **Payment** | `/payments`                 | POST   | Send money           |
-| **KYC**     | `/kyc/user/{id}`            | GET    | KYC status           |
-| **KYC**     | `/kyc/tier-upgrade`         | POST   | Upgrade tier         |
-| **AML**     | `/aml/flag`                 | POST   | Create AML flag      |
-| **AML**     | `/aml/flags`                | GET    | List open flags      |
-| **Report**  | `/reports/vat`              | GET    | VAT report           |
-
----
-
-## Environment Variables
-
-Each service needs `.env` (copy from `.env.example`):
-
-```bash
-PORT=3001
 NODE_ENV=development
-DATABASE_URL=postgresql://postgres:ahava@localhost:5432/ahava_db
+DATABASE_URL=postgresql://ahava:ahava_dev_pass@localhost:5432/ahava_dev
 REDIS_URL=redis://localhost:6379
-JWT_PRIVATE_KEY_NAME=/ahava/jwt-private-key  # AWS Secrets Manager
-JWT_PUBLIC_KEY_NAME=/ahava/jwt-public-key
-AWS_REGION=af-south-1
-```
+JWT_PRIVATE_KEY=your_generated_private_key
+JWT_PUBLIC_KEY=your_generated_public_key
 
-For production, use AWS Secrets Manager (see [services/\*/src/main.ts](services/auth-service/src/main.ts) for usage).
+### 4. Set Up Database
 
----
+Start PostgreSQL and Redis via Docker:
 
-## Common Issues & Fixes
+docker-compose -f docker-compose.dev.yml up -d
 
-### **Docker failing to start**
+Run migrations:
 
-```bash
-# Check if ports are in use
-netstat -ano | findstr "5432"  # PostgreSQL
-netstat -ano | findstr "6379"  # Redis
+npx prisma migrate dev
 
-# Kill process if needed
-taskkill /PID <PID> /F
-```
+Seed database (optional):
 
-### **Migrations not running**
+npx prisma db seed
 
-```bash
-# Check Postgres is healthy
-docker-compose logs postgres
+### 5. Start Services
 
-# Manually run migration
-npm run db:push
+Start all services:
 
-# Reset database (⚠️ deletes data)
-npm run db:reset
-```
+npm run dev
 
-### **Services not communicating**
+Or start individual services:
 
-```bash
-# Check DNS/networking
-curl http://localhost:3001/health  # Should return { status: 'ok' }
+cd services/auth-service && npm run dev
+cd services/api-gateway && npm run dev
 
-# Check API Gateway routes
-cat services/api-gateway/src/main.ts | grep proxy
-```
+### 6. Test the System
 
-### **JWT token errors**
+Health check all services:
 
-```bash
-# Regenerate JWT keys in AWS Secrets Manager
-aws secretsmanager create-secret \
-  --name /ahava/jwt-private-key \
-  --secret-string "$(openssl genrsa 2048 | base64)"
-```
+curl http://localhost:3000/health
+curl http://localhost:6001/health
+curl http://localhost:6002/health
 
----
+Test authentication:
 
-## Testing Workflow
+curl -X POST http://localhost:6001/auth/register   -H Content-Type: application/json   -d '{"phoneNumber": "+27123456789", "pin": "123456", "deviceId": "test-device"}'
 
-### **Unit Tests**
+## Service Ports
 
-```bash
-npm run test -- services/auth-service
-# Runs Jest on auth-service with watch mode
-```
+| Service | Port | Health Endpoint |
+|---------|------|-----------------|
+| api-gateway | 3000 | /health |
+| auth-service | 6001 | /health |
+| wallet-service | 6002 | /health |
+| payment-service | 6003 | /health |
+| ledger-service | 6004 | /health |
+| payment-orchestrator | 6005 | /health |
+| kyc-service | 6006 | /health |
+| notification-service | 6007 | /health |
+| aml-service | 6008 | /health |
 
-### **Integration Tests**
+## Troubleshooting
 
-```bash
-npm run test:integration
-# Tests API endpoints against live services
-```
+### Database Connection Issues
+- Verify Docker containers are running: docker ps
+- Check database logs: docker logs container_id
 
-### **Smoke Tests** (after deployment)
+### Redis Connection Issues
+- Verify Redis is running: redis-cli ping
 
-```bash
-npm run test:smoke
-# Quick health checks + basic transaction flow
-```
+### Port Conflicts
+- Check running processes: lsof -i :3000
 
-### **Load Testing**
+## Next Steps
 
-```bash
-# Use k6 or Apache Bench
-ab -n 1000 -c 10 http://localhost:3000/health
-```
+- Set up local development environment
+- Test all service endpoints
+- Configure third-party integrations (optional)
+- Run integration tests
+
+## Support
+
+For issues or questions, contact Mpho Thwala at themol581@gmail.com.
 
 ---
 
-## Deployment (AWS)
-
-### **Dev Environment**
-
-```bash
-cd infrastructure/terraform
-terraform init -backend-config="key=dev/terraform.tfstate"
-terraform apply -var-file=dev.tfvars
-
-# Get kubeconfig
-aws eks update-kubeconfig --name ahava-dev --region af-south-1
-
-# Deploy services
-kubectl apply -f ../k8s/
-```
-
-### **Production**
-
-```bash
-# Push code to main branch
-git push origin main
-
-# GitHub Actions will:
-# 1. Run tests
-# 2. Build Docker images
-# 3. Push to ECR
-# 4. Blue-green deploy to EKS
-# 5. Run smoke tests
-# 6. Auto-rollback on failure
-```
-
----
-
-## Monitoring & Logs
-
-### **Local Logs**
-
-```bash
-# View service logs
-npm run dev -- --filter=auth-service
-
-# Follow Docker logs
-docker-compose logs -f postgres
-docker-compose logs -f redis
-```
-
-### **Production (AWS CloudWatch)**
-
-```bash
-# Logs stored automatically in CloudWatch
-# View via AWS console or CLI
-aws logs tail /aws/lambda/ahava-prod --follow
-
-# Search for errors
-aws logs filter-log-events \
-  --log-group-name /aws/eks/ahava-prod \
-  --filter-pattern "error"
-```
-
----
-
-## Documentation Files
-
-- **[CLAUDE.md](CLAUDE.md)** — Project context, tech stack, absolute rules
-- **[PROJECT_COMPLETION.md](PROJECT_COMPLETION.md)** — What was built this session
-- **[PRODUCTION_ROADMAP.md](PRODUCTION_ROADMAP.md)** — 27-week timeline to SARB production
-- **[BACKEND_SCAFFOLDING_GUIDE.md](BACKEND_SCAFFOLDING_GUIDE.md)** — Architecture patterns
-- **[BUILD_STATUS.md](BUILD_STATUS.md)** — What's done vs. TODO
-
----
-
-## Need Help?
-
-1. **Code questions** → Read service comments (e.g., `services/payment-service/src/main.ts`)
-2. **Architecture** → See PRODUCTION_ROADMAP.md or BACKEND_SCAFFOLDING_GUIDE.md
-3. **Deployment** → Check infrastructure/terraform/\*.tf files
-4. **Errors** → Search for error code in packages/shared-errors/src/index.ts
-5. **API docs** → Each service has route comments explaining request/response
-
----
-
-## What's Next?
-
-Your priorities (in order):
-
-1. ✅ **Run locally** — Follow "5-Minute Startup" above
-2. 📝 **Write tests** — Jest tests (80%+ coverage per service)
-3. 🔌 **Integrate APIs** — ComplyAdvantage, Firebase, Africa's Talking
-4. 🚀 **Deploy to AWS** — Terraform + Kubernetes
-5. ⚖️ **SARB Compliance** — Legal review + license application
-
-👉 **Start with step 1, everything is ready to run.**
-
-Good luck! 🚀
+Ahava on 88 Pty Ltd | Ubuntu Pay Platform | Made in South Africa
