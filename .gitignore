@@ -1,73 +1,60 @@
-# Node
+# Dependencies
 node_modules/
+.pnp
+.pnp.js
 
-# Turbo
-.turbo/
+# Testing
+coverage/
 
-# Build outputs
+# Production
+build/
 dist/
-.next/
 
-# Generated service worker artifacts (PWA build output)
-apps/pwa/public/sw.js
-apps/pwa/public/workbox-*.js
-
-# Environment
-.env
-.env.*
-
-# Secrets (do NOT commit private keys or credentials)
-secrets/
+# Misc
+.DS_Store
 *.pem
-*.key
-*.p12
-*.pfx
 
-# Logs
+# Debug
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+# Local env files
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Vercel
+.vercel
+
+# TypeScript
+*.tsbuildinfo
+next-env.d.ts
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Keys and Certificates
+keys/
+*.key
+*.crt
+*.pem
+
+# Logs
+*.log
+logs/
 
 # OS
 .DS_Store
 Thumbs.db
 
-# IDE
-.vscode/
-.idea/
-.windsurf/
+# Docker
+.docker/
 
-# Flutter / Dart
-.dart_tool/
-.flutter-plugins
-.flutter-plugins-dependencies
-.packages
-pubspec.lock
-build/
-
-# Test coverage (generated artefacts — not source)
-coverage/
-lcov.info
-*.lcov
-
-# Terraform
-.terraform/
-.terraform.lock.hcl
-*.tfstate
-*.tfstate.backup
-*.tfstate.*.backup
-terraform.tfvars
-override.tf
-override.tf.json
-*_override.tf
-*_override.tf.json
-tfplan
-crash.log
-
-# Local logs
-auth-sms-*.log
-
-# Local backups
-ahava-backup*/
-
-runlogs/
+# Render
+.render/
