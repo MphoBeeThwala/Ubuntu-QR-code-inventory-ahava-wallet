@@ -17,11 +17,10 @@ import {
 import { sendSms, welcomeMessage, loginAlertMessage } from "./sms";
 import { writeAuditLog } from "@ahava/shared-audit";
 
-const app = express();
+const app: express.Express = express();
 const prisma = new PrismaClient();
 const PORT = process.env.PORT || 6001;
-const getJwtPrivateKey = () => (process.env.JWT_PRIVATE_KEY || "").replace(/\n/g, "
-");
+const getJwtPrivateKey = () => (process.env.JWT_PRIVATE_KEY || "").replace(/\n/g, "\n");
 
 app.use(express.json());
 
@@ -44,8 +43,7 @@ app.get("/auth/me", async (req: Request, res: Response, next: NextFunction) => {
   try {
     const token = parseBearerToken(req.headers.authorization);
     if (!token) throw new AhavaError(AhavaErrorCode.AUTH_UNAUTHORIZED, "Authorization header missing", { requestId: req.id });
-    const publicKey = (process.env.JWT_PUBLIC_KEY || "").replace(/\n/g, "
-");
+    const publicKey = (process.env.JWT_PUBLIC_KEY || "").replace(/\n/g, "\n");
     if (!publicKey) throw new AhavaError(AhavaErrorCode.INTERNAL_SERVER_ERROR, "JWT public key not configured", { requestId: req.id });
     const payload = jwt.verify(token, publicKey, { algorithms: ["RS256"], issuer: "ahava-ewallet", audience: "ahava-api" }) as Record<string, unknown>;
     const userId = (payload.userId ?? payload.sub) as string | undefined;
@@ -60,8 +58,8 @@ app.post("/auth/register", async (req: Request, res: Response, next: NextFunctio
   try {
     const { phoneNumber, pin, deviceId, deviceName, userAgent, ipAddress } = req.body;
     if (!phoneNumber || !pin || !deviceId) throw new AhavaError(AhavaErrorCode.VAL_MISSING_REQUIRED_FIELD, "Missing required fields", { requestId: req.id });
-    if (!/^(+27|0)[1-9]d{8}$/.test(phoneNumber.replace(/s/g, ""))) throw new AhavaError(AhavaErrorCode.VAL_INVALID_PHONE, "Invalid phone format", { requestId: req.id });
-    if (!/^d{4,6}$/.test(pin)) throw new AhavaError(AhavaErrorCode.VAL_INVALID_INPUT, "PIN must be 4-6 digits", { requestId: req.id });
+    if (!/^(\+27|0)[1-9]\d{8}$/.test(phoneNumber.replace(/\s/g, ""))) throw new AhavaError(AhavaErrorCode.VAL_INVALID_PHONE, "Invalid phone format", { requestId: req.id });
+    if (!/^\d{4,6}$/.test(pin)) throw new AhavaError(AhavaErrorCode.VAL_INVALID_INPUT, "PIN must be 4-6 digits", { requestId: req.id });
     const phoneNumberHash = crypto.createHash("sha256").update(phoneNumber.trim().toLowerCase()).digest("hex");
     if (await prisma.user.findUnique({ where: { phoneNumberHash } })) throw new AhavaError(AhavaErrorCode.CONFLICT_PHONE_ALREADY_REGISTERED, "Phone already registered", { requestId: req.id });
     const pinHash = await hashPin(pin);
