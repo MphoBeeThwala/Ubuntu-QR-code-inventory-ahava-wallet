@@ -31,7 +31,7 @@ import {
 } from "@ahava/shared-crypto";
 import { writeAuditLog } from "@ahava/shared-audit";
 
-const app: Express = express();
+const app = express();
 const prisma = new PrismaClient();
 const PORT = process.env.PORT || 6009;
 
@@ -119,7 +119,7 @@ async function requireAgentAuth(
 // ROUTES
 // ─────────────────────────────────────────────────────────────────
 
-app.get("/health", (req, res) => {
+app.get("/health", (req: express.Request, res: express.Response) => {
   res.json(
     createSuccessResponse({ status: "ok", service: "agent-service" }, req.id),
   );
@@ -326,7 +326,7 @@ app.get(
       ]);
 
       const todayVolume = todayTxns.reduce(
-        (sum: number, t: unknown) => sum + Number(t.amount),
+        (sum: number, t: { amount: number }) => sum + Number(t.amount),
         0,
       );
       const completed = todayTxns.length;
@@ -392,7 +392,7 @@ app.get(
       res.json(
         createSuccessResponse(
           {
-            transactions: transactions.map((t: unknown) => ({
+            transactions: transactions.map((t: { amount: number }) => ({
               id: t.id,
               type: t.transactionType,
               amountCents: Number(t.amount),
