@@ -21,7 +21,7 @@ import { parseZarToCents } from "@ahava/shared-types";
 import { v4 as uuidv4 } from "uuid";
 import africastalking from "africastalking";
 
-const app = express();
+const app: express.Express = express();
 const prisma = new PrismaClient();
 const PORT = process.env.PORT || 6008;
 
