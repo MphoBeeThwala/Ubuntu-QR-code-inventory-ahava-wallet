@@ -6,7 +6,7 @@ import {
   createSuccessResponse,
 } from '@ahava/shared-errors';
 
-const router = Router();
+const router: Router = Router();
 const prisma = new PrismaClient();
 
 // GET /transactions - List inventory transactions for a merchant
@@ -134,7 +134,7 @@ router.post('/sale', async (req, res, next) => {
         {
           transaction: {
             ...inventoryTxn,
-            unitPriceCents: inventoryTxn.unitPriceCents.toString(),
+            unitPriceCents: inventoryTxn.unitPriceCents?.toString() ?? null,
             totalCents: inventoryTxn.totalCents.toString(),
           },
         },

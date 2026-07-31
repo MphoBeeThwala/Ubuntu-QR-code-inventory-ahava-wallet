@@ -9,7 +9,7 @@ import {
 } from '@ahava/shared-errors';
 import { writeAuditLog } from '@ahava/shared-audit';
 
-const router = Router();
+const router: Router = Router();
 const prisma = new PrismaClient();
 
 // GET /products - List all products for a merchant
