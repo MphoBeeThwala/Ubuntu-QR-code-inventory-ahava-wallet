@@ -14,7 +14,7 @@ import {
   createErrorResponse,
 } from '@ahava/shared-errors';
 
-const app = express();
+const app: express.Express = express();
 const prisma = new PrismaClient();
 const PORT = process.env.PORT || 6011;
 
@@ -165,7 +165,7 @@ app.get('/payshap/transactions/:payshapMsgId', async (req, res, next) => {
 
     if (!transaction) {
       throw new AhavaError(
-        AhavaErrorCode.VAL_NOT_FOUND,
+        AhavaErrorCode.DB_NOT_FOUND,
         'PayShap transaction not found',
         { requestId: req.id },
       );
