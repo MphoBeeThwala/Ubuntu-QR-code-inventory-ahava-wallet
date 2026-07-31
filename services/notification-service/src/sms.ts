@@ -41,7 +41,7 @@ export async function sendSms(
     }
   }
 
-  throw new AhavaError(AhavaErrorCode.INTERNAL_SERVER_ERROR, "Invalid SMS provider", { provider });
+  throw new AhavaError(AhavaErrorCode.INTERNAL_SERVER_ERROR, "Invalid SMS provider", { details: { provider } });
 }
 
 export function welcomeMessage(walletNumber: string): string {
