@@ -762,6 +762,9 @@ importers:
       '@prisma/client':
         specifier: ^5.8.0
         version: 5.22.0(prisma@5.22.0)
+      axios:
+        specifier: ^1.7.2
+        version: 1.19.0
       bullmq:
         specifier: ^5.0.0
         version: 5.81.3
@@ -774,12 +777,15 @@ importers:
       uuid:
         specifier: ^9.0.1
         version: 9.0.1
+      winston:
+        specifier: ^3.11.0
+        version: 3.19.0
     devDependencies:
       '@types/express':
         specifier: ^4.17.21
         version: 4.17.25
       '@types/jest':
-        specifier: ^29.5.10
+        specifier: ^29.5.14
         version: 29.5.14
       '@types/node':
         specifier: ^20.10.6
