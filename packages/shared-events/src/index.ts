@@ -304,6 +304,7 @@ export const QUEUE_NAMES = {
   // Reporting
   REPORTING_DATA_COLLECTED: "reporting_data_collected",
   LEDGER_RECONCILIATION: "ledger_reconciliation",
+  PAYSHAP_SETTLEMENT: "payshap_settlement",
   VAT_STATEMENT_GENERATED: "reporting_vat_statement_generated",
 } as const;
 

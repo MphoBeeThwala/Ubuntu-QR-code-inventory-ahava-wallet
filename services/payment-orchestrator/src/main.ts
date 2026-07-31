@@ -64,7 +64,7 @@ async function callService(service: string, endpoint: string, method: string, pa
     try {
       const response = await fetch(url, { method, headers: { "Content-Type": "application/json", "X-Request-ID": uuidv4() }, body: JSON.stringify(payload) });
       if (!response.ok) throw new Error(`HTTP ${response.status}: ${await response.text()}`);
-      const data = await response.json(); recordSuccess(service); return data;
+      const data = await response.json(); recordSuccess(service); return data as Record<string, unknown>;
     } catch (err) { lastError = err instanceof Error ? err : new Error(String(err)); if (attempt < retries - 1) await new Promise((r) => setTimeout(r, 1000 * (attempt + 1))); }
   }
   recordFailure(service);
@@ -95,7 +95,7 @@ app.post("/orchestrate/payment", async (req: Request, res: Response, next: NextF
     let resolvedRecipientId = recipientWalletId;
     if (!resolvedRecipientId && recipientPhone) {
       const lookup = await callService("wallet", "/wallets/lookup", "GET", { walletNumber: recipientPhone });
-      resolvedRecipientId = (lookup.data?.wallet?.id as string) || null;
+      resolvedRecipientId = ((lookup as any).data?.wallet?.id as string) || null;
     }
     if (!resolvedRecipientId) throw new AhavaError(AhavaErrorCode.PAY_COUNTERPARTY_NOT_FOUND, "Recipient wallet not found", { requestId: req.id });
     saga.steps = [
@@ -117,7 +117,7 @@ app.post("/orchestrate/payment", async (req: Request, res: Response, next: NextF
         }
         saga.status = "COMPENSATED"; saga.updatedAt = new Date();
         await redis.setex(`saga:${idempotencyKey}`, 86400, JSON.stringify({ sagaId, status: saga.status, errors: saga.errors, completedAt: saga.updatedAt.toISOString() }));
-        throw new AhavaError(AhavaErrorCode.INTERNAL_SERVER_ERROR, `Payment saga failed at "${step.name}". Changes compensated.`, { requestId: req.id, details: saga.errors });
+        throw new AhavaError(AhavaErrorCode.INTERNAL_SERVER_ERROR, `Payment saga failed at "${step.name}". Changes compensated.`, { requestId: req.id, details: { errors: saga.errors } });
       }
     }
     saga.status = "COMPLETED"; saga.completedAt = new Date(); saga.updatedAt = new Date();
@@ -134,7 +134,7 @@ app.post("/orchestrate/payshap", async (req: Request, res: Response, next: NextF
     const sagaId = uuidv4();
     const debitResult = await callService("payment", "/payments", "POST", { senderWalletId, receiverWalletId: "PAYSHAP_ESCROW", amountCents, description: `PayShap to ${creditorName}`, idempotencyKey: `payshap-${idempotencyKey}`, paymentMethod: "PAYSHAP" });
     const payshapRef = `PAYSHAP-${new Date().getFullYear()}-${uuidv4().slice(0, 8).toUpperCase()}`;
-    await prisma.payshapTransaction.create({ data: { ahavaTransactionId: (debitResult.data?.transaction?.debit?.id as string) || uuidv4(), payshapMsgId: payshapRef, payshapEndToEndId: idempotencyKey, amountCents: BigInt(amountCents), currency: "ZAR", debtorName: "Ahava User", debtorAccountRef: senderWalletId, creditorName, creditorAccountRef, remittanceInfo: remittanceInfo || "", status: "PENDING", submittedAt: new Date(), rawRequest: JSON.stringify(req.body) } });
+    await prisma.payshapTransaction.create({ data: { ahavaTransactionId: ((debitResult as any).data?.transaction?.debit?.id as string) || uuidv4(), payshapMsgId: payshapRef, payshapEndToEndId: idempotencyKey, amountCents: BigInt(amountCents), currency: "ZAR", debtorName: "Ahava User", debtorAccountRef: senderWalletId, creditorName, creditorAccountRef, remittanceInfo: remittanceInfo || "", status: "PENDING", submittedAt: new Date(), rawRequest: JSON.stringify(req.body) } });
     const q = new Queue(QUEUE_NAMES.PAYSHAP_SETTLEMENT, { connection: redisConnection });
     await q.add("settle", { sagaId, payshapRef, creditorAccountRef, creditorName, amountCents, remittanceInfo, idempotencyKey }, { attempts: 5, backoff: { type: "exponential", delay: 10000 } });
     await q.close();
