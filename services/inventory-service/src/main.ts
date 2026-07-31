@@ -10,7 +10,7 @@ import {
 } from '@ahava/shared-errors';
 import { writeAuditLog } from '@ahava/shared-audit';
 
-const app = express();
+const app: express.Express = express();
 const prisma = new PrismaClient();
 const PORT = process.env.PORT || 6010;
 

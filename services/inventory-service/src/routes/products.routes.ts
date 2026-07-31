@@ -1,3 +1,4 @@
+import { v4 as uuidv4 } from "uuid";
 import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { createHash } from 'crypto';
@@ -84,7 +85,7 @@ router.post('/', async (req, res, next) => {
 
     if (!merchant) {
       throw new AhavaError(
-        AhavaErrorCode.VAL_INVALID_USER,
+        AhavaErrorCode.DB_NOT_FOUND,
         'Merchant not found',
         { requestId: req.id },
       );
@@ -184,7 +185,7 @@ router.get('/:id', async (req, res, next) => {
 
     if (!product) {
       throw new AhavaError(
-        AhavaErrorCode.VAL_NOT_FOUND,
+        AhavaErrorCode.DB_NOT_FOUND,
         'Product not found',
         { requestId: req.id },
       );
@@ -219,7 +220,7 @@ router.patch('/:id', async (req, res, next) => {
 
     if (!existingProduct) {
       throw new AhavaError(
-        AhavaErrorCode.VAL_NOT_FOUND,
+        AhavaErrorCode.DB_NOT_FOUND,
         'Product not found',
         { requestId: req.id },
       );
@@ -283,7 +284,7 @@ router.delete('/:id', async (req, res, next) => {
 
     if (!product) {
       throw new AhavaError(
-        AhavaErrorCode.VAL_NOT_FOUND,
+        AhavaErrorCode.DB_NOT_FOUND,
         'Product not found',
         { requestId: req.id },
       );

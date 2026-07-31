@@ -196,6 +196,7 @@ model User {
   guardian              User?     @relation("GuardianMinor", fields: [guardianUserId], references: [id])
   minors                User[]    @relation("GuardianMinor")
   wallets               Wallet[]
+  inventoryProducts     InventoryProduct[]
   kycDocuments          KycDocument[]
   refreshTokens         RefreshToken[]
   auditLogs             AuditLog[]
@@ -372,6 +373,7 @@ model WalletTransaction {
 
   wallet                Wallet              @relation(fields: [walletId], references: [id])
   paymentQr             PaymentQrCode?      @relation(fields: [paymentQrId], references: [id])
+  inventoryTransactions InventoryTransaction[]
 
   @@index([walletId])
   @@index([status])
@@ -668,4 +670,68 @@ model SystemConfig {
   updatedAt   DateTime  @updatedAt
 
   @@map("system_config")
+}
+
+model InventoryProduct {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  merchantId   String    @db.Uuid
+  name         String    @db.VarChar(255)
+  description  String?
+  category     String?   @db.VarChar(100)
+  priceCents   BigInt
+  costCents    BigInt?
+  sku          String?   @db.VarChar(100)
+  barcode      String?   @db.VarChar(100)
+  trackStock   Boolean   @default(false)
+  qrPayload    String
+  qrHash       String    @db.VarChar(64)
+  isActive     Boolean   @default(true)
+
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  merchant     User                    @relation(fields: [merchantId], references: [id])
+  stock        InventoryStock?
+  transactions InventoryTransaction[]
+
+  @@index([merchantId])
+  @@index([sku])
+  @@index([isActive])
+  @@map("inventory_products")
+}
+
+model InventoryStock {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  productId      String    @unique @db.Uuid
+  quantity       Int       @default(0)
+  lowStockAlert  Int       @default(5)
+  lastRestocked  DateTime?
+  location       String?   @db.VarChar(255)
+
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  product        InventoryProduct @relation(fields: [productId], references: [id])
+
+  @@map("inventory_stock")
+}
+
+model InventoryTransaction {
+  id                  String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  productId           String    @db.Uuid
+  type                String    @db.VarChar(20)
+  quantity            Int
+  unitPriceCents      BigInt?
+  totalCents          BigInt    @default(0)
+  walletTransactionId String?   @db.Uuid
+  notes               String?
+
+  createdAt           DateTime  @default(now())
+
+  product             InventoryProduct   @relation(fields: [productId], references: [id])
+  walletTransaction   WalletTransaction? @relation(fields: [walletTransactionId], references: [id])
+
+  @@index([productId])
+  @@index([walletTransactionId])
+  @@map("inventory_transactions")
 }

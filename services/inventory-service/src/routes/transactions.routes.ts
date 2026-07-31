@@ -89,7 +89,7 @@ router.post('/sale', async (req, res, next) => {
 
     if (!product) {
       throw new AhavaError(
-        AhavaErrorCode.VAL_NOT_FOUND,
+        AhavaErrorCode.DB_NOT_FOUND,
         'Product not found',
         { requestId: req.id },
       );
@@ -101,7 +101,7 @@ router.post('/sale', async (req, res, next) => {
 
     if (!walletTxn) {
       throw new AhavaError(
-        AhavaErrorCode.VAL_NOT_FOUND,
+        AhavaErrorCode.DB_NOT_FOUND,
         'Wallet transaction not found',
         { requestId: req.id },
       );

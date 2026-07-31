@@ -21,7 +21,7 @@ router.get('/:productId', async (req, res, next) => {
 
     if (!stock) {
       throw new AhavaError(
-        AhavaErrorCode.VAL_NOT_FOUND,
+        AhavaErrorCode.DB_NOT_FOUND,
         'Stock record not found',
         { requestId: req.id },
       );
@@ -63,7 +63,7 @@ router.post('/:productId/adjust', async (req, res, next) => {
 
     if (!stock) {
       throw new AhavaError(
-        AhavaErrorCode.VAL_NOT_FOUND,
+        AhavaErrorCode.DB_NOT_FOUND,
         'Stock record not found',
         { requestId: req.id },
       );
@@ -72,7 +72,7 @@ router.post('/:productId/adjust', async (req, res, next) => {
     const newQuantity = stock.quantity + quantityChange;
     if (newQuantity < 0) {
       throw new AhavaError(
-        AhavaErrorCode.VAL_INVALID_QUANTITY,
+        AhavaErrorCode.VAL_INVALID_INPUT,
         'Stock cannot go below zero',
         { requestId: req.id },
       );
