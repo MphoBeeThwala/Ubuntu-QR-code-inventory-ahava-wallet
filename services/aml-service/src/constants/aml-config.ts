@@ -1,0 +1,50 @@
+/**
+ * AML Constants
+ * Configuration and constants for AML screening
+ */
+
+export type AmlRiskLevel = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+export type AmlCheckType = 'WATCHLIST' | 'SANCTIONS' | 'VELOCITY' | 'AMOUNT' | 'GEOGRAPHIC' | 'BEHAVIORAL';
+export type AmlStatus = 'PENDING' | 'PASSED' | 'FLAGGED' | 'BLOCKED' | 'REVIEW_REQUIRED' | 'FALSE_POSITIVE';
+export type AmlSeverity = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+export type AmlEntityType = 'USER' | 'WALLET' | 'TRANSACTION' | 'PHONE' | 'EMAIL' | 'IP_ADDRESS' | 'DEVICE';
+export type AmlWatchlistType = 'PEPS' | 'SANCTIONS' | 'CRIMINAL' | 'TERRORIST' | 'FRAUD' | 'CUSTOM';
+
+export const AML_CONFIG = {
+  SINGLE_TRANSACTION_LIMIT: 100000000n,
+  DAILY_LIMIT: 500000000n,
+  MONTHLY_LIMIT: 5000000000n,
+  MAX_TRANSACTIONS_PER_HOUR: 10,
+  MAX_TRANSACTIONS_PER_DAY: 50,
+  LOW_RISK_SCORE: 0,
+  MEDIUM_RISK_SCORE: 50,
+  HIGH_RISK_SCORE: 80,
+  CRITICAL_RISK_SCORE: 100,
+  WATCHLIST_MATCH_THRESHOLD: 0.85,
+  SANCTIONS_MATCH_THRESHOLD: 0.95,
+  DAILY_WINDOW_HOURS: 24,
+  MONTHLY_WINDOW_DAYS: 30,
+  ENABLE_WATCHLIST_SCREENING: true,
+  ENABLE_SANCTIONS_SCREENING: true,
+  ENABLE_VELOCITY_CHECKS: true,
+  ENABLE_AMOUNT_CHECKS: true,
+  ENABLE_GEOGRAPHIC_CHECKS: true,
+} as const;
+
+export const RISK_LEVEL_COLORS = {
+  LOW: '#00aa44',
+  MEDIUM: '#ff9900',
+  HIGH: '#ff6600',
+  CRITICAL: '#cc0000',
+} as const;
+
+export const STATUS_COLORS = {
+  PENDING: '#666666',
+  PASSED: '#00aa44',
+  FLAGGED: '#ff9900',
+  BLOCKED: '#cc0000',
+  REVIEW_REQUIRED: '#ff6600',
+  FALSE_POSITIVE: '#0066cc',
+} as const;
+
+export default { AML_CONFIG, RISK_LEVEL_COLORS, STATUS_COLORS };
