@@ -1,0 +1,20 @@
+version: "3.8"
+
+services:
+  swagger-ui:
+    image: swaggerapi/swagger-ui:latest
+    container_name: swagger-ui
+    ports:
+      - "8081:8080"
+    volumes:
+      - ./docs/api/openapi.yaml:/usr/share/nginx/html/openapi.yaml
+    environment:
+      - URL=/openapi.yaml
+      - SWAGGER_JSON=/openapi.yaml
+    networks:
+      - api-docs
+    restart: unless-stopped
+
+networks:
+  api-docs:
+    driver: bridge
