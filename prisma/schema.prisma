@@ -35,7 +35,6 @@ model LedgerEntry {
   metadata               Json?
   createdAt              DateTime  @default(now())
 
-  // Indexes for ledger queries
   @@id([transactionId, entryType, walletId])
   @@index([walletId])
   @@index([transactionId])
@@ -68,10 +67,75 @@ model QrPayment {
   updatedAt    DateTime  @updatedAt
   expiresAt    DateTime
   
-  // Indexes for fast idempotency lookups
   @@index([qrCodeId])
   @@index([transactionId])
   @@index([walletId])
   @@index([status])
   @@index([expiresAt])
+}
+
+// ============================================
+// BATCH 4: Fee Accounting Consistency
+// ============================================
+
+enum FeeType {
+  TRANSACTION_FEE
+  WITHDRAWAL_FEE
+  DEPOSIT_FEE
+  SETTLEMENT_FEE
+  PLATFORM_FEE
+  AGENT_COMMISSION
+  SERVICE_FEE
+  FX_FEE
+}
+
+enum FeeStatus {
+  PENDING
+  COMPLETED
+  REVERSED
+  REFUNDED
+}
+
+model Fee {
+  id            String    @id @default(cuid())
+  transactionId String
+  walletId      String
+  userId        String?
+  feeType       FeeType
+  amountCents  BigInt
+  currency     String    @default("ZAR")
+  status        FeeStatus @default(PENDING)
+  description   String?
+  reference     String?
+  debitEntryId  String?
+  creditEntryId String?
+  metadata      Json?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  settledAt    DateTime?
+  
+  @@index([transactionId])
+  @@index([walletId])
+  @@index([feeType])
+  @@index([status])
+  @@index([createdAt])
+  
+  debitEntry  LedgerEntry?  @relation(fields: [debitEntryId], references: [id])
+  creditEntry LedgerEntry? @relation(fields: [creditEntryId], references: [id])
+}
+
+model FeeConfiguration {
+  id          String   @id @default(cuid())
+  feeType     FeeType  @unique
+  calculationMethod String
+  baseValue   BigInt
+  minFeeCents BigInt   @default(0)
+  maxFeeCents BigInt?
+  tiers       Json?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@index([feeType])
+  @@index([isActive])
 }
