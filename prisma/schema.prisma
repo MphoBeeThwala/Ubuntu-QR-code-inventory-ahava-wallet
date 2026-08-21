@@ -139,3 +139,194 @@ model FeeConfiguration {
   @@index([feeType])
   @@index([isActive])
 }
+
+// ============================================
+// BATCH 5: Saga Reversal
+// ============================================
+
+enum SagaStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+  REVERSING
+  REVERSED
+  PARTIALLY_REVERSED
+}
+
+enum SagaStepStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  SKIPPED
+  REVERSING
+  REVERSED
+}
+
+model Saga {
+  id            String    @id @default(cuid())
+  sagaType      String
+  transactionId String    @unique
+  walletId      String
+  userId        String?
+  status        SagaStatus @default(PENDING)
+  currentStep   Int       @default(0)
+  totalSteps    Int       @default(0)
+  startedAt     DateTime?
+  completedAt   DateTime?
+  failedAt      DateTime?
+  reversedAt    DateTime?
+  errorMessage  String?
+  metadata      Json?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  
+  steps         SagaStep[]
+  
+  @@index([transactionId])
+  @@index([walletId])
+  @@index([status])
+  @@index([createdAt])
+  @@index([sagaType])
+}
+
+model SagaStep {
+  id            String    @id @default(cuid())
+  sagaId        String
+  stepNumber    Int
+  stepType      String
+  action        String
+  status        SagaStepStatus @default(PENDING)
+  result        Json?
+  errorMessage  String?
+  startedAt     DateTime?
+  completedAt   DateTime?
+  
+  reversalSagaId String?
+  isReversal    Boolean  @default(false)
+  
+  saga          Saga     @relation(fields: [sagaId], references: [id], onDelete: Cascade)
+  
+  @@id([sagaId, stepNumber])
+  @@index([sagaId])
+  @@index([status])
+  @@index([stepType])
+  @@index([createdAt])
+}
+
+model SagaReversal {
+  id            String    @id @default(cuid())
+  originalSagaId String    @unique
+  reversalSagaId String?
+  status        SagaStatus @default(RUNNING)
+  reason        String?
+  initiatedBy   String?
+  initiatedAt   DateTime  @default(now())
+  completedAt   DateTime?
+  stepsReversed Int       @default(0)
+  totalSteps    Int       @default(0)
+  errorMessage  String?
+  metadata      Json?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  
+  originalSaga  Saga     @relation(fields: [originalSagaId], references: [id])
+  
+  @@index([originalSagaId])
+  @@index([reversalSagaId])
+  @@index([status])
+  @@index([initiatedAt])
+}
+
+// ============================================
+// BATCH 6: PIN Concurrency
+// ============================================
+
+enum PinStatus {
+  ACTIVE
+  LOCKED
+  DISABLED
+  PENDING_FIRST_USE
+}
+
+enum PinAttemptStatus {
+  SUCCESS
+  FAILED
+  LOCKED_OUT
+}
+
+// Track PIN verification attempts for rate limiting and lockout
+model PinAttempt {
+  id            String    @id @default(cuid())
+  userId        String
+  walletId      String
+  ipAddress     String?
+  deviceId      String?
+  status        PinAttemptStatus
+  attemptCount  Int       @default(1)
+  lastAttemptAt DateTime  @default(now())
+  lockedUntil   DateTime?
+  isLockout     Boolean   @default(false)
+  metadata      Json?
+  createdAt    DateTime  @default(now())
+  
+  // Indexes for rate limiting queries
+  @@id([userId, walletId, ipAddress])
+  @@index([userId])
+  @@index([walletId])
+  @@index([ipAddress])
+  @@index([deviceId])
+  @@index([lastAttemptAt])
+  @@index([lockedUntil])
+  @@index([isLockout])
+}
+
+// Store PIN hashes (never store plaintext PINs)
+model Pin {
+  id            String    @id @default(cuid())
+  userId        String    @unique
+  walletId      String    @unique
+  pinHash       String    // bcrypt hash of PIN
+  salt          String?   // Optional salt
+  status        PinStatus @default(ACTIVE)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  lastUsedAt    DateTime?
+  maxAttempts   Int       @default(5)
+  lockoutDurationMinutes Int @default(30)
+  
+  // Relationships
+  user          User      @relation(fields: [userId], references: [id])
+  wallet        Wallet    @relation(fields: [walletId], references: [id])
+  attempts      PinAttempt[]
+  
+  // Indexes
+  @@index([userId])
+  @@index([walletId])
+  @@index([status])
+  @@index([lastUsedAt])
+}
+
+// PIN session for temporary authentication
+model PinSession {
+  id            String    @id @default(cuid())
+  userId        String
+  walletId      String
+  sessionToken  String    @unique
+  expiresAt     DateTime
+  createdAt     DateTime  @default(now())
+  ipAddress     String?
+  deviceId      String?
+  isValid       Boolean   @default(true)
+  
+  // Relationships
+  user          User      @relation(fields: [userId], references: [id])
+  wallet        Wallet    @relation(fields: [walletId], references: [id])
+  
+  // Indexes
+  @@index([userId])
+  @@index([walletId])
+  @@index([sessionToken])
+  @@index([expiresAt])
+  @@index([isValid])
+}
