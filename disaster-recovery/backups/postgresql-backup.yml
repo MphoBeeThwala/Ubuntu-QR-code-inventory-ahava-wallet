@@ -1,0 +1,24 @@
+version: "3.8"
+
+services:
+  postgres-backup:
+    image: postgres:15
+    container_name: postgres-backup
+    environment:
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=ubuntu_pay
+      - BACKUP_DIR=/backups
+      - RETENTION_DAYS=30
+    volumes:
+      - ./disaster-recovery/backups:/backups
+    command: ["sleep", "infinity"]
+    restart: unless-stopped
+    networks:
+      - disaster-recovery
+
+networks:
+  disaster-recovery:
+    driver: bridge
