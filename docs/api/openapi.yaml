@@ -1,0 +1,640 @@
+openapi: 3.0.3
+info:
+  title: Ubuntu Pay Platform API
+  description: |
+    Comprehensive digital payment platform API for South Africa.
+    All monetary values are in BIGINT cents (never floats).
+  version: 1.0.0
+  contact:
+    name: Ubuntu Pay
+    email: support@ubuntu-pay.co.za
+  license:
+    name: MIT
+
+servers:
+  - url: https://api.ubuntu-pay.co.za
+    description: Production server
+  - url: https://staging-api.ubuntu-pay.co.za
+    description: Staging server
+  - url: http://localhost:3000
+    description: Development server
+
+tags:
+  - name: Authentication
+    description: User authentication and authorization
+  - name: Wallet
+    description: Wallet operations and balance management
+  - name: Payments
+    description: Payment processing and transactions
+  - name: QR Code
+    description: QR code generation and scanning
+  - name: PayShap
+    description: PayShap integration
+  - name: Agent
+    description: Agent and merchant operations
+  - name: Reporting
+    description: Reports and analytics
+
+paths:
+  /health:
+    get:
+      tags: [Health]
+      summary: Health check
+      description: Check API health status
+      responses:
+        200:
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+  /api/v1/auth/login:
+    post:
+      tags: [Authentication]
+      summary: Login
+      description: Authenticate user with phone and PIN
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        200:
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        401:
+          description: Invalid credentials
+        429:
+          description: Too many attempts
+
+  /api/v1/auth/refresh:
+    post:
+      tags: [Authentication]
+      summary: Refresh token
+      description: Refresh access token using refresh token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refreshToken]
+              properties:
+                refreshToken:
+                  type: string
+      responses:
+        200:
+          description: Token refreshed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+        401:
+          description: Invalid refresh token
+
+  /api/v1/wallet:
+    get:
+      tags: [Wallet]
+      summary: Get wallet balance
+      security:
+        - bearerAuth: []
+      responses:
+        200:
+          description: Wallet balance
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WalletBalance'
+        401:
+          description: Unauthorized
+
+  /api/v1/wallet/transactions:
+    get:
+      tags: [Wallet]
+      summary: Get transaction history
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/limit'
+        - $ref: '#/components/parameters/offset'
+        - $ref: '#/components/parameters/startDate'
+        - $ref: '#/components/parameters/endDate'
+      responses:
+        200:
+          description: Transaction history
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransactionList'
+        401:
+          description: Unauthorized
+
+  /api/v1/payments/transfer:
+    post:
+      tags: [Payments]
+      summary: Transfer money
+      description: Transfer money to another user (amount in BIGINT cents)
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TransferRequest'
+      responses:
+        200:
+          description: Transfer successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransferResponse'
+        400:
+          description: Invalid request
+        401:
+          description: Unauthorized
+        402:
+          description: Insufficient funds
+        422:
+          description: Validation error
+
+  /api/v1/payments/qr/generate:
+    post:
+      tags: [QR Code]
+      summary: Generate QR code
+      description: Generate a QR code for payment
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QRGenerateRequest'
+      responses:
+        200:
+          description: QR code generated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QRGenerateResponse'
+        400:
+          description: Invalid request
+        401:
+          description: Unauthorized
+
+  /api/v1/payments/qr/scan:
+    post:
+      tags: [QR Code]
+      summary: Scan QR code
+      description: Process a scanned QR code payment
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QRScanRequest'
+      responses:
+        200:
+          description: Payment processed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentResponse'
+        400:
+          description: Invalid QR code
+        401:
+          description: Unauthorized
+        402:
+          description: Insufficient funds
+
+  /api/v1/payshap/pay:
+    post:
+      tags: [PayShap]
+      summary: PayShap payment
+      description: Process PayShap payment (amount in BIGINT cents)
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PayShapRequest'
+      responses:
+        200:
+          description: Payment successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PayShapResponse'
+        400:
+          description: Invalid request
+        401:
+          description: Unauthorized
+        402:
+          description: Insufficient funds
+
+  /api/v1/agents:
+    get:
+      tags: [Agent]
+      summary: List agents
+      security:
+        - bearerAuth: []
+      responses:
+        200:
+          description: List of agents
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentList'
+        401:
+          description: Unauthorized
+
+  /api/v1/reports/transactions:
+    get:
+      tags: [Reporting]
+      summary: Transaction report
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/startDate'
+        - $ref: '#/components/parameters/endDate'
+        - $ref: '#/components/parameters/type'
+      responses:
+        200:
+          description: Transaction report
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportResponse'
+        401:
+          description: Unauthorized
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT access token
+
+  schemas:
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: healthy
+        timestamp:
+          type: string
+          format: date-time
+        uptime:
+          type: number
+          example: 1234.56
+
+    LoginRequest:
+      type: object
+      required: [phone, pin]
+      properties:
+        phone:
+          type: string
+          example: +27123456789
+        pin:
+          type: string
+          format: password
+          example: 1234
+
+    LoginResponse:
+      type: object
+      properties:
+        accessToken:
+          type: string
+        refreshToken:
+          type: string
+        user:
+          $ref: '#/components/schemas/User'
+
+    TokenResponse:
+      type: object
+      properties:
+        accessToken:
+          type: string
+
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        phone:
+          type: string
+          example: +27123456789
+        firstName:
+          type: string
+        lastName:
+          type: string
+        email:
+          type: string
+          format: email
+        createdAt:
+          type: string
+          format: date-time
+
+    WalletBalance:
+      type: object
+      properties:
+        balanceCents:
+          type: integer
+          format: int64
+          description: Balance in BIGINT cents (never float)
+          example: 100000
+        currency:
+          type: string
+          example: ZAR
+        availableBalanceCents:
+          type: integer
+          format: int64
+          example: 100000
+        reservedBalanceCents:
+          type: integer
+          format: int64
+          example: 0
+
+    Transaction:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        type:
+          type: string
+          enum: [transfer, payment, deposit, withdrawal]
+        amountCents:
+          type: integer
+          format: int64
+          description: Amount in BIGINT cents
+          example: 50000
+        feeCents:
+          type: integer
+          format: int64
+          example: 500
+        totalCents:
+          type: integer
+          format: int64
+          example: 50500
+        status:
+          type: string
+          enum: [pending, completed, failed, reversed]
+        createdAt:
+          type: string
+          format: date-time
+        fromUserId:
+          type: string
+          format: uuid
+        toUserId:
+          type: string
+          format: uuid
+
+    TransactionList:
+      type: object
+      properties:
+        transactions:
+          type: array
+          items:
+            $ref: '#/components/schemas/Transaction'
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+
+    TransferRequest:
+      type: object
+      required: [toPhone, amountCents]
+      properties:
+        toPhone:
+          type: string
+          example: +27987654321
+        amountCents:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Amount in BIGINT cents (never float)
+          example: 10000
+        reference:
+          type: string
+          example: Rent payment
+
+    TransferResponse:
+      type: object
+      properties:
+        transactionId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          example: completed
+        amountCents:
+          type: integer
+          format: int64
+          example: 10000
+        feeCents:
+          type: integer
+          format: int64
+          example: 100
+        totalCents:
+          type: integer
+          format: int64
+          example: 10100
+
+    QRGenerateRequest:
+      type: object
+      required: [amountCents, reference]
+      properties:
+        amountCents:
+          type: integer
+          format: int64
+          description: Amount in BIGINT cents
+          example: 50000
+        reference:
+          type: string
+          example: Groceries
+        expiryMinutes:
+          type: integer
+          default: 15
+          example: 15
+
+    QRGenerateResponse:
+      type: object
+      properties:
+        qrCode:
+          type: string
+          description: Base64 encoded QR code image
+        referenceId:
+          type: string
+          format: uuid
+        amountCents:
+          type: integer
+          format: int64
+          example: 50000
+        expiresAt:
+          type: string
+          format: date-time
+
+    QRScanRequest:
+      type: object
+      required: [qrCodeData]
+      properties:
+        qrCodeData:
+          type: string
+          description: Scanned QR code data
+
+    PaymentResponse:
+      type: object
+      properties:
+        transactionId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          example: completed
+        amountCents:
+          type: integer
+          format: int64
+          example: 50000
+
+    PayShapRequest:
+      type: object
+      required: [payShapId, amountCents]
+      properties:
+        payShapId:
+          type: string
+          example: user123
+        amountCents:
+          type: integer
+          format: int64
+          description: Amount in BIGINT cents
+          example: 75000
+        reference:
+          type: string
+          example: Electricity bill
+
+    PayShapResponse:
+      type: object
+      properties:
+        transactionId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          example: completed
+        amountCents:
+          type: integer
+          format: int64
+          example: 75000
+        payShapReference:
+          type: string
+
+    AgentList:
+      type: object
+      properties:
+        agents:
+          type: array
+          items:
+            $ref: '#/components/schemas/Agent'
+
+    Agent:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        phone:
+          type: string
+        status:
+          type: string
+          enum: [active, inactive]
+
+    ReportResponse:
+      type: object
+      properties:
+        period:
+          type: string
+          example: 2024-01
+        totalTransactions:
+          type: integer
+        totalVolumeCents:
+          type: integer
+          format: int64
+          description: Total volume in BIGINT cents
+        averageTransactionCents:
+          type: integer
+          format: int64
+          description: Average in BIGINT cents
+
+    Pagination:
+      type: object
+      properties:
+        page:
+          type: integer
+          example: 1
+        pageSize:
+          type: integer
+          example: 20
+        totalPages:
+          type: integer
+          example: 10
+        totalItems:
+          type: integer
+          example: 200
+
+  parameters:
+    limit:
+      name: limit
+      in: query
+      schema:
+        type: integer
+        default: 20
+        minimum: 1
+        maximum: 100
+      description: Number of items per page
+
+    offset:
+      name: offset
+      in: query
+      schema:
+        type: integer
+        default: 0
+        minimum: 0
+      description: Pagination offset
+
+    startDate:
+      name: startDate
+      in: query
+      schema:
+        type: string
+        format: date
+      description: Start date filter
+
+    endDate:
+      name: endDate
+      in: query
+      schema:
+        type: string
+        format: date
+      description: End date filter
+
+    type:
+      name: type
+      in: query
+      schema:
+        type: string
+        enum: [transfer, payment, deposit, withdrawal]
+      description: Transaction type filter
