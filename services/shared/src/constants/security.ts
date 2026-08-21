@@ -1,0 +1,42 @@
+export const SECURITY = {
+  RATE_LIMIT: {
+    WINDOW_MS: 15 * 60 * 1000,
+    MAX_REQUESTS: 100,
+    AUTH_MAX_REQUESTS: 5,
+    PAYMENT_MAX_REQUESTS: 10,
+  },
+  
+  PASSWORD: {
+    MIN_LENGTH: 8,
+    MAX_LENGTH: 64,
+    REQUIRE_UPPERCASE: true,
+    REQUIRE_LOWERCASE: true,
+    REQUIRE_NUMBER: true,
+    REQUIRE_SPECIAL: true,
+  },
+  
+  PIN: {
+    LENGTH: 4,
+    MAX_ATTEMPTS: 3,
+    LOCKOUT_DURATION_MS: 5 * 60 * 1000,
+  },
+  
+  SESSION: {
+    EXPIRY_MS: 24 * 60 * 60 * 1000,
+    REFRESH_THRESHOLD_MS: 15 * 60 * 1000,
+  },
+  
+  JWT: {
+    ACCESS_TOKEN_EXPIRY: '15m',
+    REFRESH_TOKEN_EXPIRY: '7d',
+    ALGORITHM: 'HS256' as const,
+  },
+  
+  FINANCIAL: {
+    MAX_TRANSACTION_AMOUNT_CENTS: BigInt(100000000),
+    DAILY_LIMIT_CENTS: BigInt(500000000),
+    MONTHLY_LIMIT_CENTS: BigInt(2000000000),
+  },
+}
+
+export type SecurityConfig = typeof SECURITY
