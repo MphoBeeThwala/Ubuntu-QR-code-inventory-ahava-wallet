@@ -1,290 +1,77 @@
-// Ahava eWallet — Master Prisma Schema
-// All monetary values in CENTS (integers). Never floats.
-// No hard deletes. All records use soft delete (deleted_at + is_deleted).
-// All timestamps UTC. Display SAST (UTC+2) in application layer.
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
 
 generator client {
-  provider        = "prisma-client-js"
-  previewFeatures = ["fullTextSearch", "postgresqlExtensions"]
-  binaryTargets   = ["native", "debian-openssl-3.0.x"]
+  provider = "prisma-client-js"
 }
 
 datasource db {
-  provider   = "postgresql"
-  url        = env("DATABASE_URL")
-  extensions = [pgcrypto, pg_trgm]
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
 // ============================================
-// ENUMS
+// BATCH 1: Ledger Foundation
 // ============================================
 
-enum TransactionType {
-  CREDIT          // Money into wallet
-  DEBIT           // Money out of wallet
-  FEE             // Platform fee
-  ADJUSTMENT      // Manual MLRO adjustment
-}
-
-enum TransactionStatus {
-  PENDING
-  PROCESSING
-  COMPLETED
-  STR_FILED
-}
-
-enum DocumentType {
-  SA_ID_BOOK
-  SA_ID_CARD
-  PASSPORT
-}
-
-enum KycTier {
-  TIER_0  // Phone + selfie only. No ID. R500/day, R2500 max balance.
-  TIER_1  // SA ID or asylum doc + phone. R2000/day, R10000 max.
-  TIER_2  // Full FICA: ID + address + source of funds. R5000/day, R25000 max.
-  MERCHANT // Full FICA + business declaration. Unlimited (AML monitored).
-}
-
-enum KycStatus {
-  PENDING
-  VERIFIED
-  REJECTED
-}
-
-enum QrCodeType {
-  STATIC    // Merchant permanent display QR
-  DYNAMIC   // Single transaction, amount-locked, 10min expiry
-  REQUEST   // Consumer requests specific amount
-}
-
-// NEW: Ledger Entry Type (BATCH 1)
 enum EntryType {
   DEBIT
   CREDIT
 }
 
-// ============================================
-// MODELS
-// ============================================
-
-// USERS & AUTHENTICATION
-// --------------------------------------------
-
-model User {
-  id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  phoneNumber      String    @unique @db.VarChar(20)  // Stored encrypted via pgcrypto
-  phoneNumberHash  String    @unique @db.VarChar(64)  // SHA-256 for lookup without decrypting
-  kycTier          KycTier   @default(TIER_0)
-  kycStatus        KycStatus @default(PENDING)
-  idNumber         String?   @db.VarChar(13)   // Encrypted
-  idNumberHash     String?   @db.VarChar(64)   // SHA-256 hash for dedup
-  idType           DocumentType?
-  idVerifiedAt     DateTime?
-  revokedReason    String?   @db.VarChar(200)
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
-  isDeleted        Boolean   @default(false)
-  deletedAt        DateTime?
-  deletedReason    String?   @db.VarChar(500)
-  suspendedAt      DateTime?
-
-  // Relations
-  wallets          Wallet[]
-  kycDocuments    KycDocument[]
-  refreshTokens   RefreshToken[]
-  auditLogs       AuditLog[]
-  amlFlags        AmlFlag[]
-}
-
-// WALLETS
-// --------------------------------------------
-
-model Wallet {
-  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  userId            String    @db.Uuid
-  walletNumber      String    @unique @db.VarChar(20)  // AHV-XXXX-XXXX-XXXX
-  balanceCents      BigInt    @default(0)
-  dailyLimitCents   BigInt    @default(50000)  // R500 default
-  monthlyLimitCents BigInt   @default(250000) // R2500 default
-  maxBalanceCents   BigInt    @default(250000)
-  perTxLimitCents   BigInt    @default(50000)
-  kycTier           KycTier
-  status            String    @default("ACTIVE") @db.VarChar(20)
-  createdAt         DateTime  @default(now())
-  updatedAt         DateTime  @updatedAt
-  isDeleted         Boolean   @default(false)
-  deletedAt         DateTime?
-
-  user              User      @relation(fields: [userId], references: [id])
-  transactions      WalletTransaction[]
-  ledgerEntries    LedgerEntry[]
-
-  @@map("wallets")
-  @@index([userId])
-  @@index([walletNumber])
-}
-
-// TRANSACTIONS
-// --------------------------------------------
-
-model WalletTransaction {
-  id                String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  walletId          String           @db.Uuid
-  transactionType   TransactionType
-  amountCents       BigInt
-  balanceBeforeCents BigInt
-  balanceAfterCents BigInt
-  counterpartyWalletId String?      @db.Uuid
-  counterpartyPhone String?      @db.VarChar(20)
-  reference         String?           @db.VarChar(255)
-  description       String?           @db.Text
-  status            TransactionStatus @default(PENDING)
-  metadata          Json?             @db.Jsonb
-  createdAt         DateTime         @default(now())
-  updatedAt         DateTime         @updatedAt
-
-  wallet            Wallet           @relation(fields: [walletId], references: [id])
-
-  @@index([walletId])
-  @@index([createdAt])
-  @@index([status])
-}
-
-// KYC DOCUMENTS
-// --------------------------------------------
-
-model KycDocument {
-  id                String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  userId            String      @db.Uuid
-  documentType      DocumentType
-  documentPath      String      @db.VarChar(500)
-  documentStatus    String      @default("PENDING") @db.VarChar(20)
-  verifiedAt        DateTime?
-  verifiedBy        String?     @db.VarChar(100)
-  verificationNotes String?    @db.Text
-  createdAt        DateTime    @default(now())
-  updatedAt        DateTime    @updatedAt
-
-  user              User        @relation(fields: [userId], references: [id])
-
-  @@map("kyc_documents")
-  @@index([userId])
-  @@index([documentType])
-  @@index([documentStatus])
-}
-
-// AML & COMPLIANCE
-// --------------------------------------------
-
-model AmlFlag {
-  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  userId            String?   @db.Uuid
-  walletId          String?   @db.Uuid
-  transactionId     String?   @db.Uuid
-  flagType          String    @db.VarChar(50)  // e.g., SANCTIONS_MATCH, HIGH_RISK
-  severity          String    @db.VarChar(20)  // LOW, MEDIUM, HIGH
-  description       String?   @db.Text
-  status            String    @default("OPEN") @db.VarChar(20)
-  actionTaken       String?   @db.VarChar(200)
-  dismissedAt       DateTime?
-  dismissedReason   String?   @db.VarChar(500)
-  reviewedBy        String?   @db.VarChar(100)
-  createdAt         DateTime  @default(now())
-  updatedAt         DateTime  @updatedAt
-
-  user              User?     @relation(fields: [userId], references: [id])
-  wallet            Wallet?   @relation(fields: [walletId], references: [id])
-
-  @@map("aml_flags")
-  @@index([userId])
-  @@index([walletId])
-  @@index([createdAt])
-  @@index([status])
-}
-
-// AUDIT LOG — IMMUTABLE
-// --------------------------------------------
-
-model AuditLog {
-  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  userId            String?   @db.Uuid
-  walletId          String?   @db.Uuid
-  action            String    @db.VarChar(200)   // e.g. WALLET_DEBIT, KYC_UPGRADE, PIN_CHANGE
-  entityType        String    @db.VarChar(100)   // e.g. wallet, transaction, user
-  entityId          String    @db.VarChar(100)
-  serviceId         String?   @db.VarChar(100)
-  ipAddress         String?   @db.VarChar(45)
-  userAgent         String?   @db.VarChar(500)
-  deviceId          String?   @db.VarChar(100)
-  oldState          Json?     @db.Jsonb
-  newState          Json?     @db.Jsonb
-  metadata          Json?     @db.Jsonb
-  prevHash         String?   @db.Char(64)
-  recordHash       String?   @db.Char(64)
-  hashVersion      Int?      @default(1)
-  createdAt         DateTime  @default(now())
-
-  @@map("audit_logs")
-  @@index([userId])
-  @@index([walletId])
-  @@index([action])
-  @@index([entityType])
-  @@index([createdAt])
-  @@index([recordHash])
-}
-
-// AUTHENTICATION
-// --------------------------------------------
-
-model RefreshToken {
-  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  userId            String    @db.Uuid
-  tokenHash         String    @unique @db.VarChar(64)
-  deviceId          String?   @db.VarChar(100)
-  deviceInfo        Json?     @db.Jsonb
-  ipAddress         String?   @db.VarChar(45)
-  userAgent         String?   @db.VarChar(500)
-  expiresAt         DateTime
-  createdAt         DateTime  @default(now())
-  revokedAt         DateTime?
-  revokedReason     String?   @db.VarChar(200)
-
-  user              User      @relation(fields: [userId], references: [id])
-
-  @@map("refresh_tokens")
-  @@index([userId])
-  @@index([tokenHash])
-  @@index([expiresAt])
-}
-
-// ============================================
-// NEW: LEDGER ENTRIES (BATCH 1 - Ledger Foundation)
-// ============================================
-
 model LedgerEntry {
-  id                      String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  transactionId          String    @db.Uuid
-  walletId               String    @db.Uuid
-  userId                 String?   @db.Uuid
+  id                     String    @id @default(cuid())
+  transactionId          String
+  walletId               String
+  userId                 String
   entryType              EntryType
-  accountCode            String    @db.VarChar(20)
+  accountCode            String
   amountCents            BigInt
-  currency               String    @default("ZAR") @db.VarChar(3)
-  description            String?   @db.Text
-  reference              String?   @db.VarChar(255)
-  counterpartyWalletId   String?   @db.Uuid
-  counterpartyAccountCode String?   @db.VarChar(20)
-  metadata               Json?     @db.Jsonb
-  createdAt              DateTime  @default(now()) @db.Timestamptz
+  currency               String    @default("ZAR")
+  description            String?
+  reference              String?
+  counterpartyWalletId   String?
+  counterpartyAccountCode String?
+  metadata               Json?
+  createdAt              DateTime  @default(now())
 
-  transaction           WalletTransaction? @relation(fields: [transactionId], references: [id])
-  wallet               Wallet              @relation(fields: [walletId], references: [id])
-  user                 User?               @relation(fields: [userId], references: [id])
+  // Indexes for ledger queries
+  @@id([transactionId, entryType, walletId])
+  @@index([walletId])
+  @@index([transactionId])
+  @@index([createdAt])
+  @@index([entryType])
+}
 
-  @@map("ledger_entries")
+// ============================================
+// BATCH 3: QR Payment Idempotency
+// ============================================
+
+enum QrPaymentStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  EXPIRED
+}
+
+model QrPayment {
+  id            String    @id @default(cuid())
+  qrCodeId      String    @unique
+  transactionId String    @unique
+  walletId      String
+  amountCents  BigInt
+  currency     String    @default("ZAR")
+  status        QrPaymentStatus @default(PENDING)
+  reference     String?
+  metadata      Json?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  expiresAt    DateTime
+  
+  // Indexes for fast idempotency lookups
+  @@index([qrCodeId])
   @@index([transactionId])
   @@index([walletId])
-  @@index([accountCode])
-  @@index([createdAt])
+  @@index([status])
+  @@index([expiresAt])
 }

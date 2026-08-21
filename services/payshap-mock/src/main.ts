@@ -1,285 +1,229 @@
-/**
- * PayShap Mock Service
- * Simulates SARB PayShap API responses for demo purposes
- * Production-ready code that can be replaced with real API calls later
- */
-
 import express, { Request, Response, NextFunction } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { PrismaClient } from '@prisma/client';
 import {
-  AhavaError,
-  AhavaErrorCode,
-  createSuccessResponse,
-  createErrorResponse,
-} from '@ahava/shared-errors';
+  checkQrIdempotency,
+  recordQrPayment,
+  updateQrPaymentStatus,
+  isQrCodeExpired,
+} from './utils/qr-idempotency';
 
-const app: express.Express = express();
+const app = express();
 const prisma = new PrismaClient();
 const PORT = process.env.PORT || 6011;
 
 app.use(express.json());
 
-// Request ID middleware
-app.use((req: Request, res: Response, next: NextFunction) => {
-  const incoming = req.get('X-Request-ID');
-  const requestId = typeof incoming === 'string' && incoming.length > 0 ? incoming : uuidv4();
-  req.id = requestId;
-  res.setHeader('X-Request-ID', requestId);
-  next();
-});
-
-// Health check
-app.get('/health', (req, res) => {
-  res.json(createSuccessResponse({ status: 'ok', service: 'payshap-mock' }, req.id));
-});
-
-/**
- * POST /payshap/transactions
- * Simulate PayShap payment initiation
- * In production, this would call real PayShap API
- */
-app.post('/payshap/transactions', async (req, res, next) => {
+// QR Payment Idempotency Middleware
+async function qrIdempotencyMiddleware(req, res, next) {
   try {
-    const {
-      debtorAccountRef,
-      creditorAccountRef,
-      amountCents,
-      currency = 'ZAR',
-      remittanceInfo,
-      debtorName,
-      creditorName,
-    } = req.body;
-
-    if (!debtorAccountRef || !creditorAccountRef || amountCents === undefined) {
-      throw new AhavaError(
-        AhavaErrorCode.VAL_MISSING_REQUIRED_FIELD,
-        'debtorAccountRef, creditorAccountRef, and amountCents are required',
-        { requestId: req.id },
-      );
+    const qrCodeId = req.body.qrCodeId;
+    const transactionId = req.body.transactionId;
+    
+    if (!qrCodeId) {
+      return next();
     }
 
-    // Validate wallets exist
-    const debtorWallet = await prisma.wallet.findFirst({
-      where: { walletNumber: debtorAccountRef, isDeleted: false },
-    });
+    const checkResult = await checkQrIdempotency(qrCodeId, transactionId);
 
-    const creditorWallet = await prisma.wallet.findFirst({
-      where: { walletNumber: creditorAccountRef, isDeleted: false },
-    });
-
-    if (!debtorWallet || !creditorWallet) {
-      throw new AhavaError(
-        AhavaErrorCode.PAY_COUNTERPARTY_NOT_FOUND,
-        'Debtor or creditor wallet not found',
-        { requestId: req.id },
-      );
+    if (checkResult.isDuplicate) {
+      const existingPayment = checkResult.existingPayment;
+      return res.status(409).json({
+        error: 'DUPLICATE_PAYMENT',
+        message: 'This QR code or transaction has already been processed',
+        paymentId: existingPayment.id,
+        status: existingPayment.status,
+        transactionId: existingPayment.transactionId,
+      });
     }
 
-    // Simulate PayShap response
-    const payshapMsgId = `PSHAP-${uuidv4().slice(0, 8).toUpperCase()}`;
-    const payshapEndToEndId = uuidv4();
+    const isExpired = await isQrCodeExpired(qrCodeId);
+    if (isExpired) {
+      return res.status(400).json({
+        error: 'QR_CODE_EXPIRED',
+        message: 'This QR code has expired',
+        qrCodeId,
+      });
+    }
 
-    // In production: Call real PayShap API here
-    // For mock: Simulate instant settlement
-    const mockResponse = {
-      payshapMsgId,
-      payshapEndToEndId,
-      amountCents: BigInt(amountCents),
-      currency,
-      debtorName: debtorName || 'Ubuntu User',
-      debtorAccountRef,
-      creditorName: creditorName || 'Ubuntu Merchant',
-      creditorAccountRef,
-      remittanceInfo: remittanceInfo || 'Ubuntu Pay Transaction',
-      status: 'ACCEPTED',
-      statusReason: null,
-      submittedAt: new Date().toISOString(),
-      settledAt: new Date().toISOString(),
-      rawRequest: JSON.stringify(req.body),
-      rawResponse: JSON.stringify({
-        message: 'Transaction accepted',
-        status: 'ACCEPTED',
-        timestamp: new Date().toISOString(),
-      }),
-    };
-
-    // Store in database
-    await prisma.payshapTransaction.create({
-      data: {
-        id: uuidv4(),
-        ahavaTransactionId: uuidv4(),
-        payshapMsgId,
-        payshapEndToEndId,
-        amountCents: BigInt(amountCents),
-        currency,
-        debtorName: debtorName || 'Ubuntu User',
-        debtorAccountRef,
-        creditorName: creditorName || 'Ubuntu Merchant',
-        creditorAccountRef,
-        remittanceInfo: remittanceInfo || 'Ubuntu Pay Transaction',
-        status: 'SETTLED',
-        submittedAt: new Date(),
-        settledAt: new Date(),
-        rawRequest: JSON.stringify(req.body),
-        rawResponse: JSON.stringify(mockResponse),
-      },
-    });
-
-    res.status(201).json(
-      createSuccessResponse(
-        {
-          payshapTransaction: {
-            ...mockResponse,
-            amountCents: mockResponse.amountCents.toString(),
-          },
-          qrCode: {
-            type: 'PAYSHAP',
-            payload: JSON.stringify({
-              ...mockResponse,
-              qrType: 'PAYSHAP',
-              timestamp: new Date().toISOString(),
-            }),
-            qrHash: uuidv4(),
-          },
-        },
-        req.id,
-      ),
-    );
+    next();
   } catch (error) {
-    next(error);
+    console.error('Idempotency check error:', error);
+    next();
   }
-});
-
-/**
- * GET /payshap/transactions/:payshapMsgId
- * Get PayShap transaction status
- */
-app.get('/payshap/transactions/:payshapMsgId', async (req, res, next) => {
-  try {
-    const { payshapMsgId } = req.params;
-
-    const transaction = await prisma.payshapTransaction.findUnique({
-      where: { payshapMsgId },
-    });
-
-    if (!transaction) {
-      throw new AhavaError(
-        AhavaErrorCode.DB_NOT_FOUND,
-        'PayShap transaction not found',
-        { requestId: req.id },
-      );
-    }
-
-    res.json(
-      createSuccessResponse(
-        {
-          payshapTransaction: {
-            ...transaction,
-            amountCents: transaction.amountCents.toString(),
-          },
-        },
-        req.id,
-      ),
-    );
-  } catch (error) {
-    next(error);
-  }
-});
-
-/**
- * POST /payshap/qr
- * Generate a PayShap-compatible QR code
- */
-app.post('/payshap/qr', async (req, res, next) => {
-  try {
-    const { walletNumber, amountCents, description } = req.body;
-
-    if (!walletNumber) {
-      throw new AhavaError(
-        AhavaErrorCode.VAL_MISSING_REQUIRED_FIELD,
-        'walletNumber is required',
-        { requestId: req.id },
-      );
-    }
-
-    // Validate wallet
-    const wallet = await prisma.wallet.findFirst({
-      where: { walletNumber, isDeleted: false },
-    });
-
-    if (!wallet) {
-      throw new AhavaError(
-        AhavaErrorCode.WAL_NOT_FOUND,
-        'Wallet not found',
-        { requestId: req.id },
-      );
-    }
-
-    // Generate PayShap QR payload
-    const qrPayload = {
-      type: 'PAYSHAP_QR',
-      walletNumber,
-      amountCents: amountCents ? BigInt(amountCents) : null,
-      currency: 'ZAR',
-      description: description || 'Ubuntu Pay Payment',
-      timestamp: new Date().toISOString(),
-      payshap: {
-        version: '1.0',
-        merchantId: walletNumber,
-        amount: amountCents ? amountCents / 100 : null,
-      },
-    };
-
-    const qrHash = uuidv4();
-
-    res.status(201).json(
-      createSuccessResponse(
-        {
-          qrCode: {
-            type: 'PAYSHAP',
-            payload: qrPayload,
-            qrHash,
-            walletNumber,
-            amountCents: amountCents?.toString(),
-            expiresAt: amountCents ? new Date(Date.now() + 10 * 60 * 1000) : null,
-          },
-        },
-        req.id,
-      ),
-    );
-  } catch (error) {
-    next(error);
-  }
-});
-
-// Error handling
-app.use((err: Error, req: Request, res: Response, _next: NextFunction) => {
-  if (err instanceof AhavaError) {
-    return res.status(err.statusCode).json(createErrorResponse(err));
-  }
-  console.error('Unhandled error:', err);
-  const genericError = new AhavaError(
-    AhavaErrorCode.INTERNAL_SERVER_ERROR,
-    'Internal server error',
-    { requestId: req.id },
-  );
-  res.status(500).json(createErrorResponse(genericError));
-});
-
-if (require.main === module) {
-  app.listen(PORT, () => {
-    console.log(`✅ PayShap Mock Service listening on port ${PORT}`);
-    console.log(`🏥 Health: http://localhost:${PORT}/health`);
-  });
 }
+
+// Generate QR code
+app.post('/payshap/qr', async (req, res) => {
+  try {
+    const walletId = req.body.walletId;
+    const amountCents = req.body.amountCents;
+    const reference = req.body.reference;
+    const metadata = req.body.metadata;
+
+    if (!walletId || !amountCents) {
+      return res.status(400).json({
+        error: 'MISSING_REQUIRED_FIELDS',
+        message: 'walletId and amountCents are required',
+      });
+    }
+
+    const qrCodeId = 'qr_' + uuidv4();
+    const transactionId = 'txn_' + uuidv4();
+
+    await recordQrPayment({
+      qrCodeId,
+      transactionId,
+      walletId,
+      amountCents: BigInt(amountCents).toString(),
+      reference,
+      metadata,
+      expiresInMinutes: 30,
+    });
+
+    res.json({
+      success: true,
+      qrCodeId,
+      transactionId,
+      walletId,
+      amountCents: amountCents.toString(),
+      currency: 'ZAR',
+      status: 'PENDING',
+      reference,
+      metadata,
+      expiresAt: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
+      qrCodeUrl: 'https://api.example.com/payshap/qr/' + qrCodeId,
+    });
+  } catch (error) {
+    console.error('Generate QR error:', error);
+    res.status(500).json({
+      error: 'INTERNAL_ERROR',
+      message: 'Failed to generate QR code',
+    });
+  }
+});
+
+// Validate QR code
+app.get('/payshap/qr/:id', async (req, res) => {
+  try {
+    const qrCodeId = req.params.id;
+
+    const payment = await prisma.qrPayment.findUnique({
+      where: { qrCodeId },
+    });
+
+    if (!payment) {
+      return res.status(404).json({
+        error: 'QR_CODE_NOT_FOUND',
+        message: 'QR code not found or invalid',
+        qrCodeId,
+      });
+    }
+
+    if (payment.expiresAt < new Date()) {
+      await updateQrPaymentStatus(qrCodeId, 'EXPIRED');
+      return res.status(400).json({
+        error: 'QR_CODE_EXPIRED',
+        message: 'This QR code has expired',
+        qrCodeId,
+        status: 'EXPIRED',
+      });
+    }
+
+    res.json({
+      success: true,
+      qrCodeId: payment.qrCodeId,
+      transactionId: payment.transactionId,
+      walletId: payment.walletId,
+      amountCents: payment.amountCents.toString(),
+      currency: payment.currency,
+      status: payment.status,
+      reference: payment.reference,
+      metadata: payment.metadata,
+      expiresAt: payment.expiresAt.toISOString(),
+    });
+  } catch (error) {
+    console.error('Validate QR error:', error);
+    res.status(500).json({
+      error: 'INTERNAL_ERROR',
+      message: 'Failed to validate QR code',
+    });
+  }
+});
+
+// Process payment with idempotency check
+app.post('/payshap/pay', qrIdempotencyMiddleware, async (req, res) => {
+  try {
+    const qrCodeId = req.body.qrCodeId;
+    const transactionId = req.body.transactionId;
+    const amountCents = req.body.amountCents;
+
+    if (!qrCodeId || !transactionId) {
+      return res.status(400).json({
+        error: 'MISSING_REQUIRED_FIELDS',
+        message: 'qrCodeId and transactionId are required',
+      });
+    }
+
+    const existingPayment = await prisma.qrPayment.findUnique({
+      where: { qrCodeId },
+    });
+
+    if (!existingPayment) {
+      return res.status(404).json({
+        error: 'QR_CODE_NOT_FOUND',
+        message: 'QR code not found',
+        qrCodeId,
+      });
+    }
+
+    if (existingPayment.amountCents !== BigInt(amountCents.toString())) {
+      return res.status(400).json({
+        error: 'AMOUNT_MISMATCH',
+        message: 'Payment amount does not match QR code amount',
+        expected: existingPayment.amountCents.toString(),
+        received: amountCents.toString(),
+      });
+    }
+
+    await updateQrPaymentStatus(qrCodeId, 'COMPLETED', transactionId);
+
+    res.json({
+      success: true,
+      paymentId: existingPayment.id,
+      qrCodeId,
+      transactionId,
+      walletId: existingPayment.walletId,
+      amountCents: existingPayment.amountCents.toString(),
+      currency: existingPayment.currency,
+      status: 'COMPLETED',
+      reference: existingPayment.reference,
+      metadata: existingPayment.metadata,
+      processedAt: new Date().toISOString(),
+      payShapReference: 'PS_' + uuidv4(),
+    });
+  } catch (error) {
+    console.error('Process payment error:', error);
+    if (qrCodeId) {
+      try {
+        await updateQrPaymentStatus(qrCodeId, 'FAILED');
+      } catch (updateError) {
+        console.error('Failed to update payment status:', updateError);
+      }
+    }
+    res.status(500).json({
+      error: 'INTERNAL_ERROR',
+      message: 'Failed to process payment',
+    });
+  }
+});
+
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok', service: 'payshap-mock', timestamp: new Date().toISOString() });
+});
+
+app.listen(PORT, () => {
+  console.log('PayShap Mock service running on port ' + PORT);
+});
 
 export default app;
-
-declare global {
-  namespace Express {
-    interface Request {
-      id?: string;
-    }
-  }
-}
