@@ -1,7 +1,50 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
 
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
 
 // ============================================
-// QR Payment Idempotency Models (BATCH 3)
+// BATCH 1: Ledger Foundation
+// ============================================
+
+enum EntryType {
+  DEBIT
+  CREDIT
+}
+
+model LedgerEntry {
+  id                     String    @id @default(cuid())
+  transactionId          String
+  walletId               String
+  userId                 String
+  entryType              EntryType
+  accountCode            String
+  amountCents            BigInt
+  currency               String    @default("ZAR")
+  description            String?
+  reference              String?
+  counterpartyWalletId   String?
+  counterpartyAccountCode String?
+  metadata               Json?
+  createdAt              DateTime  @default(now())
+
+  // Indexes for ledger queries
+  @@id([transactionId, entryType, walletId])
+  @@index([walletId])
+  @@index([transactionId])
+  @@index([createdAt])
+  @@index([entryType])
+}
+
+// ============================================
+// BATCH 3: QR Payment Idempotency
 // ============================================
 
 enum QrPaymentStatus {
