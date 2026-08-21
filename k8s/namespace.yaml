@@ -1,0 +1,10 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ubuntu-pay
+  labels:
+    name: ubuntu-pay
+    environment: production
+    platform: ubuntu-pay
+    tier: backend
