@@ -1,0 +1,64 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: api-gateway-config
+  namespace: ubuntu-pay
+  labels:
+    app: api-gateway
+    component: config
+    tier: backend
+    batch: "9"
+data:
+  NODE_ENV: "production"
+  PORT: "3000"
+  LOG_LEVEL: "info"
+  RATE_LIMIT_WINDOW_MS: "900000"
+  RATE_LIMIT_MAX: "1000"
+  CORS_ORIGIN: "https://app.ubuntupay.co.za,https://agent.ubuntupay.co.za"
+  JWT_SECRET: "change-me-in-production"
+  JWT_EXPIRES_IN: "15m"
+  JWT_REFRESH_EXPIRES_IN: "7d"
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: auth-service-config
+  namespace: ubuntu-pay
+  labels:
+    app: auth-service
+    component: config
+    tier: backend
+    batch: "9"
+data:
+  NODE_ENV: "production"
+  PORT: "6001"
+  LOG_LEVEL: "info"
+  DATABASE_URL: "postgresql://user:password@postgres.ubuntu-pay.svc.cluster.local:5432/ubuntupay"
+  REDIS_URL: "redis://redis.ubuntu-pay.svc.cluster.local:6379"
+  JWT_SECRET: "change-me-in-production"
+  JWT_EXPIRES_IN: "15m"
+  JWT_REFRESH_EXPIRES_IN: "7d"
+  PIN_BCRYPT_ROUNDS: "12"
+  PIN_MAX_ATTEMPTS: "5"
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: wallet-service-config
+  namespace: ubuntu-pay
+  labels:
+    app: wallet-service
+    component: config
+    tier: backend
+    batch: "9"
+data:
+  NODE_ENV: "production"
+  PORT: "6002"
+  LOG_LEVEL: "info"
+  DATABASE_URL: "postgresql://user:password@postgres.ubuntu-pay.svc.cluster.local:5432/ubuntupay"
+  REDIS_URL: "redis://redis.ubuntu-pay.svc.cluster.local:6379"
+  DAILY_LIMIT: "500000000"
+  MONTHLY_LIMIT: "5000000000"
