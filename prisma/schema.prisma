@@ -139,3 +139,101 @@ model FeeConfiguration {
   @@index([feeType])
   @@index([isActive])
 }
+
+// ============================================
+// BATCH 5: Saga Reversal
+// ============================================
+
+enum SagaStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+  REVERSING
+  REVERSED
+  PARTIALLY_REVERSED
+}
+
+enum SagaStepStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  SKIPPED
+  REVERSING
+  REVERSED
+}
+
+model Saga {
+  id            String    @id @default(cuid())
+  sagaType      String
+  transactionId String    @unique
+  walletId      String
+  userId        String?
+  status        SagaStatus @default(PENDING)
+  currentStep   Int       @default(0)
+  totalSteps    Int       @default(0)
+  startedAt     DateTime?
+  completedAt   DateTime?
+  failedAt      DateTime?
+  reversedAt    DateTime?
+  errorMessage  String?
+  metadata      Json?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  
+  steps         SagaStep[]
+  
+  @@index([transactionId])
+  @@index([walletId])
+  @@index([status])
+  @@index([createdAt])
+  @@index([sagaType])
+}
+
+model SagaStep {
+  id            String    @id @default(cuid())
+  sagaId        String
+  stepNumber    Int
+  stepType      String
+  action        String
+  status        SagaStepStatus @default(PENDING)
+  result        Json?
+  errorMessage  String?
+  startedAt     DateTime?
+  completedAt   DateTime?
+  
+  reversalSagaId String?
+  isReversal    Boolean  @default(false)
+  
+  saga          Saga     @relation(fields: [sagaId], references: [id], onDelete: Cascade)
+  
+  @@id([sagaId, stepNumber])
+  @@index([sagaId])
+  @@index([status])
+  @@index([stepType])
+  @@index([createdAt])
+}
+
+model SagaReversal {
+  id            String    @id @default(cuid())
+  originalSagaId String    @unique
+  reversalSagaId String?
+  status        SagaStatus @default(RUNNING)
+  reason        String?
+  initiatedBy   String?
+  initiatedAt   DateTime  @default(now())
+  completedAt   DateTime?
+  stepsReversed Int       @default(0)
+  totalSteps    Int       @default(0)
+  errorMessage  String?
+  metadata      Json?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  
+  originalSaga  Saga     @relation(fields: [originalSagaId], references: [id])
+  
+  @@index([originalSagaId])
+  @@index([reversalSagaId])
+  @@index([status])
+  @@index([initiatedAt])
+}
