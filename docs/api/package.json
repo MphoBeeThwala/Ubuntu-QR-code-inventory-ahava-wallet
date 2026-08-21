@@ -1,0 +1,13 @@
+{
+  "name": "ubuntu-pay-api-docs",
+  "version": "1.0.0",
+  "description": "Ubuntu Pay Platform API Documentation",
+  "scripts": {
+    "serve": "npx @redocly/cli preview-docs docs/api/openapi.yaml --port 8082",
+    "validate": "npx @redocly/cli lint docs/api/openapi.yaml",
+    "bundle": "npx @redocly/cli bundle docs/api/openapi.yaml -o dist/openapi-bundle.yaml"
+  },
+  "devDependencies": {
+    "@redocly/cli": "^1.0.0"
+  }
+}
