@@ -1,0 +1,282 @@
+
+// ============================================================================
+// BATCH 8: AML/Notification Queues - Schema Additions
+// Add these models to prisma/schema.prisma
+// ============================================================================
+
+// ============================================================================
+// AML ENUMS
+// ============================================================================
+
+enum AmlRiskLevel {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum AmlStatus {
+  PENDING
+  PASSED
+  FLAGGED
+  BLOCKED
+  REVIEW_REQUIRED
+  FALSE_POSITIVE
+}
+
+enum AmlCheckType {
+  WATCHLIST
+  SANCTIONS
+  VELOCITY
+  AMOUNT
+  GEOGRAPHIC
+  BEHAVIORAL
+}
+
+enum AmlSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum AmlEntityType {
+  USER
+  WALLET
+  TRANSACTION
+  PHONE
+  EMAIL
+  IP_ADDRESS
+  DEVICE
+}
+
+enum AmlWatchlistType {
+  PEPS      // Politically Exposed Persons
+  SANCTIONS
+  CRIMINAL
+  TERRORIST
+  FRAUD
+  CUSTOM
+}
+
+// ============================================================================
+// AML MODELS
+// ============================================================================
+
+model AmlCheck {
+  id               String    @id @default(cuid())
+  userId           String
+  transactionId    String?
+  riskScore        Int
+  riskLevel        AmlRiskLevel
+  status           AmlStatus
+  checksPerformed  Json // AmlCheckType[]
+  flags            Json // AmlFlag[]
+  recommendations  Json // string[]
+  metadata         Json?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  // Relations
+  user             User             @relation(fields: [userId], references: [id])
+  transaction      Transaction?      @relation(fields: [transactionId], references: [id])
+  amlCheckSteps    AmlCheckStep[]
+
+  @@index([userId])
+  @@index([transactionId])
+  @@index([riskLevel])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model AmlCheckStep {
+  id          String    @id @default(cuid())
+  amlCheckId  String
+  checkType   AmlCheckType
+  description String
+  severity    AmlSeverity
+  details     Json?
+  passed      Boolean
+  createdAt   DateTime  @default(now())
+
+  // Relations
+  amlCheck    AmlCheck  @relation(fields: [amlCheckId], references: [id], onDelete: Cascade)
+
+  @@index([amlCheckId])
+  @@index([checkType])
+  @@index([severity])
+}
+
+model AmlWatchlist {
+  id           String    @id @default(cuid())
+  entityType   AmlEntityType
+  entityId     String
+  name         String
+  type         AmlWatchlistType
+  category     String
+  confidence   Float
+  source       String
+  details      Json?
+  isActive     Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@unique([entityType, entityId])
+  @@index([entityType])
+  @@index([type])
+  @@index([isActive])
+}
+
+model AmlWatchlistMatch {
+  id           String    @id @default(cuid())
+  amlCheckId   String
+  watchlistId  String
+  entityType   AmlEntityType
+  entityId     String
+  matchScore   Float
+  details      Json?
+  createdAt    DateTime  @default(now())
+
+  // Relations
+  amlCheck     AmlCheck      @relation(fields: [amlCheckId], references: [id], onDelete: Cascade)
+  watchlist    AmlWatchlist   @relation(fields: [watchlistId], references: [id])
+
+  @@index([amlCheckId])
+  @@index([watchlistId])
+  @@index([entityType, entityId])
+}
+
+// ============================================================================
+// NOTIFICATION ENUMS
+// ============================================================================
+
+enum NotificationType {
+  SMS
+  EMAIL
+  PUSH
+  WEBHOOK
+}
+
+enum NotificationChannel {
+  TRANSACTION
+  SECURITY
+  MARKETING
+  COMPLIANCE
+  SYSTEM
+}
+
+enum NotificationStatus {
+  PENDING
+  PROCESSING
+  SENT
+  DELIVERED
+  FAILED
+  RETRYING
+  EXPIRED
+}
+
+enum NotificationDeliveryStatus {
+  PENDING
+  SENT
+  DELIVERED
+  FAILED
+  BOUNCED
+  TIMEOUT
+}
+
+// ============================================================================
+// NOTIFICATION MODELS
+// ============================================================================
+
+model NotificationQueue {
+  id            String    @id @default(cuid())
+  notificationId String    @unique
+  userId        String
+  type          NotificationType
+  priority      Int
+  channel       NotificationChannel
+  title         String
+  message       String
+  data          Json
+  metadata      Json?
+  status        NotificationStatus @default(PENDING)
+  retryCount    Int               @default(0)
+  lastAttemptAt DateTime?
+  scheduledAt   DateTime?
+  expiresAt     DateTime?
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+
+  // Relations
+  user          User                @relation(fields: [userId], references: [id])
+  notification  Notification?       @relation(fields: [notificationId], references: [id])
+  deliveryAttempts NotificationDeliveryAttempt[]
+
+  @@index([userId])
+  @@index([type])
+  @@index([priority])
+  @@index([status])
+  @@index([channel])
+  @@index([scheduledAt])
+  @@index([createdAt])
+}
+
+model Notification {
+  id            String    @id @default(cuid())
+  userId        String
+  type          NotificationType
+  channel       NotificationChannel
+  title         String
+  message       String
+  data          Json
+  metadata      Json?
+  isRead        Boolean   @default(false)
+  readAt        DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  // Relations
+  user          User                  @relation(fields: [userId], references: [id])
+  queueItem     NotificationQueue?    @relation(fields: [id], references: [notificationId])
+  deliveryAttempts NotificationDeliveryAttempt[]
+
+  @@index([userId])
+  @@index([type])
+  @@index([channel])
+  @@index([isRead])
+  @@index([createdAt])
+}
+
+model NotificationDeliveryAttempt {
+  id               String    @id @default(cuid())
+  notificationId   String
+  queueId         String?
+  attemptNumber    Int
+  status           NotificationDeliveryStatus
+  responseCode     Int?
+  responseMessage  String?
+  errorDetails     Json?
+  startedAt        DateTime  @default(now())
+  completedAt      DateTime?
+
+  // Relations
+  notification    Notification   @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+  queueItem       NotificationQueue? @relation(fields: [queueId], references: [id], onDelete: Cascade)
+
+  @@index([notificationId])
+  @@index([queueId])
+  @@index([status])
+  @@index([startedAt])
+}
+
+// ============================================================================
+// TYPES FOR JSON FIELDS
+// ============================================================================
+
+// Add this type definition to schema.prisma or a separate types file
+type AmlFlag = {
+  checkType: AmlCheckType
+  description: string
+  severity: AmlSeverity
+  details?: Record<string, unknown>
+}
