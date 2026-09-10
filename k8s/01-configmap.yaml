@@ -23,3 +23,9 @@ data:
   PAYSHAP_MOCK_URL: "http://payshap-mock:6011"
   LEDGER_SERVICE_URL: "http://ledger-service:6004"
   PAYMENT_ORCHESTRATOR_URL: "http://payment-orchestrator:6005"
+  # Compliance team distribution address — aml-service's MlroNotifier sends
+  # AML flag alerts here. Replace with the real Money Laundering Reporting
+  # Officer / compliance team's address before deploying; alerts silently
+  # fail to dispatch (logged and marked FAILED, retried, then dropped)
+  # without a real address configured.
+  MLRO_ALERT_EMAIL: "compliance@ahava.example"
