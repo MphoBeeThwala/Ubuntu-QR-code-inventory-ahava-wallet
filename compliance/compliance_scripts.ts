@@ -1,36 +1,48 @@
 /**
  * Compliance Verification Scripts
  * Ubuntu Pay Platform
- * 
- * Note: Regulatory compliance in licensing is not yet complete,
- * but the system software meets all technical standards.
+ *
+ * Runs read-only checks directly against the real schema (see
+ * prisma/schema.prisma) — every query below was cross-checked against the
+ * actual migration history, not assumed. Previous version of this file
+ * queried tables and columns (transactions, aml_configurations,
+ * debit_amount_cents/credit_amount_cents, users.password, ...) that have
+ * never existed in this database; it would have failed with a SQL error on
+ * every single check. Treat a clean run of this file as evidence for an
+ * audit pack, not as a substitute for one — see SARB_COMPLIANCE.md for
+ * what still requires a human sign-off (governance, key management,
+ * incident response, POPIA/FICA registration).
  */
 
 import { Pool } from 'pg';
 
-// Database connection
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL || 'postgres://postgres:postgres@localhost:5432/ubuntu_pay',
+  connectionString: process.env.DATABASE_URL || 'postgres://postgres:postgres@localhost:5432/ahava_dev',
 });
 
 /**
- * Verify double-entry accounting
- * SUM of all debits must equal SUM of all credits
+ * Verify double-entry accounting: SUM(DEBIT) must equal SUM(CREDIT) in
+ * ledger_entries. Mirrors services/ledger-service's own /ledger/reconcile
+ * logic — this script exists to run the same check outside the service,
+ * e.g. from a scheduled job or CI.
  */
 export async function verifyDoubleEntry(): Promise<{ passed: boolean; imbalance?: bigint }> {
   const client = await pool.connect();
-  
+
   try {
     const result = await client.query(
-      'SELECT SUM(debit_amount_cents) AS total_debits, SUM(credit_amount_cents) AS total_credits FROM ledger_entries'
+      `SELECT
+         COALESCE(SUM(CASE WHEN "entryType" = 'DEBIT' THEN "amountCents" ELSE 0 END), 0) AS total_debits,
+         COALESCE(SUM(CASE WHEN "entryType" = 'CREDIT' THEN "amountCents" ELSE 0 END), 0) AS total_credits
+       FROM ledger_entries`
     );
-    
+
     const debits = BigInt(result.rows[0].total_debits || 0);
     const credits = BigInt(result.rows[0].total_credits || 0);
     const imbalance = debits - credits;
-    
+
     if (imbalance === 0n) {
-      console.log('PASS: Double-entry accounting verified');
+      console.log('PASS: Double-entry accounting verified (debits == credits)');
       return { passed: true };
     } else {
       console.error('FAIL: Double-entry accounting imbalance detected');
@@ -43,52 +55,42 @@ export async function verifyDoubleEntry(): Promise<{ passed: boolean; imbalance?
 }
 
 /**
- * Verify audit trail completeness
+ * Verify that completed payments produced an audit trail entry.
+ * payment-service writes an audit_logs row with entityType =
+ * 'wallet_transaction' for every completed /payments call (see
+ * services/payment-service/src/main.ts) — this checks that invariant
+ * holds rather than asserting a per-wallet audit requirement that isn't
+ * how this system is designed (wallets themselves aren't individually
+ * audit-logged on creation; USER_REGISTERED covers that at the user level).
  */
 export async function verifyAuditTrail(): Promise<{ passed: boolean; missing?: string[] }> {
   const client = await pool.connect();
   const missing: string[] = [];
-  
+
   try {
-    const txResult = await client.query(
-      'SELECT COUNT(*) AS total_transactions FROM transactions'
+    const completedTxResult = await client.query(
+      `SELECT COUNT(*) AS count FROM wallet_transactions WHERE status = 'COMPLETED'`
     );
-    
     const auditResult = await client.query(
-      'SELECT COUNT(*) AS total_audit_logs FROM audit_logs WHERE resource = $1',
-      ['transaction']
+      `SELECT COUNT(*) AS count FROM audit_logs WHERE "entityType" = 'wallet_transaction'`
     );
-    
-    const totalTransactions = parseInt(txResult.rows[0].total_transactions);
-    const totalAuditLogs = parseInt(auditResult.rows[0].total_audit_logs);
-    
-    if (totalAuditLogs < totalTransactions) {
-      missing.push('Transaction audit logs: expected ' + totalTransactions + ', found ' + totalAuditLogs);
+
+    const completedTransactions = parseInt(completedTxResult.rows[0].count, 10);
+    const auditedTransactions = parseInt(auditResult.rows[0].count, 10);
+
+    if (auditedTransactions < completedTransactions) {
+      missing.push(
+        `wallet_transaction audit logs: ${completedTransactions} completed transactions, only ${auditedTransactions} audited`,
+      );
     }
-    
-    const walletResult = await client.query(
-      'SELECT COUNT(*) AS total_wallets FROM wallets'
-    );
-    
-    const walletAuditResult = await client.query(
-      'SELECT COUNT(*) AS total_wallet_audits FROM audit_logs WHERE resource = $1',
-      ['wallet']
-    );
-    
-    const totalWallets = parseInt(walletResult.rows[0].total_wallets);
-    const totalWalletAudits = parseInt(walletAuditResult.rows[0].total_wallet_audits);
-    
-    if (totalWalletAudits < totalWallets) {
-      missing.push('Wallet audit logs: expected at least ' + totalWallets + ', found ' + totalWalletAudits);
-    }
-    
+
     if (missing.length === 0) {
-      console.log('PASS: Audit trail completeness verified');
+      console.log('PASS: Audit trail coverage verified');
       return { passed: true };
     } else {
       console.error('FAIL: Audit trail completeness check failed');
-      missing.forEach(function(m) { console.error('   - ' + m); });
-      return { passed: false, missing: missing };
+      missing.forEach((m) => console.error('   - ' + m));
+      return { passed: false, missing };
     }
   } finally {
     client.release();
@@ -96,61 +98,45 @@ export async function verifyAuditTrail(): Promise<{ passed: boolean; missing?: s
 }
 
 /**
- * Verify transaction integrity
+ * Verify transaction integrity invariants that aren't already enforced by
+ * a DB constraint (idempotencyKey has a UNIQUE index, and status/amount
+ * types are enforced by the column type itself, so those can't actually
+ * be violated — this checks things Postgres doesn't guarantee for you).
  */
 export async function verifyTransactionIntegrity(): Promise<{ passed: boolean; issues?: string[] }> {
   const client = await pool.connect();
   const issues: string[] = [];
-  
+
   try {
-    const dupResult = await client.query(
-      'SELECT reference_id, COUNT(*) AS count FROM transactions GROUP BY reference_id HAVING COUNT(*) > 1'
+    const negativeAmountResult = await client.query(
+      `SELECT COUNT(*) AS count FROM wallet_transactions WHERE amount < 0`
     );
-    
-    if (dupResult.rows.length > 0) {
-      issues.push('Duplicate transaction references: ' + dupResult.rows.length);
+    if (parseInt(negativeAmountResult.rows[0].count, 10) > 0) {
+      issues.push('wallet_transactions with a negative amount: ' + negativeAmountResult.rows[0].count);
     }
-    
-    const ledgerDupResult = await client.query(
-      'SELECT reference_id, COUNT(*) AS count FROM ledger_entries GROUP BY reference_id HAVING COUNT(*) > 1'
-    );
-    
-    if (ledgerDupResult.rows.length > 0) {
-      issues.push('Duplicate ledger entry references: ' + ledgerDupResult.rows.length);
-    }
-    
-    const negativeResult = await client.query(
-      'SELECT COUNT(*) AS count FROM transactions WHERE amount_cents < 0'
-    );
-    
-    if (parseInt(negativeResult.rows[0].count) > 0) {
-      issues.push('Transactions with negative amounts: ' + negativeResult.rows[0].count);
-    }
-    
+
     const negativeFeeResult = await client.query(
-      'SELECT COUNT(*) AS count FROM transactions WHERE fee_cents < 0'
+      `SELECT COUNT(*) AS count FROM wallet_transactions WHERE "feeAmount" < 0`
     );
-    
-    if (parseInt(negativeFeeResult.rows[0].count) > 0) {
-      issues.push('Transactions with negative fees: ' + negativeFeeResult.rows[0].count);
+    if (parseInt(negativeFeeResult.rows[0].count, 10) > 0) {
+      issues.push('wallet_transactions with a negative feeAmount: ' + negativeFeeResult.rows[0].count);
     }
-    
-    const invalidStatusResult = await client.query(
-      'SELECT status, COUNT(*) AS count FROM transactions WHERE status NOT IN ($1, $2, $3, $4, $5) GROUP BY status',
-      ['pending', 'completed', 'failed', 'reversed', 'duplicate']
+
+    const balanceMismatchResult = await client.query(
+      `SELECT COUNT(*) AS count FROM wallet_transactions
+       WHERE "transactionType" = 'DEBIT' AND "balanceAfter" != "balanceBefore" - amount - "feeAmount"`
     );
-    
-    if (invalidStatusResult.rows.length > 0) {
-      issues.push('Invalid transaction statuses: ' + JSON.stringify(invalidStatusResult.rows));
+    if (parseInt(balanceMismatchResult.rows[0].count, 10) > 0) {
+      issues.push('DEBIT wallet_transactions where balanceAfter != balanceBefore - amount - fee: ' + balanceMismatchResult.rows[0].count);
     }
-    
+
     if (issues.length === 0) {
       console.log('PASS: Transaction integrity verified');
       return { passed: true };
     } else {
       console.error('FAIL: Transaction integrity check failed');
-      issues.forEach(function(i) { console.error('   - ' + i); });
-      return { passed: false, issues: issues };
+      issues.forEach((i) => console.error('   - ' + i));
+      return { passed: false, issues };
     }
   } finally {
     client.release();
@@ -158,36 +144,36 @@ export async function verifyTransactionIntegrity(): Promise<{ passed: boolean; i
 }
 
 /**
- * Verify data protection
+ * Verify basic data-protection posture: DB connection uses SSL, and PIN
+ * hashes look like real Argon2id hashes rather than something that leaked
+ * through unhashed. There is no `users.password` column in this schema —
+ * PINs are hashed into `users."pinHash"` (see @ahava/shared-crypto).
  */
 export async function verifyDataProtection(): Promise<{ passed: boolean; issues?: string[] }> {
   const issues: string[] = [];
-  
   const client = await pool.connect();
-  
+
   try {
     if (process.env.DATABASE_URL && process.env.DATABASE_URL.includes('sslmode')) {
       console.log('PASS: Database SSL configured');
     } else {
-      issues.push('Database SSL not configured');
+      issues.push('DATABASE_URL does not specify sslmode — expected outside local dev');
     }
-    
-    const passwordResult = await client.query(
-      'SELECT COUNT(*) AS count FROM users WHERE password LIKE $1 OR password LIKE $2',
-      ['%---%', '_ _ _']
+
+    const unhashedPinResult = await client.query(
+      `SELECT COUNT(*) AS count FROM users WHERE "pinHash" IS NOT NULL AND "pinHash" NOT LIKE '$argon2%'`
     );
-    
-    if (parseInt(passwordResult.rows[0].count) > 0) {
-      issues.push('Some passwords may not be hashed');
+    if (parseInt(unhashedPinResult.rows[0].count, 10) > 0) {
+      issues.push('Users with a pinHash that is not an Argon2 hash: ' + unhashedPinResult.rows[0].count);
     }
-    
+
     if (issues.length === 0) {
       console.log('PASS: Data protection verified');
       return { passed: true };
     } else {
       console.error('FAIL: Data protection check failed');
-      issues.forEach(function(i) { console.error('   - ' + i); });
-      return { passed: false, issues: issues };
+      issues.forEach((i) => console.error('   - ' + i));
+      return { passed: false, issues };
     }
   } finally {
     client.release();
@@ -195,44 +181,37 @@ export async function verifyDataProtection(): Promise<{ passed: boolean; issues?
 }
 
 /**
- * Verify KYC/AML compliance
+ * Report KYC tier distribution and any unresolved CRITICAL AML flags.
+ * This is deliberately a report, not a pass/fail gate on "100% of users
+ * are KYC-verified" — TIER_0 (unverified, lower-limit) accounts are a
+ * legitimate, designed-for state in a tiered-KYC system, not a compliance
+ * failure. What IS actionable is an open CRITICAL aml_flags row.
  */
 export async function verifyKycAml(): Promise<{ passed: boolean; issues?: string[] }> {
   const client = await pool.connect();
   const issues: string[] = [];
-  
+
   try {
-    const userResult = await client.query(
-      'SELECT COUNT(*) AS total_users FROM users'
+    const tierResult = await client.query(
+      `SELECT "kycTier", COUNT(*) AS count FROM users WHERE "isDeleted" = false GROUP BY "kycTier"`
     );
-    
-    const kycResult = await client.query(
-      'SELECT COUNT(*) AS kyc_completed FROM users WHERE kyc_status = $1',
-      ['completed']
+    console.log('KYC tier distribution: ' + JSON.stringify(tierResult.rows));
+
+    const openCriticalFlags = await client.query(
+      `SELECT COUNT(*) AS count FROM aml_flags WHERE severity = 'CRITICAL' AND status IN ('OPEN', 'UNDER_REVIEW')`
     );
-    
-    const totalUsers = parseInt(userResult.rows[0].total_users);
-    const kycCompleted = parseInt(kycResult.rows[0].kyc_completed);
-    
-    if (kycCompleted < totalUsers) {
-      issues.push('KYC not completed for all users: ' + kycCompleted + '/' + totalUsers);
+    const openCount = parseInt(openCriticalFlags.rows[0].count, 10);
+    if (openCount > 0) {
+      issues.push('Unresolved CRITICAL AML flags: ' + openCount);
     }
-    
-    const amlConfigResult = await client.query(
-      'SELECT COUNT(*) AS count FROM aml_configurations'
-    );
-    
-    if (parseInt(amlConfigResult.rows[0].count) === 0) {
-      issues.push('AML configurations not found');
-    }
-    
+
     if (issues.length === 0) {
-      console.log('PASS: KYC/AML compliance verified');
+      console.log('PASS: No unresolved CRITICAL AML flags');
       return { passed: true };
     } else {
-      console.error('FAIL: KYC/AML compliance check failed');
-      issues.forEach(function(i) { console.error('   - ' + i); });
-      return { passed: false, issues: issues };
+      console.error('FAIL: KYC/AML check failed');
+      issues.forEach((i) => console.error('   - ' + i));
+      return { passed: false, issues };
     }
   } finally {
     client.release();
@@ -240,43 +219,32 @@ export async function verifyKycAml(): Promise<{ passed: boolean; issues?: string
 }
 
 /**
- * Verify reporting
+ * Sanity-check that the system has recent activity to report on. There
+ * are no dedicated reporting tables in this schema (reporting-service
+ * queries wallet_transactions directly) — the previous version of this
+ * function checked for transaction_reports/compliance_reports/
+ * audit_reports tables that were never created.
  */
 export async function verifyReporting(): Promise<{ passed: boolean; issues?: string[] }> {
   const client = await pool.connect();
   const issues: string[] = [];
-  
+
   try {
-    const tables = ['transaction_reports', 'compliance_reports', 'audit_reports'];
-    
-    for (let i = 0; i < tables.length; i++) {
-      const table = tables[i];
-      const result = await client.query(
-        'SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = $1)',
-        [table]
-      );
-      
-      if (!result.rows[0].exists) {
-        issues.push('Reporting table missing: ' + table);
-      }
-    }
-    
-    const reportResult = await client.query(
-      'SELECT COUNT(*) AS count FROM transactions WHERE created_at >= NOW() - INTERVAL $1',
-      ['7 days']
+    const recentResult = await client.query(
+      `SELECT COUNT(*) AS count FROM wallet_transactions WHERE "createdAt" >= NOW() - INTERVAL '7 days'`
     );
-    
-    if (parseInt(reportResult.rows[0].count) === 0) {
-      issues.push('No transactions in the last 7 days');
+
+    if (parseInt(recentResult.rows[0].count, 10) === 0) {
+      issues.push('No wallet_transactions in the last 7 days — expected for a fresh environment, worth a second look otherwise');
     }
-    
+
     if (issues.length === 0) {
-      console.log('PASS: Reporting verified');
+      console.log('PASS: Recent transaction activity found');
       return { passed: true };
     } else {
       console.error('FAIL: Reporting check failed');
-      issues.forEach(function(i) { console.error('   - ' + i); });
-      return { passed: false, issues: issues };
+      issues.forEach((i) => console.error('   - ' + i));
+      return { passed: false, issues };
     }
   } finally {
     client.release();
@@ -299,7 +267,7 @@ export async function runAllComplianceChecks(): Promise<{
 }> {
   console.log('Running compliance checks...');
   console.log('');
-  
+
   const results = {
     doubleEntry: await verifyDoubleEntry(),
     auditTrail: await verifyAuditTrail(),
@@ -308,9 +276,9 @@ export async function runAllComplianceChecks(): Promise<{
     kycAml: await verifyKycAml(),
     reporting: await verifyReporting(),
   };
-  
-  const allPassed = Object.values(results).every(function(r) { return r.passed; });
-  
+
+  const allPassed = Object.values(results).every((r) => r.passed);
+
   console.log('');
   console.log('==================================================');
   if (allPassed) {
@@ -319,14 +287,14 @@ export async function runAllComplianceChecks(): Promise<{
     console.log('FAILURE: SOME COMPLIANCE CHECKS FAILED');
   }
   console.log('==================================================');
-  
-  return { passed: allPassed, results: results };
+
+  return { passed: allPassed, results };
 }
 
 if (require.main === module) {
   runAllComplianceChecks()
-    .then(function() { process.exit(0); })
-    .catch(function(err) {
+    .then(() => process.exit(0))
+    .catch((err) => {
       console.error('Error running compliance checks: ' + err);
       process.exit(1);
     });

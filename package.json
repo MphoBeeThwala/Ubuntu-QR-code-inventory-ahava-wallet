@@ -31,13 +31,17 @@
     "migrate:dev": "pnpm --filter ./services/* exec npx prisma migrate dev",
     "generate": "pnpm --filter ./services/* exec npx prisma generate",
     "seed": "pnpm --filter ./services/* exec npx prisma db seed",
-    "prisma:studio": "pnpm --filter ./services/* exec npx prisma studio"
+    "prisma:studio": "pnpm --filter ./services/* exec npx prisma studio",
+    "compliance:check": "tsx compliance/compliance_scripts.ts"
   },
   "devDependencies": {
     "@prisma/client": "5.22.0",
     "@types/node": "^20.0.0",
+    "@types/pg": "^8.11.6",
     "concurrently": "^8.2.0",
-    "prisma": "5.22.0"
+    "pg": "^8.11.5",
+    "prisma": "5.22.0",
+    "tsx": "^4.7.0"
   },
   "engines": {
     "node": ">=18.0.0",

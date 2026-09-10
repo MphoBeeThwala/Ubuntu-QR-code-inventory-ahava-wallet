@@ -4,7 +4,9 @@
 
 This document outlines the technical compliance requirements for the Ubuntu Pay Platform to meet South African Reserve Bank (SARB) standards.
 
-**Note:** Regulatory compliance in licensing is not yet complete, but the system software must meet all technical standards.
+**Note:** Regulatory licensing is not yet complete — this document is not legal advice, and covers technical implementation only. See `SARB_COMPLIANCE_MAP.md` at the repo root for the engineering team's own up-to-date readiness assessment, which this document should agree with; if the two ever conflict, trust that one and fix this one.
+
+Every file path, table name, and command below was checked against the actual codebase and schema — not assumed. If you're reading this after a schema or service change, re-verify before trusting it.
 
 ## 1. Double-Entry Accounting
 
@@ -15,14 +17,13 @@ This document outlines the technical compliance requirements for the Ubuntu Pay 
 - All monetary values stored as BIGINT cents (never floats)
 
 ### Implementation
-- Ledger Service: services/ledger-service/src/services/ledger-service.ts
-- Verification: npm run verify:ledger
-- Schema: ledger_entries table with debit_amount_cents and credit_amount_cents as BIGINT
+- Ledger Service: `services/ledger-service/src/main.ts`
+- Live payment paths write ledger entries directly inside their own DB transaction (see `services/payment-service/src/main.ts` and `services/wallet-service/src/main.ts`), rather than over HTTP, so the ledger write is atomic with the balance change it records
+- Schema: `ledger_entries` table (Prisma model `LedgerEntry`) — a single `"amountCents"` BIGINT column plus an `"entryType"` enum (`DEBIT`/`CREDIT`), not separate debit/credit columns
 
 ### Verification Commands
-- Check ledger balance: psql -c "SELECT SUM(debit_amount_cents) - SUM(credit_amount_cents) AS imbalance FROM ledger_entries;"
-- Check by date range: psql -c "SELECT DATE_TRUNC('day', created_at) AS day, SUM(debit_amount_cents) - SUM(credit_amount_cents) AS daily_imbalance FROM ledger_entries GROUP BY day ORDER BY day;"
-- Run automated verification: npm run verify:ledger
+- Run the automated check: `npm run compliance:check` (runs `compliance_scripts.ts`'s `verifyDoubleEntry`, which queries `ledger_entries` directly)
+- Manual check: `psql -c "SELECT SUM(CASE WHEN \"entryType\"='DEBIT' THEN \"amountCents\" ELSE 0 END) - SUM(CASE WHEN \"entryType\"='CREDIT' THEN \"amountCents\" ELSE 0 END) AS imbalance FROM ledger_entries;"`
 
 ## 2. Audit Trail
 
@@ -34,14 +35,15 @@ This document outlines the technical compliance requirements for the Ubuntu Pay 
 - Correlation IDs for tracing across services
 
 ### Implementation
-- Audit Logger: services/shared/src/config/logger.ts
-- Storage: Audit logs stored in PostgreSQL with retention policy
+- Audit writer: `packages/shared-audit/src/index.ts` (`writeAuditLog`) — hash-chains each row (`prevHash`/`recordHash`) so tampering with history is detectable
+- Storage: `audit_logs` table (Prisma model `AuditLog`)
+
+### Status — NOT fully true yet
+- Hash chaining is real and in use.
+- **Append-only enforcement is not**: the migration meant to make `audit_logs` immutable at the database level (`audit_logs_append_only`) shipped as an empty placeholder — nothing currently stops an `UPDATE`/`DELETE` on this table. Don't cite immutability as achieved until that migration has real SQL (a trigger or `REVOKE UPDATE, DELETE` for the application role).
 
 ### Verification
-- All financial actions are logged
-- Audit logs cannot be modified or deleted
-- All changes include before/after values
-- User identification is present for all entries
+- `npm run compliance:check` (`verifyAuditTrail`) checks that completed `wallet_transactions` have a matching `audit_logs` row.
 
 ## 3. Transaction Integrity
 
@@ -52,167 +54,126 @@ This document outlines the technical compliance requirements for the Ubuntu Pay 
 - Atomic transaction processing
 
 ### Implementation
-- Idempotency Keys: All payment requests include idempotency key
-- Reference IDs: Unique UUID v4 for all transactions
-- Status Tracking: Transactions have clear status
+- Idempotency Keys: `wallet_transactions."idempotencyKey"` has a unique DB constraint, checked before the transaction opens
+- Reference IDs: cuid/UUID primary keys throughout
+- Status Tracking: `wallet_transactions.status` (Prisma enum `TransactionStatus`)
 
 ### Verification
-- Check for duplicate references: psql -c "SELECT reference_id, COUNT(*) FROM transactions GROUP BY reference_id HAVING COUNT(*) > 1;"
-- Check for duplicate ledger entries: psql -c "SELECT reference_id, COUNT(*) FROM ledger_entries GROUP BY reference_id HAVING COUNT(*) > 1;"
-- Run idempotency tests: npm run test:idempotency
+- `npm run compliance:check` (`verifyTransactionIntegrity`) — checks for negative amounts/fees and debit-side balance arithmetic directly against `wallet_transactions`. Duplicate `idempotencyKey` values can't actually occur (enforced by the unique index itself), so that's not re-checked here.
 
 ## 4. KYC/AML Compliance
 
 ### Requirements
-- KYC verification for all users
-- AML screening for all transactions
+- Tiered KYC (`users."kycTier"`: `TIER_0` through `MERCHANT`) — TIER_0/unverified is a legitimate, designed-for state with lower transaction limits, not itself a compliance failure
+- AML screening for transactions
 - Risk-based approach to compliance
 - Suspicious activity reporting
 
 ### Implementation
-- KYC Service: services/kyc-service (if exists)
-- AML Service: services/aml-service/src/services/aml-service.ts
-- Watchlist Screening: Placeholder implementation in BATCH 8
+- AML engine: `services/aml-service/src/aml.engine.ts` — `screenSanctions()` (synchronous, blocking, called by payment-service before every `/payments` request commits) and `runPostPaymentChecks()` (async risk-scoring after commit)
+- Sanctions provider: `services/aml-service/src/comply-advantage.client.ts` — real ComplyAdvantage integration when `COMPLYADVANTAGE_API_KEY` is set; without it, runs in stub mode and always returns `CLEAR`. Confirm the key is actually configured in whichever environment you're checking.
+- STR filing: `POST /aml/str-file` on aml-service
 
 ### Verification
-- All users have KYC status
-- All transactions are screened for AML
-- High-risk transactions are flagged
-- Suspicious activities are reported
+- `npm run compliance:check` (`verifyKycAml`) reports the KYC tier distribution and flags any unresolved `CRITICAL` severity row in `aml_flags`.
 
 ## 5. Data Protection
 
 ### Requirements
-- Encryption of sensitive data at rest
-- Encryption of sensitive data in transit
+- Encryption of sensitive data at rest and in transit
 - Access controls for financial data
 - Data retention policies
 
 ### Implementation
-- Encryption: TLS 1.3 for all communications
-- Database: PostgreSQL with encryption options
-- Backups: AES-256 encryption
-- Access Control: JWT authentication with role-based access
+- PII encryption: `packages/shared-crypto/src/index.ts` (`encryptPII`, AES-256-GCM) — applied to phone numbers on write in auth-service. This covers PII fields specifically, not literally every column at rest.
+- PIN hashing: Argon2id (`hashPin`/`verifyPin` in the same package)
+- Transport: TLS termination is an infrastructure/ingress concern, not enforced in application code — confirm it's actually configured wherever this is deployed before citing it as done.
+- Access Control: JWT (RS256) authentication via api-gateway
 
 ### Verification
-- All API endpoints use HTTPS
-- Database connections are encrypted
-- Backup files are encrypted
-- Access to financial data is role-restricted
+- `npm run compliance:check` (`verifyDataProtection`) checks `DATABASE_URL` for `sslmode` and that no `users."pinHash"` value is missing its Argon2 prefix.
 
 ## 6. Reporting
 
 ### Requirements
 - Transaction reporting
 - Compliance reporting
-- Audit reporting
 - SARB reporting (format ready)
 
 ### Implementation
-- Reporting Service: services/reporting-service
-- Scheduled Reports: Daily, weekly, monthly
-- Ad-hoc Reports: On-demand reporting
+- Reporting Service: `services/reporting-service` — queries `wallet_transactions` directly; there are no separate `transaction_reports`/`compliance_reports` tables in this schema.
+- SARB regulatory reporting format: not yet built — this is a real gap, not just undocumented.
 
 ## 7. Business Continuity
 
 ### Requirements
 - Disaster recovery plan in place
 - Backup and restore procedures
-- High availability configuration
 - Incident response procedures
 
-### Implementation
-- Disaster Recovery: BATCH 14 documentation
-- High Availability: Multi-region deployment
-- Incident Response: Runbook in BATCH 14
-
-### Verification
-- DR plan tested quarterly
-- Backups verified daily
-- HA failover tested monthly
-- Incident response tested
+### Status
+Disaster-recovery documentation exists in `disaster-recovery/` but has not yet been corrected to match the real schema and actual available tooling (no HA/Patroni setup exists in this repo's infra as committed) — treat it as a draft to be verified, not a tested procedure, until someone has actually run a restore against this schema.
 
 ## 8. Security
 
 ### Requirements
 - Rate limiting on all endpoints
-- Input validation on all inputs
+- Input validation on financial/PII endpoints
 - Security headers on all responses
 - Authentication and authorization
-- Secure password storage
+- Secure password (PIN) storage
 
 ### Implementation
-- Rate Limiting: BATCH 11 - rateLimiter.ts
-- Input Validation: BATCH 11 - validation.ts
-- Security Headers: BATCH 11 - securityHeaders.ts
-- Authentication: JWT with device binding
-- Password Storage: Argon2 hashing
+- Rate Limiting: `services/api-gateway/src/middleware/rate-limit.middleware.ts` — Redis-backed, applied at the gateway
+- Security Headers: `helmet` in `services/api-gateway/src/main.ts`
+- Input Validation: zod schemas on payment-service's `/payments` and `/payments/qr`, wallet-service's `/qr/:qrHash/pay`, and auth-service's `/auth/register`/`/auth/login` — layered in front of the existing business-rule checks, not yet extended to every endpoint
+- Authentication: JWT (RS256) with device binding
+- PIN Storage: Argon2id
 
 ### Verification
-- Rate limiting active on all endpoints
-- Input validation on all API endpoints
-- Security headers present on all responses
-- Authentication required for sensitive endpoints
-- Passwords are hashed (not stored in plaintext)
+- Manual: confirm rate limiting and headers are active by inspecting response headers from a live gateway instance.
 
 ## 9. Monitoring and Alerting
 
 ### Requirements
-- Real-time monitoring of all services
+- Real-time monitoring of instrumented services
 - Alerting on critical issues
 - Financial data integrity monitoring
-- Compliance metric tracking
 
 ### Implementation
-- Monitoring: BATCH 10 - Prometheus + Grafana
-- Alerting: BATCH 10 - Alert rules
-- Financial Alerts: Ledger imbalance detection
-
-### Alerts
-- Ledger Imbalance: Immediate alert if debits != credits
-- High Error Rate: Alert if error rate > 1%
-- Service Downtime: Alert if any service down > 1 minute
-- Financial Limits: Alert if approaching daily/monthly limits
+- Metrics: `packages/shared-observability` (Prometheus client) — wired into payment-service and wallet-service (`GET /metrics` on each); other services are not yet instrumented
+- Config: `monitoring/prometheus.yml`, `monitoring/alert.rules` — only lists the services actually exposing `/metrics`; don't add a service to the scrape config until it's actually instrumented
+- Financial Alerts: `LedgerImbalance` and `FailedTransactions` rules in `alert.rules`
 
 ## 10. Testing
 
 ### Requirements
-- Unit tests for all financial logic
-- Integration tests for all services
-- End-to-end tests for all flows
-- Compliance tests for all requirements
+- Unit tests for financial logic
+- Compliance checks runnable on demand
 
 ### Implementation
-- Unit Tests: Jest tests in each service
-- Integration Tests: Service-to-service testing
-- E2E Tests: User journey testing
-- Compliance Tests: npm run test:compliance
+- Unit/integration tests: Jest, per service (`services/*/src/__tests__/`)
+- Compliance checks: `npm run compliance:check` runs `compliance/compliance_scripts.ts` against the live database
+
+### Status
+No CI workflow currently runs the compliance checks automatically on deploy — `npm run compliance:check` must be run manually today.
 
 ## Compliance Verification Scripts
 
 ### Run All Compliance Checks
+```
 npm run compliance:check
+```
 
-### Individual Checks
-npm run compliance:double-entry
-npm run compliance:audit-trail
-npm run compliance:transaction-integrity
-npm run compliance:data-protection
-npm run compliance:kyc-aml
-npm run compliance:reporting
-
-## Compliance Status Dashboard
-
-Access the compliance dashboard at: https://compliance.ubuntu-pay.co.za
+This runs every check in `compliance/compliance_scripts.ts` (`verifyDoubleEntry`, `verifyAuditTrail`, `verifyTransactionIntegrity`, `verifyDataProtection`, `verifyKycAml`, `verifyReporting`) against `DATABASE_URL` and prints a pass/fail summary. There are no separate per-check npm scripts — import the individual functions from that file if you need to run one in isolation.
 
 ## Notes
 
-1. Regulatory Licensing: Not yet complete. This document focuses on technical compliance.
-2. System Software: All technical standards are met or will be met by the end of BATCH 15.
-3. Verification: All compliance checks must pass before production deployment.
-4. Maintenance: Compliance status must be verified after each deployment.
-5. Audit: External audit of compliance will be required before SARB licensing.
+1. **Regulatory licensing**: not yet complete. This document covers technical implementation only — see the audit artifact / `SARB_COMPLIANCE_MAP.md` for the regulatory strategy (TPPP registration, PASA, etc.).
+2. **Technical standards**: several items above are marked "NOT yet true" deliberately — read the Status sections, don't assume every requirement listed is satisfied just because it's listed.
+3. **No compliance dashboard exists.** An earlier version of this document linked to `https://compliance.ubuntu-pay.co.za` — that URL does not resolve to anything and should never have been cited as real infrastructure. Don't add a fabricated URL back in; if a real dashboard gets built, link it then.
+4. **External audit**: will be required before SARB licensing regardless of the technical state.
 
 ## Document Information
 
-Version: 1.0 | Last Updated: 2026-08-21 | Next Review: 2026-11-21 | Owner: Compliance Team | Status: Technical compliance in progress (licensing pending)
+Owner: Engineering | Status: Technical implementation in progress (see Status notes per section) | Regulatory licensing: not started
