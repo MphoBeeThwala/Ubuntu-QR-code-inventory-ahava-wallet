@@ -434,12 +434,70 @@ app.get("/health", (req, res) => {
   );
 });
 
+// CRITICAL: this endpoint moves real money (processSend, processAirtime)
+// based entirely on the phoneNumber field in the request body — and it
+// has its own public LoadBalancer + ingress host (ussd.ahava.co.za,
+// see k8s/ingress.yaml), bypassing api-gateway's JWT middleware entirely
+// by design, because a real USSD session genuinely has no way to carry a
+// Bearer token: the caller is a feature-phone user mid-USSD-session, not
+// an app with a stored access token. A JWT check here would be wrong —
+// it would just break every real USSD call, which is exactly why this
+// wasn't "fixed" the same way as every other service this session.
+//
+// But that also means NOTHING previously verified the request actually
+// came from Africa's Talking's real USSD gateway rather than an arbitrary
+// internet client forging the phoneNumber field. And because the menu
+// router is stateless (replays the full "*"-delimited step history on
+// every call), an attacker who merely knows a victim's phone number could
+// submit the ENTIRE send-money flow in a single POST — e.g.
+// text="2*AHV-ATTACKER-WALLET*9999*1" — and drain their wallet in one
+// unauthenticated request. No wallet id, PIN, or session state required.
+//
+// The fix here is callback authentication, not caller authentication:
+// Africa's Talking lets you configure the full USSD callback URL
+// (including a query string) for a shortcode from their dashboard, so a
+// long random secret embedded in that URL — checked here — verifies the
+// request came through the callback URL only AT's infrastructure knows,
+// the same shared-secret-in-the-webhook-URL pattern many callback/webhook
+// integrations use when the provider doesn't support custom headers or
+// payload signing on this class of callback. Fails closed (blocks every
+// request) if USSD_CALLBACK_TOKEN isn't configured, rather than silently
+// falling back to open.
+//
+// Setup required (not yet done — this only adds the check, provisioning
+// the actual secret and updating Africa's Talking's dashboard is a
+// deployment step for whoever manages that account):
+//   1. Generate a random secret, e.g. `openssl rand -hex 32`.
+//   2. Set USSD_CALLBACK_TOKEN to it in this service's environment.
+//   3. In the Africa's Talking dashboard, set this USSD shortcode's
+//      callback URL to https://ussd.ahava.co.za/ussd?token=<same secret>.
+function requireValidCallbackToken(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): void {
+  const expected = process.env.USSD_CALLBACK_TOKEN;
+  if (!expected) {
+    console.error(
+      "[ussd-service] USSD_CALLBACK_TOKEN is not set — rejecting all USSD callbacks. " +
+        "See the comment above requireValidCallbackToken in main.ts for setup steps.",
+    );
+    res.status(503).send("END Service unavailable.");
+    return;
+  }
+  if (req.query.token !== expected) {
+    res.status(403).send("END Unauthorized.");
+    return;
+  }
+  next();
+}
+
 /**
  * POST /ussd
  * Africa's Talking USSD callback endpoint.
  * Responds with plain text: "CON <msg>" or "END <msg>"
  */
-app.post("/ussd", async (req: Request, res: Response) => {
+app.post("/ussd", requireValidCallbackToken, async (req: Request, res: Response) => {
   const { sessionId, serviceCode, phoneNumber, text } = req.body as UssdRequest;
 
   if (!sessionId || !phoneNumber) {

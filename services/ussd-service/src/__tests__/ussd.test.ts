@@ -67,13 +67,22 @@ import app from "../main";
 
 // ─── Helpers ──────────────────────────────────────────────────────
 
+// requireValidCallbackToken reads process.env.USSD_CALLBACK_TOKEN fresh on
+// every request (not cached at module load), so this can be set here
+// rather than needing to precede the import above.
+const TEST_CALLBACK_TOKEN = "test-ussd-callback-token";
+process.env.USSD_CALLBACK_TOKEN = TEST_CALLBACK_TOKEN;
+
 function ussdPost(text: string, phoneNumber = "+27821234567") {
-  return request(app).post("/ussd").type("form").send({
-    sessionId: "session-test-001",
-    serviceCode: "*384#",
-    phoneNumber,
-    text,
-  });
+  return request(app)
+    .post(`/ussd?token=${TEST_CALLBACK_TOKEN}`)
+    .type("form")
+    .send({
+      sessionId: "session-test-001",
+      serviceCode: "*384#",
+      phoneNumber,
+      text,
+    });
 }
 
 beforeEach(() => {
@@ -108,11 +117,77 @@ describe("POST /ussd — root menu", () => {
 
   it("returns 400 when sessionId is missing", async () => {
     const res = await request(app)
-      .post("/ussd")
+      .post(`/ussd?token=${TEST_CALLBACK_TOKEN}`)
       .type("form")
       .send({ phoneNumber: "+27821234567", text: "" });
     expect(res.status).toBe(400);
     expect(res.text).toContain("END");
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────
+// Regression coverage: this endpoint moves real money based entirely on
+// the phoneNumber field in the request body, and has its own public
+// ingress bypassing api-gateway's auth entirely — before this fix,
+// nothing verified a request actually came from Africa's Talking rather
+// than an arbitrary internet client forging phoneNumber.
+describe("POST /ussd — callback authentication", () => {
+  it("rejects a request with no token", async () => {
+    const res = await request(app).post("/ussd").type("form").send({
+      sessionId: "session-attack-001",
+      serviceCode: "*384#",
+      phoneNumber: "+27821234567",
+      text: "",
+    });
+    expect(res.status).toBe(403);
+    expect(res.text).toContain("END");
+  });
+
+  it("rejects a request with the wrong token", async () => {
+    const res = await request(app)
+      .post("/ussd?token=not-the-real-token")
+      .type("form")
+      .send({
+        sessionId: "session-attack-002",
+        serviceCode: "*384#",
+        phoneNumber: "+27821234567",
+        text: "",
+      });
+    expect(res.status).toBe(403);
+  });
+
+  it("rejects every request when USSD_CALLBACK_TOKEN is not configured", async () => {
+    const original = process.env.USSD_CALLBACK_TOKEN;
+    delete process.env.USSD_CALLBACK_TOKEN;
+    try {
+      const res = await request(app)
+        .post(`/ussd?token=${TEST_CALLBACK_TOKEN}`)
+        .type("form")
+        .send({
+          sessionId: "session-attack-003",
+          serviceCode: "*384#",
+          phoneNumber: "+27821234567",
+          text: "",
+        });
+      expect(res.status).toBe(503);
+    } finally {
+      process.env.USSD_CALLBACK_TOKEN = original;
+    }
+  });
+
+  it("does not attempt a wallet lookup for an unauthenticated attack request", async () => {
+    // The critical scenario this fix closes: submitting the entire
+    // send-money flow in one shot for a victim's phone number, with no
+    // valid callback token.
+    const res = await request(app).post("/ussd").type("form").send({
+      sessionId: "session-drain-attempt",
+      serviceCode: "*384#",
+      phoneNumber: "+27821234567",
+      text: "2*AHV-ATTACKER-WALLET*9999*1",
+    });
+    expect(res.status).toBe(403);
+    expect(mockPrisma.user.findUnique).not.toHaveBeenCalled();
+    expect(mockPrisma.$transaction).not.toHaveBeenCalled();
   });
 });
 
