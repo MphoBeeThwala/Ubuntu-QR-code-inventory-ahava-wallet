@@ -10,8 +10,27 @@ const redisClient = new Redis(process.env.REDIS_URL || "redis://localhost:6379",
 });
 redisClient.on("error", (err) => { console.error("[rate-limit] Redis error:", err.message); });
 
-function keyGenerator(req: Request): string {
-  return req.deviceFingerprint || req.userId || req.ip || "unknown";
+// req.deviceFingerprint comes straight from the client-supplied
+// `X-Device-Id` header (see main.ts's device-fingerprinting middleware) —
+// nothing verifies it, so keying on it alone let an attacker get a fresh
+// rate-limit bucket on every request just by sending a different header
+// value, defeating generalRateLimiter, authRateLimiter (brute-force
+// protection on /auth/login), and paymentRateLimiter entirely. req.userId
+// is dead weight in this fallback chain: jwtAuthMiddleware, which sets it,
+// runs AFTER these limiters in main.ts's app.use() order (rate limiting
+// has to cover login attempts, which by definition have no valid JWT yet),
+// so it is never populated when keyGenerator runs.
+//
+// Keying on IP + device fingerprint together closes the free-bypass gap —
+// spoofing the header no longer buys a new bucket unless the request also
+// comes from a new source IP, which is a meaningfully harder resource to
+// rotate at volume than an HTTP header — while still giving distinct
+// buckets to different real devices sharing one IP (mobile carrier CGNAT,
+// office/home NAT), which a pure-IP key would have lumped together.
+export function keyGenerator(req: Request): string {
+  const ip = req.ip || "unknown-ip";
+  const device = req.deviceFingerprint || "unknown-device";
+  return `${ip}:${device}`;
 }
 
 function rateLimitHandler(req: Request, res: Response): void {
