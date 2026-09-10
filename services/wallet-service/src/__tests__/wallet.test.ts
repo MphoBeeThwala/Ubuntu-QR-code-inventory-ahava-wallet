@@ -46,6 +46,9 @@ jest.mock("@ahava/shared-events", () => ({
   QUEUE_NAMES: {
     WALLET_CREATED: "wallet:created",
   },
+  // main.ts calls this at module load time to configure BullMQ — without
+  // it the whole suite fails before a single test runs.
+  getRedisConnectionConfig: jest.fn(() => ({})),
 }));
 
 // ─── Import app AFTER all mocks ───────────────────────────────────

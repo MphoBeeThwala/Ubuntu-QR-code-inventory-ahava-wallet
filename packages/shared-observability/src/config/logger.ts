@@ -1,5 +1,5 @@
-import winston from winston
-import { v4 as uuidv4 } from uuid
+import winston from "winston";
+import { v4 as uuidv4 } from "uuid";
 
 export enum LogLevel {
   ERROR = 'error',

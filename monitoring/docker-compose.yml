@@ -1,3 +1,6 @@
+# Local-only observability stack. Not deployed anywhere via k8s/ — for a
+# real environment, point Grafana/Prometheus config (and credentials) at
+# your actual monitoring stack instead of running this compose file.
 version: "3.8"
 
 services:
@@ -7,8 +10,11 @@ services:
     ports:
       - "9090:9090"
     volumes:
-      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
-      - ./monitoring/alert.rules:/etc/prometheus/alert.rules
+      # Paths are relative to THIS file (monitoring/docker-compose.yml), not
+      # the repo root — the previous "./monitoring/prometheus.yml" would
+      # have resolved to monitoring/monitoring/prometheus.yml and failed.
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./alert.rules:/etc/prometheus/alert.rules
       - prometheus_data:/prometheus
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"
@@ -25,8 +31,11 @@ services:
     volumes:
       - grafana_data:/var/lib/grafana
     environment:
-      - GF_SECURITY_ADMIN_USER=admin
-      - GF_SECURITY_ADMIN_PASSWORD=admin
+      # Local-dev-only default — never rely on this outside a throwaway
+      # local stack. Override both via a real .env file before exposing
+      # this compose stack beyond localhost.
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
       - GF_USERS_ALLOW_SIGN_UP=false
     networks:
       - monitoring

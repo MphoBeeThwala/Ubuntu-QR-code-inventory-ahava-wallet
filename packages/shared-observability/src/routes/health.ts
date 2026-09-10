@@ -1,5 +1,5 @@
-import { Router } from express
-import { metricsEndpoint, healthCheckEndpoint } from ../middleware/metrics
+import { Router } from "express";
+import { metricsEndpoint, healthCheckEndpoint } from "../middleware/metrics";
 
 const router = Router()
 

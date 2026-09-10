@@ -12,6 +12,7 @@ import { Queue } from "bullmq";
 import { QUEUE_NAMES, getRedisConnectionConfig } from "@ahava/shared-events";
 import { sendSms, txSentMessage, txReceivedMessage } from "./sms";
 import { writeAuditLog } from "@ahava/shared-audit";
+import { metricsMiddleware, metricsEndpoint } from "@ahava/shared-observability";
 
 const app = express();
 const prisma = new PrismaClient();
@@ -64,6 +65,7 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   res.setHeader("X-Request-ID", requestId);
   next();
 });
+app.use(metricsMiddleware("wallet-service"));
 
 // Health check
 app.get("/health", (req, res) => {
@@ -71,6 +73,8 @@ app.get("/health", (req, res) => {
     createSuccessResponse({ status: "ok", service: "wallet-service" }, req.id),
   );
 });
+
+app.get("/metrics", metricsEndpoint);
 
 // POST /wallets - Create a new wallet for a user
 app.post(
