@@ -13,6 +13,7 @@ import { QUEUE_NAMES, getRedisConnectionConfig } from "@ahava/shared-events";
 import { sendSms, txSentMessage, txReceivedMessage } from "./sms";
 import { writeAuditLog } from "@ahava/shared-audit";
 import { decryptPII, fetchPIIEncryptionKey } from "@ahava/shared-crypto";
+import { metricsMiddleware, metricsEndpoint } from "@ahava/shared-observability";
 import { z } from "zod";
 
 // Type-shape validation layered in front of, not instead of, the existing
@@ -108,6 +109,7 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   res.setHeader("X-Request-ID", requestId);
   next();
 });
+app.use(metricsMiddleware("wallet-service"));
 
 // Health check
 app.get("/health", (req, res) => {
@@ -115,6 +117,8 @@ app.get("/health", (req, res) => {
     createSuccessResponse({ status: "ok", service: "wallet-service" }, req.id),
   );
 });
+
+app.get("/metrics", metricsEndpoint);
 
 // POST /wallets - Create a new wallet for a user
 app.post(

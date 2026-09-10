@@ -15,6 +15,7 @@
     "@ahava/shared-crypto": "*",
     "@ahava/shared-errors": "*",
     "@ahava/shared-events": "*",
+    "@ahava/shared-observability": "*",
     "@ahava/shared-types": "*",
     "@prisma/client": "^5.8.0",
     "axios": "^1.7.2",

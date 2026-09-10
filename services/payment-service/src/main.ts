@@ -12,6 +12,7 @@ import {
 import { QUEUE_NAMES, getRedisConnectionConfig } from "@ahava/shared-events";
 import { writeAuditLog } from "@ahava/shared-audit";
 import { z } from "zod";
+import { metricsMiddleware, metricsEndpoint } from "@ahava/shared-observability";
 
 // Type-shape validation layered in FRONT OF, not instead of, the existing
 // business-rule checks below (required-field presence, wallet existence,
@@ -135,12 +136,15 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   res.setHeader("X-Request-ID", requestId);
   next();
 });
+app.use(metricsMiddleware("payment-service"));
 
 app.get("/health", (req, res) => {
   res.json(
     createSuccessResponse({ status: "ok", service: "payment-service" }, req.id),
   );
 });
+
+app.get("/metrics", metricsEndpoint);
 
 // POST /payments/qr - Generate a payment QR code (static or dynamic)
 app.post(

@@ -1,0 +1,25 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  - "alert.rules"
+
+# Only services that actually mount @ahava/shared-observability's
+# metricsMiddleware + a GET /metrics route are listed here — payment-service
+# and wallet-service as of this commit. The previous version of this file
+# listed api-gateway and auth-service too, but neither had the middleware
+# wired in, so Prometheus would have scraped a 404 from both. Add a service
+# here only once it's actually instrumented (see either main.ts for the
+# two-line pattern), not just added to this list.
+scrape_configs:
+  - job_name: "payment-service"
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["payment-service:6003"]
+    scrape_interval: 10s
+  - job_name: "wallet-service"
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["wallet-service:6002"]
+    scrape_interval: 10s
