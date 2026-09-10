@@ -429,6 +429,7 @@ model AmlFlag {
   resolvedAt     DateTime?
   reviewNote     String?         @db.VarChar(2000)
   strReference   String?         @db.VarChar(100)
+  strFiledAt     DateTime?
   createdAt      DateTime        @default(now())
   updatedAt      DateTime         @updatedAt
 

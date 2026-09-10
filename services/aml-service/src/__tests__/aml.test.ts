@@ -71,10 +71,12 @@ jest.mock("winston", () => ({
 
 // ─── Mock AML Engine + deps ───────────────────────────────────────
 const mockRunPostPaymentChecks = jest.fn().mockResolvedValue(undefined);
+const mockScreenSanctions = jest.fn().mockResolvedValue(undefined);
 
 jest.mock("../aml.engine", () => ({
   AmlEngine: jest.fn().mockImplementation(() => ({
     runPostPaymentChecks: mockRunPostPaymentChecks,
+    screenSanctions: mockScreenSanctions,
   })),
 }));
 
@@ -121,6 +123,7 @@ beforeEach(() => {
   jest.clearAllMocks();
   mockWorkerIsRunning.mockReturnValue(true);
   mockRunPostPaymentChecks.mockResolvedValue(undefined);
+  mockScreenSanctions.mockResolvedValue(undefined);
   mockNotifyFlag.mockResolvedValue(undefined);
 });
 
@@ -204,6 +207,54 @@ describe("AML worker processing", () => {
         attempt: 2,
       }),
     );
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────
+describe("POST /aml/screen-sanctions", () => {
+  it("returns 200 cleared when both parties pass screening", async () => {
+    const res = await request(app).post("/aml/screen-sanctions").send({
+      senderUserId: "user-1",
+      recipientUserId: "user-2",
+      correlationId: "corr-1",
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.cleared).toBe(true);
+    expect(mockScreenSanctions).toHaveBeenCalledWith({
+      senderUserId: "user-1",
+      recipientUserId: "user-2",
+      correlationId: "corr-1",
+      blockOnMatch: true,
+    });
+  });
+
+  it("returns 403 when screenSanctions reports a match", async () => {
+    const { AhavaError, AhavaErrorCode } = require("@ahava/shared-errors");
+    mockScreenSanctions.mockRejectedValue(
+      new AhavaError(
+        AhavaErrorCode.AML_SANCTIONS_MATCH,
+        "Transaction cannot be processed at this time",
+      ),
+    );
+
+    const res = await request(app).post("/aml/screen-sanctions").send({
+      senderUserId: "user-1",
+      recipientUserId: "user-2",
+      correlationId: "corr-1",
+    });
+
+    expect(res.status).toBe(403);
+    expect(res.body.error.code).toBe("AML_SANCTIONS_MATCH");
+  });
+
+  it("returns 400 when required fields are missing", async () => {
+    const res = await request(app)
+      .post("/aml/screen-sanctions")
+      .send({ senderUserId: "user-1" });
+
+    expect(res.status).toBe(400);
+    expect(mockScreenSanctions).not.toHaveBeenCalled();
   });
 });
 

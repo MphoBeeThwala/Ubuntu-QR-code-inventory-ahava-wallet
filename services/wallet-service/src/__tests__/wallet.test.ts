@@ -591,6 +591,16 @@ describe("POST /qr/:qrHash/pay", () => {
     expect(res.status).toBe(400);
   });
 
+  it("returns 400 when senderWalletId is the wrong type (zod shape check)", async () => {
+    const res = await request(app).post(`/qr/${QR_HASH}/pay`).send({
+      senderWalletId: 12345,
+      amountCents: 5000,
+      idempotencyKey: "idem-002",
+    });
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe("VAL_INVALID_INPUT");
+  });
+
   it("returns 404 when QR not found", async () => {
     mockPrisma.paymentQrCode.findFirst.mockResolvedValue(null);
     const res = await request(app).post(`/qr/${QR_HASH}/pay`).send({

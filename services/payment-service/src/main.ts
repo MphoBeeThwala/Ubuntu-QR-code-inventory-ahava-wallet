@@ -11,6 +11,55 @@ import {
 } from "@ahava/shared-errors";
 import { QUEUE_NAMES, getRedisConnectionConfig } from "@ahava/shared-events";
 import { writeAuditLog } from "@ahava/shared-audit";
+import { z } from "zod";
+
+// Type-shape validation layered in FRONT OF, not instead of, the existing
+// business-rule checks below (required-field presence, wallet existence,
+// balance sufficiency, etc. all stay exactly as they were — this only
+// rejects a field that's PRESENT but the wrong type before it reaches
+// code that assumes a string/number, e.g. a Prisma query built from
+// senderWalletId, or amount arithmetic on a non-numeric amountCents).
+function validateBody<T extends z.ZodTypeAny>(
+  schema: T,
+  body: unknown,
+  requestId?: string,
+): z.infer<T> {
+  const result = schema.safeParse(body);
+  if (!result.success) {
+    const issue = result.error.issues[0];
+    throw new AhavaError(
+      AhavaErrorCode.VAL_INVALID_INPUT,
+      issue
+        ? `${issue.path.join(".") || "body"}: ${issue.message}`
+        : "Invalid request body",
+      { requestId },
+    );
+  }
+  return result.data;
+}
+
+const paymentsBodySchema = z.object({
+  senderWalletId: z.string().min(1).optional(),
+  receiverWalletId: z.string().min(1).optional(),
+  receiverWalletNumber: z.string().min(1).optional(),
+  recipientPhone: z.string().min(1).optional(),
+  amountCents: z.coerce.number().optional(),
+  description: z.string().max(500).optional(),
+  idempotencyKey: z.string().min(1).max(36).optional(),
+  paymentMethod: z
+    .enum(["UBUNTUPAY_WALLET", "PAYSHAP", "CASH_IN", "CASH_OUT"])
+    .optional(),
+  deviceId: z.string().optional(),
+  ipAddress: z.string().optional(),
+});
+
+const paymentsQrBodySchema = z.object({
+  walletId: z.string().min(1).optional(),
+  qrType: z.enum(["STATIC", "DYNAMIC", "REQUEST"]).optional(),
+  amountCents: z.coerce.number().optional(),
+  description: z.string().max(200).optional(),
+  ttlSeconds: z.number().optional(),
+});
 
 const app = express();
 const prisma = new PrismaClient();
@@ -21,6 +70,61 @@ const redisConnection = getRedisConnectionConfig();
 const paymentCreatedQueue = new Queue(QUEUE_NAMES.PAYMENTS_CREATED, {
   connection: redisConnection,
 });
+
+// Synchronous, blocking sanctions check — calls aml-service's
+// screenSanctions BEFORE any balance moves. This is distinct from the
+// PAYMENTS_CREATED queue below, which triggers async risk-scoring AFTER a
+// payment has already committed; sanctions screening specifically cannot
+// happen after the fact.
+//
+// Reads process.env fresh on every call (rather than caching into a
+// module-level constant) so tests can toggle SANCTIONS_SCREENING_ENABLED
+// per-suite regardless of when the env var is set relative to module load.
+async function screenSanctionsBlocking(params: {
+  senderUserId: string;
+  recipientUserId: string;
+  correlationId: string;
+}): Promise<void> {
+  if (process.env.SANCTIONS_SCREENING_ENABLED === "false") return;
+  const amlServiceUrl =
+    process.env.AML_SERVICE_URL || "http://localhost:6007";
+
+  // Named fetchResponse, not response: Express's own Response type is
+  // already imported into this file's scope and would otherwise shadow
+  // the global fetch Response type here.
+  let fetchResponse: Awaited<ReturnType<typeof fetch>>;
+  try {
+    fetchResponse = await fetch(`${amlServiceUrl}/aml/screen-sanctions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...params, blockOnMatch: true }),
+      signal: AbortSignal.timeout(5000),
+    });
+  } catch (error) {
+    throw new AhavaError(
+      AhavaErrorCode.EXT_COMPLY_ADVANTAGE_ERROR,
+      "Sanctions screening is unavailable — payment cannot be processed",
+      { requestId: params.correlationId },
+    );
+  }
+
+  if (fetchResponse.status === 403) {
+    // aml-service found a match and already raised the AML flag.
+    throw new AhavaError(
+      AhavaErrorCode.AML_SANCTIONS_MATCH,
+      "Transaction cannot be processed at this time",
+      { requestId: params.correlationId },
+    );
+  }
+
+  if (!fetchResponse.ok) {
+    throw new AhavaError(
+      AhavaErrorCode.EXT_COMPLY_ADVANTAGE_ERROR,
+      "Sanctions screening is unavailable — payment cannot be processed",
+      { requestId: params.correlationId },
+    );
+  }
+}
 
 app.use(express.json());
 app.use((req: Request, res: Response, next: NextFunction) => {
@@ -49,7 +153,7 @@ app.post(
         amountCents,
         description,
         ttlSeconds = 600, // 10 min default for dynamic
-      } = req.body;
+      } = validateBody(paymentsQrBodySchema, req.body, req.id);
 
       if (!walletId) {
         throw new AhavaError(
@@ -196,7 +300,7 @@ app.post(
         paymentMethod,
         deviceId,
         ipAddress,
-      } = req.body;
+      } = validateBody(paymentsBodySchema, req.body, req.id);
 
       if (!senderWalletId || amountCents == null || !idempotencyKey) {
         throw new AhavaError(
@@ -281,6 +385,29 @@ app.post(
           "Idempotency key already used",
           { requestId: req.id },
         );
+      }
+
+      // ─────────────────────────────────────────────────────────────
+      // PRE-TRANSACTION: blocking sanctions screening. Must happen before
+      // any balance moves — see screenSanctionsBlocking's own comment for
+      // why this is separate from the post-commit AML queue below.
+      // ─────────────────────────────────────────────────────────────
+      const screeningWallets = await prisma.wallet.findMany({
+        where: { id: { in: [senderWalletId, receiverWalletIdFinal] } },
+        select: { id: true, userId: true },
+      });
+      const senderForScreening = screeningWallets.find(
+        (w) => w.id === senderWalletId,
+      );
+      const receiverForScreening = screeningWallets.find(
+        (w) => w.id === receiverWalletIdFinal,
+      );
+      if (senderForScreening && receiverForScreening) {
+        await screenSanctionsBlocking({
+          senderUserId: senderForScreening.userId,
+          recipientUserId: receiverForScreening.userId,
+          correlationId: idempotencyKey,
+        });
       }
 
       // ─────────────────────────────────────────────────────────────
