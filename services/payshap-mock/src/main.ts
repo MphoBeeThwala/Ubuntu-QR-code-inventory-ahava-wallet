@@ -1,6 +1,7 @@
 import express, { Request, Response, NextFunction } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { PrismaClient } from '@prisma/client';
+import { parseBearerToken, verifyJWT } from '@ahava/shared-crypto';
 import {
   checkQrIdempotency,
   recordQrPayment,
@@ -13,6 +14,39 @@ const prisma = new PrismaClient();
 const PORT = process.env.PORT || 6011;
 
 app.use(express.json());
+
+// This service is gateway-routed (api-gateway forwards /payshap/* here) so
+// it's genuinely internet-reachable, but had no authorization at all —
+// anyone could generate or tamper with QR payment records for any
+// walletId. Nothing in the codebase currently calls these endpoints
+// (grepped every service and frontend), so there's no real caller shape
+// to model ownership against yet — this is a baseline requireAuth to stop
+// anonymous abuse through the public gateway, matching this file's
+// existing plain-JSON error style rather than introducing AhavaError here.
+async function requireAuth(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  const token = parseBearerToken(req.headers.authorization);
+  if (!token) {
+    res.status(403).json({
+      error: 'UNAUTHORIZED',
+      message: 'Authorization header missing or malformed',
+    });
+    return;
+  }
+
+  try {
+    await verifyJWT(token);
+    next();
+  } catch {
+    res.status(403).json({
+      error: 'INVALID_TOKEN',
+      message: 'Invalid or expired access token',
+    });
+  }
+}
 
 // QR Payment Idempotency Middleware
 async function qrIdempotencyMiddleware(
@@ -58,7 +92,7 @@ async function qrIdempotencyMiddleware(
 }
 
 // Generate QR code
-app.post('/payshap/qr', async (req, res) => {
+app.post('/payshap/qr', requireAuth, async (req, res) => {
   try {
     const walletId = req.body.walletId;
     const amountCents = req.body.amountCents;
@@ -108,7 +142,7 @@ app.post('/payshap/qr', async (req, res) => {
 });
 
 // Validate QR code
-app.get('/payshap/qr/:id', async (req, res) => {
+app.get('/payshap/qr/:id', requireAuth, async (req, res) => {
   try {
     const qrCodeId = req.params.id;
 
@@ -156,7 +190,7 @@ app.get('/payshap/qr/:id', async (req, res) => {
 });
 
 // Process payment with idempotency check
-app.post('/payshap/pay', qrIdempotencyMiddleware, async (req, res) => {
+app.post('/payshap/pay', requireAuth, qrIdempotencyMiddleware, async (req, res) => {
   // Declared here, not inside the try block, specifically so the catch
   // block below can still read it — it previously read `qrCodeId` from a
   // `const` scoped to the try block, which throws ReferenceError on any

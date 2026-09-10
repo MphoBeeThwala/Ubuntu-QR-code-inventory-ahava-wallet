@@ -20,7 +20,14 @@ data:
   AML_SERVICE_URL: "http://aml-service:6007"
   USSD_SERVICE_URL: "http://ussd-service:6008"
   INVENTORY_SERVICE_URL: "http://inventory-service:6010"
-  PAYSHAP_MOCK_URL: "http://payshap-mock:6011"
+  # Must be PAYSHAP_SERVICE_URL, not PAYSHAP_MOCK_URL — api-gateway reads
+  # process.env.PAYSHAP_SERVICE_URL (matching every other service's
+  # <NAME>_SERVICE_URL convention above). The old key name meant the
+  # gateway never actually saw this value in a real deployment and fell
+  # back to its hardcoded "http://localhost:6011" default, which doesn't
+  # resolve inside the api-gateway pod — every /payshap/* request routed
+  # through the gateway would have failed.
+  PAYSHAP_SERVICE_URL: "http://payshap-mock:6011"
   LEDGER_SERVICE_URL: "http://ledger-service:6004"
   PAYMENT_ORCHESTRATOR_URL: "http://payment-orchestrator:6005"
   # Compliance team distribution address — aml-service's MlroNotifier sends
