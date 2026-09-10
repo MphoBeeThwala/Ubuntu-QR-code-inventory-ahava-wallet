@@ -118,6 +118,13 @@ enum NotificationChannel {
   SMS
   EMAIL
   WHATSAPP
+  // Stored-and-surfaced-on-next-open notifications with no external
+  // delivery step — see processNotification()'s IN_APP case in
+  // notification-service/src/main.ts, which has handled this value since
+  // before this enum existed. kyc-service's KYC status notifications
+  // (see services/kyc-service/src/main.ts) send channel: "IN_APP", which
+  // would fail prisma.notification.create()'s enum validation without it.
+  IN_APP
 }
 
 enum NotificationStatus {

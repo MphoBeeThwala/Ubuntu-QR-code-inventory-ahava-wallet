@@ -7,18 +7,26 @@ import {
   createSuccessResponse,
   createErrorResponse,
 } from "@ahava/shared-errors";
-import { getRedisConnectionConfig } from "@ahava/shared-events";
+import { QUEUE_NAMES, getRedisConnectionConfig } from "@ahava/shared-events";
 import { Queue, Worker, Job } from "bullmq";
 import * as admin from "firebase-admin";
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const AfricasTalking = require("africastalking");
 import { SESClient, SendEmailCommand } from "@aws-sdk/client-ses";
+import { z } from "zod";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CONSTANTS
 // ─────────────────────────────────────────────────────────────────────────────
 
-const QUEUE_NAME = "notifications_dispatch";
+// Must match QUEUE_NAMES.NOTIFICATION_QUEUED ("notifications_queued") —
+// this used to be a hardcoded local string ("notifications_dispatch") that
+// didn't match what any other producer actually pushes to. kyc-service
+// (KYC document-received notices) and aml-service's MlroNotifier (AML flag
+// alerts) both enqueue via the shared QUEUE_NAMES constant; with the names
+// mismatched, every job they sent landed in a queue this worker never
+// listened on and was silently never delivered.
+const QUEUE_NAME = QUEUE_NAMES.NOTIFICATION_QUEUED;
 const PORT = process.env.PORT || 6005;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -253,6 +261,49 @@ app.get("/health", (req: Request, res: Response) => {
   );
 });
 
+// Type-shape validation layered in FRONT OF, not instead of, the existing
+// required-field checks below — see the identical helper in
+// payment-service/src/main.ts and auth-service/src/main.ts. `channel` is
+// constrained to the actual NotificationChannel enum values this service's
+// dispatch worker (processNotification, above) and the Prisma schema both
+// recognize, so an unsupported value is rejected here with a clear message
+// instead of failing later at prisma.notification.create() or silently
+// hitting the worker's `default: throw new Error("Unknown ... channel")`.
+function validateBody<T extends z.ZodTypeAny>(
+  schema: T,
+  body: unknown,
+  requestId?: string,
+): z.infer<T> {
+  const result = schema.safeParse(body);
+  if (!result.success) {
+    const issue = result.error.issues[0];
+    throw new AhavaError(
+      AhavaErrorCode.VAL_INVALID_INPUT,
+      issue
+        ? `${issue.path.join(".") || "body"}: ${issue.message}`
+        : "Invalid request body",
+      { requestId },
+    );
+  }
+  return result.data;
+}
+
+// WHATSAPP is a valid NotificationChannel enum value at the database level
+// (kept for a future integration) but processNotification() below has no
+// case for it — an accepted request would just fail at dispatch time with
+// "Unknown notification channel: WHATSAPP". Restricted to the channels the
+// worker can actually deliver until that's implemented.
+const notificationSendBodySchema = z.object({
+  userId: z.string().min(1).optional(),
+  channel: z.enum(["PUSH", "SMS", "EMAIL", "IN_APP"]).optional(),
+  title: z.string().max(200).optional(),
+  body: z.string().min(1).max(1000).optional(),
+  fcmToken: z.string().optional(),
+  phoneNumber: z.string().optional(),
+  emailAddress: z.string().optional(),
+  metadata: z.record(z.string()).optional(),
+});
+
 app.post(
   "/notifications/send",
   async (req: Request, res: Response, next: NextFunction) => {
@@ -266,12 +317,12 @@ app.post(
         phoneNumber,
         emailAddress,
         metadata,
-      } = req.body;
+      } = validateBody(notificationSendBodySchema, req.body, req.id);
 
-      if (!userId || !channel || !body) {
+      if (!userId || !channel || !title || !body) {
         throw new AhavaError(
           AhavaErrorCode.VAL_MISSING_REQUIRED_FIELD,
-          "userId, channel, and body are required",
+          "userId, channel, title, and body are required",
           { requestId: req.id },
         );
       }
@@ -280,7 +331,7 @@ app.post(
         data: {
           userId,
           channel,
-          title: title || null,
+          title,
           body,
           status: "PENDING",
           data: metadata ? JSON.stringify(metadata) : null,

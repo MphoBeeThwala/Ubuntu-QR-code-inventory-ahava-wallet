@@ -30,6 +30,7 @@ import {
   verifyJWT,
 } from "@ahava/shared-crypto";
 import { writeAuditLog } from "@ahava/shared-audit";
+import { z } from "zod";
 
 const app: express.Application = express();
 const prisma = new PrismaClient();
@@ -42,6 +43,39 @@ function compactIdempotencyKey(prefix: string, key: string): string {
     .digest("hex")
     .slice(0, 36);
 }
+
+// Type-shape validation layered in FRONT OF, not instead of, the existing
+// business-rule checks below (required-field presence, float/customer
+// balance sufficiency, etc. all stay exactly as they were — this only
+// rejects a field that's PRESENT but the wrong type before it reaches code
+// that assumes a number/string, e.g. amount arithmetic on a non-numeric
+// amountCents or a hash built from a non-string idempotencyKey). Mirrors
+// the identical helper in payment-service/src/main.ts and
+// auth-service/src/main.ts.
+function validateBody<T extends z.ZodTypeAny>(
+  schema: T,
+  body: unknown,
+  requestId?: string,
+): z.infer<T> {
+  const result = schema.safeParse(body);
+  if (!result.success) {
+    const issue = result.error.issues[0];
+    throw new AhavaError(
+      AhavaErrorCode.VAL_INVALID_INPUT,
+      issue
+        ? `${issue.path.join(".") || "body"}: ${issue.message}`
+        : "Invalid request body",
+      { requestId },
+    );
+  }
+  return result.data;
+}
+
+const cashInOutBodySchema = z.object({
+  customerWalletId: z.string().min(1).optional(),
+  amountCents: z.coerce.number().optional(),
+  idempotencyKey: z.string().min(1).max(100).optional(),
+});
 
 app.use(express.json());
 
@@ -419,7 +453,11 @@ app.post(
   requireAgentAuth,
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const { customerWalletId, amountCents, idempotencyKey } = req.body;
+      const { customerWalletId, amountCents, idempotencyKey } = validateBody(
+        cashInOutBodySchema,
+        req.body,
+        req.id,
+      );
 
       if (!customerWalletId || !amountCents || !idempotencyKey) {
         throw new AhavaError(
@@ -553,7 +591,11 @@ app.post(
   requireAgentAuth,
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const { customerWalletId, amountCents, idempotencyKey } = req.body;
+      const { customerWalletId, amountCents, idempotencyKey } = validateBody(
+        cashInOutBodySchema,
+        req.body,
+        req.id,
+      );
 
       if (!customerWalletId || !amountCents || !idempotencyKey) {
         throw new AhavaError(

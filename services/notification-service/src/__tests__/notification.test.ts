@@ -314,6 +314,7 @@ describe("POST /notifications/send", () => {
     await request(app).post("/notifications/send").send({
       userId: "user-001",
       channel: "SMS",
+      title: "OTP Code",
       body: "Your OTP is 123456",
       phoneNumber: "+27821234567",
     });
@@ -336,6 +337,7 @@ describe("POST /notifications/send", () => {
       .send({
         userId: "user-001",
         channel: "SMS",
+        title: "Transfer Sent",
         body: "Transfer of R50 sent",
         phoneNumber: "+27831234567",
         metadata: { transactionId: "txn-001" },
@@ -379,6 +381,7 @@ describe("POST /notifications/send", () => {
     const res = await request(app).post("/notifications/send").send({
       userId: "user-001",
       channel: "IN_APP",
+      title: "New Feature",
       body: "New feature available",
     });
 
@@ -389,7 +392,7 @@ describe("POST /notifications/send", () => {
   it("sets X-Request-ID response header", async () => {
     const res = await request(app)
       .post("/notifications/send")
-      .send({ userId: "user-001", channel: "IN_APP", body: "Test" });
+      .send({ userId: "user-001", channel: "IN_APP", title: "Test", body: "Test" });
 
     expect(res.headers["x-request-id"]).toBeDefined();
   });
@@ -424,7 +427,7 @@ describe("POST /notifications/send", () => {
 
     const res = await request(app)
       .post("/notifications/send")
-      .send({ userId: "user-001", channel: "IN_APP", body: "Test" });
+      .send({ userId: "user-001", channel: "IN_APP", title: "Test", body: "Test" });
 
     expect(res.status).toBe(500);
   });

@@ -10,12 +10,58 @@ import {
 import { Queue } from "bullmq";
 import { QUEUE_NAMES, getRedisConnectionConfig } from "@ahava/shared-events";
 import { writeAuditLog } from "@ahava/shared-audit";
+import { z } from "zod";
 
 const app = express();
 const prisma = new PrismaClient();
 const PORT = process.env.PORT || 6004;
 
 const redisConnection = getRedisConnectionConfig();
+
+// Type-shape validation layered in FRONT OF, not instead of, the existing
+// required-field checks below — see the identical helper in
+// payment-service/src/main.ts and auth-service/src/main.ts. This upload
+// endpoint accepts identity-document metadata (documentHash, s3Key) tied to
+// a userId, so a malformed value here (e.g. documentType outside the
+// Prisma enum) is worth rejecting cleanly before it reaches
+// prisma.kycDocument.create and surfaces as a raw Prisma error instead.
+function validateBody<T extends z.ZodTypeAny>(
+  schema: T,
+  body: unknown,
+  requestId?: string,
+): z.infer<T> {
+  const result = schema.safeParse(body);
+  if (!result.success) {
+    const issue = result.error.issues[0];
+    throw new AhavaError(
+      AhavaErrorCode.VAL_INVALID_INPUT,
+      issue
+        ? `${issue.path.join(".") || "body"}: ${issue.message}`
+        : "Invalid request body",
+      { requestId },
+    );
+  }
+  return result.data;
+}
+
+const kycDocumentUploadBodySchema = z.object({
+  userId: z.string().min(1).optional(),
+  documentType: z
+    .enum([
+      "SA_ID_BOOK",
+      "SA_ID_CARD",
+      "PASSPORT",
+      "ASYLUM_DOCUMENT",
+      "REFUGEE_DOCUMENT",
+      "PROOF_OF_ADDRESS",
+      "PROOF_OF_INCOME",
+      "BUSINESS_REGISTRATION",
+      "SELFIE",
+    ])
+    .optional(),
+  s3Key: z.string().min(1).max(500).optional(),
+  documentHash: z.string().min(1).max(64).optional(),
+});
 
 app.use(express.json());
 app.use((req: Request, res: Response, next: NextFunction) => {
@@ -69,7 +115,11 @@ app.post(
   "/kyc/document/upload",
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const { userId, documentType, s3Key, documentHash } = req.body;
+      const { userId, documentType, s3Key, documentHash } = validateBody(
+        kycDocumentUploadBodySchema,
+        req.body,
+        req.id,
+      );
 
       if (!userId || !documentType || !s3Key || !documentHash) {
         throw new AhavaError(

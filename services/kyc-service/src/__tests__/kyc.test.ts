@@ -102,7 +102,7 @@ describe("GET /kyc/user/:userId", () => {
 describe("POST /kyc/document/upload", () => {
   const validPayload = {
     userId: "user-uuid-1",
-    documentType: "SOUTH_AFRICAN_ID",
+    documentType: "SA_ID_BOOK",
     s3Key: "kyc/user-uuid-1/sa-id.jpg",
     documentHash: "abc123hash",
   };
@@ -111,7 +111,7 @@ describe("POST /kyc/document/upload", () => {
     const doc = {
       id: "doc-uuid-1",
       userId: "user-uuid-1",
-      documentType: "SOUTH_AFRICAN_ID",
+      documentType: "SA_ID_BOOK",
       s3Key: "kyc/user-uuid-1/sa-id.jpg",
       documentHash: "abc123hash",
       verificationStatus: "PENDING",
