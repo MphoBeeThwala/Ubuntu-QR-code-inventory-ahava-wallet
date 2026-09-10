@@ -29,3 +29,7 @@ data:
   # fail to dispatch (logged and marked FAILED, retried, then dropped)
   # without a real address configured.
   MLRO_ALERT_EMAIL: "compliance@ahava.example"
+  # kyc-service issues presigned S3 PUT URLs against this bucket for
+  # identity-document uploads (POST /kyc/document/upload-url). Replace with
+  # the real bucket name before deploying.
+  KYC_DOCUMENTS_BUCKET: "ahava-kyc-documents-prod"

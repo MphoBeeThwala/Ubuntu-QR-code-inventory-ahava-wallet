@@ -1,5 +1,35 @@
 import request from "supertest";
 import { Queue as MockedQueue } from "bullmq";
+import * as nodeCrypto from "crypto";
+import * as jwt from "jsonwebtoken";
+
+// Real RSA keypair + JWT_PUBLIC_KEY env var: requireAuth's verifyJWT() call
+// (packages/shared-crypto, not mocked in this file) falls back to reading
+// this env var when no explicit key is passed. Same recipe as
+// wallet-service/payment-service/agent-service's test suites.
+const { publicKey: testPublicKey, privateKey: testPrivateKey } =
+  nodeCrypto.generateKeyPairSync("rsa", {
+    modulusLength: 2048,
+    publicKeyEncoding: { type: "pkcs1", format: "pem" },
+    privateKeyEncoding: { type: "pkcs1", format: "pem" },
+  });
+process.env.JWT_PUBLIC_KEY = testPublicKey;
+
+function signToken(claims: Record<string, unknown>): string {
+  return jwt.sign(claims, testPrivateKey, {
+    algorithm: "RS256",
+    issuer: "ahava-ewallet",
+    expiresIn: "5m",
+  });
+}
+
+function customerAuthHeader(userId = "user-uuid-1"): string {
+  return `Bearer ${signToken({ sub: userId })}`;
+}
+
+function agentAuthHeader(): string {
+  return `Bearer ${signToken({ sub: "agent-user-1", role: "AGENT" })}`;
+}
 
 // ─── Mock PrismaClient ────────────────────────────────────────────
 const mockPrisma = {
@@ -39,6 +69,18 @@ jest.mock("bullmq", () => ({
     queueInstances.push(instance);
     return instance;
   }),
+}));
+
+// getSignedUrl performs real SigV4 signing, which needs SOME resolved AWS
+// credentials even though it never makes a network call — this sandbox
+// has none configured (no access keys, no IAM role), so it throws
+// CredentialsProviderError. Mocked so the test suite doesn't depend on
+// real AWS credentials being present; PutObjectCommand/S3Client stay real
+// since constructing them doesn't require credentials, only signing does.
+jest.mock("@aws-sdk/s3-request-presigner", () => ({
+  getSignedUrl: jest
+    .fn()
+    .mockResolvedValue("https://s3.af-south-1.amazonaws.com/mocked-presigned-url"),
 }));
 
 jest.mock("@ahava/shared-events", () => ({
@@ -85,7 +127,9 @@ describe("GET /kyc/user/:userId", () => {
       pepFlag: false,
     });
 
-    const res = await request(app).get("/kyc/user/user-uuid-1");
+    const res = await request(app)
+      .get("/kyc/user/user-uuid-1")
+      .set("Authorization", customerAuthHeader("user-uuid-1"));
     expect(res.status).toBe(200);
     expect(res.body.data.kyc.kycTier).toBe("TIER_0");
     expect(res.body.data.kyc.pepFlag).toBe(false);
@@ -93,7 +137,30 @@ describe("GET /kyc/user/:userId", () => {
 
   it("returns 403 when user not found", async () => {
     mockPrisma.user.findUnique.mockResolvedValue(null);
-    const res = await request(app).get("/kyc/user/nonexistent");
+    const res = await request(app)
+      .get("/kyc/user/nonexistent")
+      .set("Authorization", customerAuthHeader("nonexistent"));
+    expect(res.status).toBe(403);
+  });
+
+  // Regression coverage: this route (which includes pepFlag, a
+  // politically-exposed-person flag) had no authorization at all — any
+  // authenticated user could read any other user's KYC status.
+  it("rejects a non-owner, non-agent caller", async () => {
+    mockPrisma.user.findUnique.mockResolvedValue({
+      kycTier: "TIER_0",
+      kycStatus: "PENDING",
+      idVerifiedAt: null,
+      pepFlag: false,
+    });
+    const res = await request(app)
+      .get("/kyc/user/user-uuid-1")
+      .set("Authorization", customerAuthHeader("a-different-user"));
+    expect(res.status).toBe(403);
+  });
+
+  it("rejects without an Authorization header", async () => {
+    const res = await request(app).get("/kyc/user/user-uuid-1");
     expect(res.status).toBe(403);
   });
 });
@@ -121,6 +188,7 @@ describe("POST /kyc/document/upload", () => {
 
     const res = await request(app)
       .post("/kyc/document/upload")
+      .set("Authorization", customerAuthHeader("user-uuid-1"))
       .send(validPayload);
 
     expect(res.status).toBe(201);
@@ -136,7 +204,10 @@ describe("POST /kyc/document/upload", () => {
     const doc = { id: "doc-1", createdAt: new Date() };
     mockPrisma.kycDocument.create.mockResolvedValue(doc);
 
-    await request(app).post("/kyc/document/upload").send(validPayload);
+    await request(app)
+      .post("/kyc/document/upload")
+      .set("Authorization", customerAuthHeader("user-uuid-1"))
+      .send(validPayload);
 
     expect(MockedQueue).toHaveBeenCalledWith(
       "kyc:document:uploaded",
@@ -148,7 +219,10 @@ describe("POST /kyc/document/upload", () => {
     const doc = { id: "doc-2", createdAt: new Date() };
     mockPrisma.kycDocument.create.mockResolvedValue(doc);
 
-    await request(app).post("/kyc/document/upload").send(validPayload);
+    await request(app)
+      .post("/kyc/document/upload")
+      .set("Authorization", customerAuthHeader("user-uuid-1"))
+      .send(validPayload);
     await flushPromises();
 
     expect(queueInstances).toHaveLength(2);
@@ -168,6 +242,7 @@ describe("POST /kyc/document/upload", () => {
 
     const res = await request(app)
       .post("/kyc/document/upload")
+      .set("Authorization", customerAuthHeader("user-uuid-1"))
       .send(validPayload);
     await flushPromises();
 
@@ -186,6 +261,7 @@ describe("POST /kyc/document/upload", () => {
   it("returns 400 when required fields are missing", async () => {
     const res = await request(app)
       .post("/kyc/document/upload")
+      .set("Authorization", customerAuthHeader("user-uuid-1"))
       .send({ userId: "user-uuid-1" });
     expect(res.status).toBe(400);
   });
@@ -193,8 +269,26 @@ describe("POST /kyc/document/upload", () => {
   it("returns 400 when userId is missing", async () => {
     const res = await request(app)
       .post("/kyc/document/upload")
+      .set("Authorization", customerAuthHeader())
       .send({ documentType: "PASSPORT", s3Key: "x", documentHash: "y" });
     expect(res.status).toBe(400);
+  });
+
+  it("rejects without an Authorization header", async () => {
+    const res = await request(app)
+      .post("/kyc/document/upload")
+      .send(validPayload);
+    expect(res.status).toBe(403);
+    expect(mockPrisma.kycDocument.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects uploading a document for a different userId", async () => {
+    const res = await request(app)
+      .post("/kyc/document/upload")
+      .set("Authorization", customerAuthHeader("a-different-user"))
+      .send(validPayload);
+    expect(res.status).toBe(403);
+    expect(mockPrisma.kycDocument.create).not.toHaveBeenCalled();
   });
 });
 
@@ -215,6 +309,7 @@ describe("POST /kyc/tier-upgrade", () => {
 
     const res = await request(app)
       .post("/kyc/tier-upgrade")
+      .set("Authorization", agentAuthHeader())
       .send({ userId: "user-uuid-1", newTier: "TIER_1" });
 
     expect(res.status).toBe(200);
@@ -247,6 +342,7 @@ describe("POST /kyc/tier-upgrade", () => {
 
     await request(app)
       .post("/kyc/tier-upgrade")
+      .set("Authorization", agentAuthHeader())
       .send({ userId: "user-uuid-1", newTier: "TIER_2" });
 
     expect(mockPrisma.wallet.updateMany).toHaveBeenCalledWith(
@@ -273,6 +369,7 @@ describe("POST /kyc/tier-upgrade", () => {
 
     await request(app)
       .post("/kyc/tier-upgrade")
+      .set("Authorization", agentAuthHeader())
       .send({ userId: "user-uuid-1", newTier: "TIER_1" });
 
     expect(mockPrisma.auditLog.create).toHaveBeenCalledWith(
@@ -296,6 +393,7 @@ describe("POST /kyc/tier-upgrade", () => {
 
     await request(app)
       .post("/kyc/tier-upgrade")
+      .set("Authorization", agentAuthHeader())
       .send({ userId: "user-uuid-1", newTier: "TIER_X" });
 
     expect(mockPrisma.wallet.updateMany).toHaveBeenCalledWith(
@@ -312,6 +410,7 @@ describe("POST /kyc/tier-upgrade", () => {
   it("returns 400 when userId is missing", async () => {
     const res = await request(app)
       .post("/kyc/tier-upgrade")
+      .set("Authorization", agentAuthHeader())
       .send({ newTier: "TIER_1" });
     expect(res.status).toBe(400);
   });
@@ -319,6 +418,7 @@ describe("POST /kyc/tier-upgrade", () => {
   it("returns 400 when newTier is missing", async () => {
     const res = await request(app)
       .post("/kyc/tier-upgrade")
+      .set("Authorization", agentAuthHeader())
       .send({ userId: "user-uuid-1" });
     expect(res.status).toBe(400);
   });
@@ -327,6 +427,7 @@ describe("POST /kyc/tier-upgrade", () => {
     mockPrisma.user.findUnique.mockResolvedValue(null);
     const res = await request(app)
       .post("/kyc/tier-upgrade")
+      .set("Authorization", agentAuthHeader())
       .send({ userId: "nonexistent", newTier: "TIER_1" });
     expect(res.status).toBe(403);
   });
@@ -336,9 +437,99 @@ describe("POST /kyc/tier-upgrade", () => {
 
     const res = await request(app)
       .post("/kyc/tier-upgrade")
+      .set("Authorization", agentAuthHeader())
       .send({ userId: "user-uuid-1", newTier: "TIER_1" });
 
     expect(res.status).toBe(500);
     expect(res.body.error.code).toBe("INTERNAL_SERVER_ERROR");
+  });
+
+  // Regression coverage: this route would grant ANY userId TIER_2 limits
+  // (the highest in the system) with zero authorization — a customer could
+  // self-upgrade past real document review entirely.
+  it("rejects without an agent role", async () => {
+    const res = await request(app)
+      .post("/kyc/tier-upgrade")
+      .set("Authorization", customerAuthHeader("user-uuid-1"))
+      .send({ userId: "user-uuid-1", newTier: "TIER_2" });
+    expect(res.status).toBe(403);
+    expect(mockPrisma.user.update).not.toHaveBeenCalled();
+  });
+
+  it("rejects without an Authorization header", async () => {
+    const res = await request(app)
+      .post("/kyc/tier-upgrade")
+      .send({ userId: "user-uuid-1", newTier: "TIER_2" });
+    expect(res.status).toBe(403);
+    expect(mockPrisma.user.update).not.toHaveBeenCalled();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────
+describe("POST /kyc/document/upload-url", () => {
+  const originalBucket = process.env.KYC_DOCUMENTS_BUCKET;
+
+  beforeEach(() => {
+    process.env.KYC_DOCUMENTS_BUCKET = "test-kyc-bucket";
+  });
+
+  afterEach(() => {
+    process.env.KYC_DOCUMENTS_BUCKET = originalBucket;
+  });
+
+  it("returns a presigned upload URL and an s3Key scoped to the caller", async () => {
+    const res = await request(app)
+      .post("/kyc/document/upload-url")
+      .set("Authorization", customerAuthHeader("user-uuid-1"))
+      .send({ documentType: "SA_ID_BOOK", contentType: "image/jpeg" });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.uploadUrl).toEqual(expect.any(String));
+    expect(res.body.data.s3Key).toMatch(
+      /^kyc-documents\/user-uuid-1\/SA_ID_BOOK\/.+\.jpg$/,
+    );
+    expect(res.body.data.expiresIn).toBe(300);
+  });
+
+  it("defaults to application/pdf when contentType is omitted", async () => {
+    const res = await request(app)
+      .post("/kyc/document/upload-url")
+      .set("Authorization", customerAuthHeader("user-uuid-1"))
+      .send({ documentType: "PROOF_OF_ADDRESS" });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.s3Key).toMatch(/\.pdf$/);
+  });
+
+  it("returns 400 when documentType is missing", async () => {
+    const res = await request(app)
+      .post("/kyc/document/upload-url")
+      .set("Authorization", customerAuthHeader("user-uuid-1"))
+      .send({});
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 400 for an unsupported contentType", async () => {
+    const res = await request(app)
+      .post("/kyc/document/upload-url")
+      .set("Authorization", customerAuthHeader("user-uuid-1"))
+      .send({ documentType: "SA_ID_BOOK", contentType: "text/html" });
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 503 when KYC_DOCUMENTS_BUCKET is not configured", async () => {
+    delete process.env.KYC_DOCUMENTS_BUCKET;
+    const res = await request(app)
+      .post("/kyc/document/upload-url")
+      .set("Authorization", customerAuthHeader("user-uuid-1"))
+      .send({ documentType: "SA_ID_BOOK" });
+    expect(res.status).toBe(503);
+  });
+
+  it("rejects without an Authorization header", async () => {
+    const res = await request(app)
+      .post("/kyc/document/upload-url")
+      .send({ documentType: "SA_ID_BOOK" });
+    expect(res.status).toBe(403);
   });
 });

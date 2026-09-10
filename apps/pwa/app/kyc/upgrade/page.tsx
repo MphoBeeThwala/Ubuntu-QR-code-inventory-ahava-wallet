@@ -5,58 +5,65 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { apiClient } from "@/lib/api-client";
 
-type KycTier = "KYC_TIER_0" | "KYC_TIER_1" | "KYC_TIER_2" | "KYC_TIER_3";
+// Matches the real KycTier enum and tierLimits in kyc-service/src/main.ts
+// and wallet-service/src/main.ts — this used to be a fabricated 4-tier
+// scale ("KYC_TIER_0".."KYC_TIER_3") with limits that didn't correspond to
+// anything the backend actually enforces.
+type KycTier = "TIER_0" | "TIER_1" | "TIER_2";
 
 interface KycStatus {
   kycTier: KycTier;
-  userId: string;
+  kycStatus: string;
+  idVerifiedAt: string | null;
+  pepFlag: boolean;
 }
 
 const TIER_INFO: Record<
   KycTier,
   { label: string; limit: string; docs: string[]; color: string }
 > = {
-  KYC_TIER_0: {
+  TIER_0: {
     label: "Unverified",
-    limit: "R500/day",
+    limit: "R500/day · R2 000/month",
     docs: [],
     color: "text-gray-500",
   },
-  KYC_TIER_1: {
+  TIER_1: {
     label: "Basic Verified",
-    limit: "R5 000/day · R25 000/month",
-    docs: ["South African ID number", "Selfie photo"],
+    limit: "R2 000/day · R10 000/month",
+    docs: ["South African ID document", "Selfie photo"],
     color: "text-blue-600",
   },
-  KYC_TIER_2: {
+  TIER_2: {
     label: "FICA Verified",
-    limit: "R25 000/day · R100 000/month",
+    limit: "R5 000/day · R50 000/month",
     docs: ["SA ID document (photo)", "Proof of address (≤3 months)"],
     color: "text-ahava-600",
   },
-  KYC_TIER_3: {
-    label: "Full Compliance",
-    limit: "R100 000/day · Unlimited monthly",
-    docs: ["SA ID document", "Proof of address", "Source of funds declaration"],
-    color: "text-yellow-600",
-  },
 };
 
+// Matches the real DocumentType enum in prisma/schema.prisma — this used
+// to offer "SA_ID" and "SOURCE_OF_FUNDS", neither of which is a valid
+// value (the closest real ones are SA_ID_BOOK/SA_ID_CARD, and there is no
+// source-of-funds document type at all), so kyc-service's validation
+// rejected every upload of those two types outright.
 const DOCUMENT_TYPES = [
-  { value: "SA_ID", label: "SA ID Document / Smart Card" },
+  { value: "SA_ID_BOOK", label: "SA ID Book" },
+  { value: "SA_ID_CARD", label: "SA Smart ID Card" },
   { value: "PASSPORT", label: "Passport" },
   {
     value: "PROOF_OF_ADDRESS",
     label: "Proof of Address (utility bill, bank statement)",
   },
-  { value: "SOURCE_OF_FUNDS", label: "Source of Funds Declaration" },
+  { value: "SELFIE", label: "Selfie Photo" },
 ];
 
 export default function KycUpgradePage() {
   const router = useRouter();
+  const [userId, setUserId] = useState<string | null>(null);
   const [kycStatus, setKycStatus] = useState<KycStatus | null>(null);
   const [loading, setLoading] = useState(true);
-  const [docType, setDocType] = useState("SA_ID");
+  const [docType, setDocType] = useState("SA_ID_BOOK");
   const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   const [success, setSuccess] = useState(false);
@@ -64,15 +71,16 @@ export default function KycUpgradePage() {
 
   useEffect(() => {
     const token = localStorage.getItem("accessToken");
-    const userId = localStorage.getItem("userId");
-    if (!token || !userId) {
+    const storedUserId = localStorage.getItem("userId");
+    if (!token || !storedUserId) {
       router.replace("/auth/login");
       return;
     }
 
+    setUserId(storedUserId);
     apiClient.setTokens(token, localStorage.getItem("refreshToken") || "");
     apiClient
-      .getKycStatus(userId)
+      .getKycStatus(storedUserId)
       .then((res) => {
         if (res.success && res.data) {
           setKycStatus(res.data as KycStatus);
@@ -87,11 +95,15 @@ export default function KycUpgradePage() {
       setError("Please select a document to upload");
       return;
     }
+    if (!userId) {
+      setError("Your session has expired — please log in again.");
+      return;
+    }
 
     setUploading(true);
     setError("");
     try {
-      const res = await apiClient.uploadKycDocument(file, docType);
+      const res = await apiClient.uploadKycDocument(userId, file, docType);
       if (res.success) {
         setSuccess(true);
       } else {
@@ -104,16 +116,14 @@ export default function KycUpgradePage() {
     }
   };
 
-  const currentTier = (kycStatus?.kycTier ?? "KYC_TIER_0") as KycTier;
+  const currentTier = (kycStatus?.kycTier ?? "TIER_0") as KycTier;
   const currentInfo = TIER_INFO[currentTier];
   const nextTier = (
-    currentTier === "KYC_TIER_0"
-      ? "KYC_TIER_1"
-      : currentTier === "KYC_TIER_1"
-        ? "KYC_TIER_2"
-        : currentTier === "KYC_TIER_2"
-          ? "KYC_TIER_3"
-          : null
+    currentTier === "TIER_0"
+      ? "TIER_1"
+      : currentTier === "TIER_1"
+        ? "TIER_2"
+        : null
   ) as KycTier | null;
 
   return (
@@ -223,7 +233,7 @@ export default function KycUpgradePage() {
                           : "bg-gray-200 text-gray-500"
                       }`}
                     >
-                      {isAchieved ? "✓" : tier.replace("KYC_TIER_", "")}
+                      {isAchieved ? "✓" : tier.replace("TIER_", "")}
                     </div>
                     <div>
                       <p className={`text-sm font-semibold ${info.color}`}>

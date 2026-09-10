@@ -10,6 +10,9 @@ import {
 import { Queue } from "bullmq";
 import { QUEUE_NAMES, getRedisConnectionConfig } from "@ahava/shared-events";
 import { writeAuditLog } from "@ahava/shared-audit";
+import { parseBearerToken, verifyJWT } from "@ahava/shared-crypto";
+import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { z } from "zod";
 
 const app = express();
@@ -17,6 +20,112 @@ const prisma = new PrismaClient();
 const PORT = process.env.PORT || 6004;
 
 const redisConnection = getRedisConnectionConfig();
+
+// Presigned-upload flow for identity documents: the client asks this
+// service for a short-lived, single-object S3 write URL (this endpoint),
+// PUTs the file bytes directly to S3 (server never sees them, avoiding a
+// multipart-body hop through api-gateway's JSON-only proxying), then calls
+// POST /kyc/document/upload with the resulting s3Key + a client-computed
+// hash to register the document. Previously there was no way to get a
+// document into S3 at all — the PWA posted a raw file as multipart
+// form-data straight to /kyc/document/upload, which has only ever accepted
+// a JSON manifest referencing a key that nothing generated.
+const s3Client = new S3Client({
+  region: process.env.AWS_REGION || "af-south-1",
+});
+const UPLOAD_URL_TTL_SECONDS = 300;
+const ALLOWED_UPLOAD_CONTENT_TYPES: Record<string, string> = {
+  "image/jpeg": "jpg",
+  "image/png": "png",
+  "application/pdf": "pdf",
+};
+
+// This file had no authorization anywhere — GET /kyc/user/:userId (which
+// includes pepFlag, a politically-exposed-person flag) was readable by any
+// authenticated caller for any userId, and POST /kyc/tier-upgrade would
+// grant ANY userId TIER_2 limits (the highest spending limits in the
+// system) with zero identity verification — a customer could self-upgrade
+// past actual KYC review entirely. Grepped for callers of tier-upgrade
+// across every other service and the frontends: none exist, so this was
+// also completely orphaned from any legitimate internal caller. Same
+// requireAuth/assertOwnerOrAgent/requireAgentRole pattern as
+// wallet-service and payment-service's identical fixes this session.
+async function requireAuth(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  const token = parseBearerToken(req.headers.authorization);
+  if (!token) {
+    const err = new AhavaError(
+      AhavaErrorCode.AUTH_UNAUTHORIZED,
+      "Authorization header missing or malformed",
+      { requestId: req.id },
+    );
+    res.status(err.statusCode).json(createErrorResponse(err));
+    return;
+  }
+
+  try {
+    const payload = await verifyJWT(token);
+    req.userId = (payload.userId ?? payload.sub) as string | undefined;
+    req.role = payload.role as string | undefined;
+    if (!req.userId) {
+      throw new Error("token has no subject");
+    }
+    next();
+  } catch {
+    const err = new AhavaError(
+      AhavaErrorCode.AUTH_INVALID_TOKEN,
+      "Invalid or expired access token",
+      { requestId: req.id },
+    );
+    res.status(err.statusCode).json(createErrorResponse(err));
+  }
+}
+
+/** Throws unless the caller is an AGENT or the resource's actual owner. */
+function assertOwnerOrAgent(req: Request, resourceUserId: string): void {
+  if (req.role === "AGENT") return;
+  if (req.userId && req.userId === resourceUserId) return;
+  throw new AhavaError(
+    AhavaErrorCode.AUTH_UNAUTHORIZED,
+    "You do not have access to this resource",
+    { requestId: req.id },
+  );
+}
+
+async function requireAgentRole(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  const token = parseBearerToken(req.headers.authorization);
+  if (!token) {
+    const err = new AhavaError(
+      AhavaErrorCode.AUTH_UNAUTHORIZED,
+      "Authorization header missing or malformed",
+      { requestId: req.id },
+    );
+    res.status(err.statusCode).json(createErrorResponse(err));
+    return;
+  }
+
+  try {
+    const payload = await verifyJWT(token);
+    if (payload.role !== "AGENT") {
+      throw new Error("insufficient role");
+    }
+    next();
+  } catch {
+    const err = new AhavaError(
+      AhavaErrorCode.AUTH_UNAUTHORIZED,
+      "This action requires an authorized agent account",
+      { requestId: req.id },
+    );
+    res.status(err.statusCode).json(createErrorResponse(err));
+  }
+}
 
 // Type-shape validation layered in FRONT OF, not instead of, the existing
 // required-field checks below — see the identical helper in
@@ -43,6 +152,23 @@ function validateBody<T extends z.ZodTypeAny>(
   }
   return result.data;
 }
+
+const kycDocumentUploadUrlBodySchema = z.object({
+  documentType: z
+    .enum([
+      "SA_ID_BOOK",
+      "SA_ID_CARD",
+      "PASSPORT",
+      "ASYLUM_DOCUMENT",
+      "REFUGEE_DOCUMENT",
+      "PROOF_OF_ADDRESS",
+      "PROOF_OF_INCOME",
+      "BUSINESS_REGISTRATION",
+      "SELFIE",
+    ])
+    .optional(),
+  contentType: z.enum(["image/jpeg", "image/png", "application/pdf"]).optional(),
+});
 
 const kycDocumentUploadBodySchema = z.object({
   userId: z.string().min(1).optional(),
@@ -82,9 +208,12 @@ app.get("/health", (req, res) => {
 // GET /kyc/user/:userId - Get KYC status
 app.get(
   "/kyc/user/:userId",
+  requireAuth,
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { userId } = req.params;
+      assertOwnerOrAgent(req, userId);
+
       const user = await prisma.user.findUnique({
         where: { id: userId },
         select: {
@@ -110,9 +239,83 @@ app.get(
   },
 );
 
+// POST /kyc/document/upload-url - Get a presigned S3 URL to upload a
+// document to, before calling POST /kyc/document/upload to register it.
+app.post(
+  "/kyc/document/upload-url",
+  requireAuth,
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { documentType, contentType } = validateBody(
+        kycDocumentUploadUrlBodySchema,
+        req.body,
+        req.id,
+      );
+
+      if (!documentType) {
+        throw new AhavaError(
+          AhavaErrorCode.VAL_MISSING_REQUIRED_FIELD,
+          "documentType is required",
+          { requestId: req.id },
+        );
+      }
+
+      // Read fresh on every call, not cached into a module-level constant,
+      // so tests can toggle this per-suite regardless of when the env var
+      // is set relative to module load — same reasoning as
+      // SANCTIONS_SCREENING_ENABLED in payment-service/src/main.ts.
+      const kycDocumentsBucket = process.env.KYC_DOCUMENTS_BUCKET || "";
+      if (!kycDocumentsBucket) {
+        throw new AhavaError(
+          AhavaErrorCode.INTERNAL_SERVICE_UNAVAILABLE,
+          "Document uploads are not configured (KYC_DOCUMENTS_BUCKET unset)",
+          { requestId: req.id },
+        );
+      }
+
+      const resolvedContentType = contentType || "application/pdf";
+      const extension = ALLOWED_UPLOAD_CONTENT_TYPES[resolvedContentType];
+      if (!extension) {
+        throw new AhavaError(
+          AhavaErrorCode.VAL_INVALID_INPUT,
+          "contentType must be one of: " +
+            Object.keys(ALLOWED_UPLOAD_CONTENT_TYPES).join(", "),
+          { requestId: req.id },
+        );
+      }
+
+      // req.userId, not a body field — a caller can only ever request an
+      // upload URL for their own document, same as the ownership check on
+      // POST /kyc/document/upload below (agents aren't expected to upload
+      // documents on a customer's behalf, unlike wallet actions, so no
+      // AGENT bypass here).
+      const s3Key = `kyc-documents/${req.userId}/${documentType}/${uuidv4()}.${extension}`;
+
+      const command = new PutObjectCommand({
+        Bucket: kycDocumentsBucket,
+        Key: s3Key,
+        ContentType: resolvedContentType,
+      });
+      const uploadUrl = await getSignedUrl(s3Client, command, {
+        expiresIn: UPLOAD_URL_TTL_SECONDS,
+      });
+
+      res.json(
+        createSuccessResponse(
+          { uploadUrl, s3Key, expiresIn: UPLOAD_URL_TTL_SECONDS },
+          req.id,
+        ),
+      );
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
 // POST /kyc/document/upload - Upload KYC document
 app.post(
   "/kyc/document/upload",
+  requireAuth,
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { userId, documentType, s3Key, documentHash } = validateBody(
@@ -128,6 +331,8 @@ app.post(
           { requestId: req.id },
         );
       }
+
+      assertOwnerOrAgent(req, userId);
 
       const doc = await prisma.kycDocument.create({
         data: {
@@ -178,8 +383,14 @@ app.post(
 );
 
 // POST /kyc/tier-upgrade - Upgrade KYC tier
+// Grants higher spending limits (up to TIER_2 = R25,000 max balance) — this
+// must follow real document review, not be self-service. Orphaned from any
+// legitimate caller today (grepped every service and frontend); agent role
+// required as an immediate stopgap, same bar as wallet-service's
+// suspend/freeze/limits routes.
 app.post(
   "/kyc/tier-upgrade",
+  requireAgentRole,
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { userId, newTier } = req.body;
@@ -275,6 +486,8 @@ declare global {
   namespace Express {
     interface Request {
       id?: string;
+      userId?: string;
+      role?: string;
     }
   }
 }

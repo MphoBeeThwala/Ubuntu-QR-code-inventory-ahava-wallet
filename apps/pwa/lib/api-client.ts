@@ -276,9 +276,24 @@ class AhavaApiClient {
   }
 
   // KYC Methods
-  async getKycStatus(userId: string): Promise<ApiResponse> {
+  async getKycStatus(userId: string): Promise<
+    ApiResponse<{
+      kycTier: string;
+      kycStatus: string;
+      idVerifiedAt: string | null;
+      pepFlag: boolean;
+    }>
+  > {
     const response = await this.client.get(`/kyc/user/${userId}`);
-    return response.data;
+    const raw = response.data;
+    // kyc-service wraps the status under a `kyc` key — this used to be
+    // passed through unwrapped, so kycTier was always undefined and the
+    // upgrade page permanently displayed the TIER_0 fallback regardless of
+    // the user's real tier.
+    if (raw.success && raw.data?.kyc) {
+      return { ...raw, data: raw.data.kyc };
+    }
+    return raw;
   }
 
   async getUserDetails(): Promise<ApiResponse<{ kycTier: string }>> {
@@ -293,14 +308,53 @@ class AhavaApiClient {
     return raw;
   }
 
+  // Uploads a KYC document in three steps: (1) ask kyc-service for a
+  // short-lived presigned S3 URL scoped to the caller's own account, (2)
+  // PUT the file bytes directly to S3 — never through api-gateway, whose
+  // proxy only parses JSON bodies and would silently drop a multipart
+  // upload — (3) compute a SHA-256 hash of the file and register the
+  // document with kyc-service. Previously this posted the raw file as
+  // multipart form data straight to /kyc/document/upload, an endpoint that
+  // has only ever accepted a JSON manifest referencing an S3 key nothing
+  // generated — every upload silently failed end to end.
   async uploadKycDocument(
+    userId: string,
     file: File,
     documentType: string,
   ): Promise<ApiResponse> {
-    const formData = new FormData();
-    formData.append("file", file);
-    formData.append("documentType", documentType);
-    const response = await this.client.post("/kyc/document/upload", formData);
+    const urlResponse = await this.client.post("/kyc/document/upload-url", {
+      documentType,
+      contentType: file.type,
+    });
+    const urlData = urlResponse.data;
+    if (!urlData.success) return urlData;
+    const { uploadUrl, s3Key } = urlData.data;
+
+    const putResponse = await fetch(uploadUrl, {
+      method: "PUT",
+      headers: { "Content-Type": file.type },
+      body: file,
+    });
+    if (!putResponse.ok) {
+      throw new Error(
+        `Failed to upload document to storage (${putResponse.status})`,
+      );
+    }
+
+    const hashBuffer = await crypto.subtle.digest(
+      "SHA-256",
+      await file.arrayBuffer(),
+    );
+    const documentHash = Array.from(new Uint8Array(hashBuffer))
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("");
+
+    const response = await this.client.post("/kyc/document/upload", {
+      userId,
+      documentType,
+      s3Key,
+      documentHash,
+    });
     return response.data;
   }
 
