@@ -6,6 +6,7 @@ import { AhavaError, AhavaErrorCode, createSuccessResponse, createErrorResponse 
 import { Queue } from "bullmq";
 import { QUEUE_NAMES, getRedisConnectionConfig } from "@ahava/shared-events";
 import { writeAuditLog } from "@ahava/shared-audit";
+import { parseBearerToken, verifyJWT } from "@ahava/shared-crypto";
 
 const app = express();
 const prisma = new PrismaClient();
@@ -79,6 +80,59 @@ async function callService(service: string, endpoint: string, method: string, pa
   throw new AhavaError(AhavaErrorCode.INTERNAL_SERVER_ERROR, `Service ${service} unavailable: ${lastError?.message}`);
 }
 
+// senderWalletId used to be trusted straight from the request body with no
+// check that the authenticated caller actually owned it — any customer
+// could drain funds from ANY wallet by orchestrating a payment through it,
+// same vulnerability class fixed in wallet-service and payment-service
+// this session. Not currently reachable through api-gateway (missing from
+// its routing table) or the internet (this service's k8s Service is
+// ClusterIP-only), but that's exactly the kind of thing a routing change
+// could silently undo, and the fix costs nothing to apply now.
+async function requireAuth(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  const token = parseBearerToken(req.headers.authorization);
+  if (!token) {
+    const err = new AhavaError(
+      AhavaErrorCode.AUTH_UNAUTHORIZED,
+      "Authorization header missing or malformed",
+      { requestId: req.id },
+    );
+    res.status(err.statusCode).json(createErrorResponse(err));
+    return;
+  }
+
+  try {
+    const payload = await verifyJWT(token);
+    req.userId = (payload.userId ?? payload.sub) as string | undefined;
+    req.role = payload.role as string | undefined;
+    if (!req.userId) {
+      throw new Error("token has no subject");
+    }
+    next();
+  } catch {
+    const err = new AhavaError(
+      AhavaErrorCode.AUTH_INVALID_TOKEN,
+      "Invalid or expired access token",
+      { requestId: req.id },
+    );
+    res.status(err.statusCode).json(createErrorResponse(err));
+  }
+}
+
+/** Throws unless the caller is an AGENT or the resource's actual owner. */
+function assertOwnerOrAgent(req: Request, resourceUserId: string): void {
+  if (req.role === "AGENT") return;
+  if (req.userId && req.userId === resourceUserId) return;
+  throw new AhavaError(
+    AhavaErrorCode.AUTH_UNAUTHORIZED,
+    "You do not have access to this resource",
+    { requestId: req.id },
+  );
+}
+
 app.use(express.json());
 app.use((req: Request, res: Response, next: NextFunction) => {
   const incoming = req.get("X-Request-ID");
@@ -91,11 +145,14 @@ app.get("/health", (req, res) => {
   res.json(createSuccessResponse({ status: "ok", service: "payment-orchestrator", circuitBreakers: Object.entries(circuitBreakers).map(([svc, state]) => ({ service: svc, state: state.state, failures: state.failures })) }, req.id));
 });
 
-app.post("/orchestrate/payment", async (req: Request, res: Response, next: NextFunction) => {
+app.post("/orchestrate/payment", requireAuth, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { senderWalletId, recipientWalletId, recipientPhone, amountCents, description, idempotencyKey, deviceId, ipAddress } = req.body;
     if (!senderWalletId || amountCents == null || !idempotencyKey) throw new AhavaError(AhavaErrorCode.VAL_MISSING_REQUIRED_FIELD, "Missing senderWalletId, amountCents, or idempotencyKey", { requestId: req.id });
     if (!recipientWalletId && !recipientPhone) throw new AhavaError(AhavaErrorCode.VAL_MISSING_REQUIRED_FIELD, "Provide recipientWalletId or recipientPhone", { requestId: req.id });
+
+    const senderWalletForAuth = await prisma.wallet.findUnique({ where: { id: senderWalletId }, select: { userId: true } });
+    if (senderWalletForAuth) assertOwnerOrAgent(req, senderWalletForAuth.userId);
 
     const cached = await redis.get(`saga:${idempotencyKey}`);
     if (cached) { const result = JSON.parse(cached); if (result.status === "COMPLETED") return res.json(createSuccessResponse(result, req.id)); }
@@ -142,10 +199,13 @@ app.post("/orchestrate/payment", async (req: Request, res: Response, next: NextF
   } catch (error) { next(error); }
 });
 
-app.post("/orchestrate/payshap", async (req: Request, res: Response, next: NextFunction) => {
+app.post("/orchestrate/payshap", requireAuth, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { senderWalletId, creditorAccountRef, creditorName, amountCents, remittanceInfo, idempotencyKey } = req.body;
     if (!senderWalletId || !creditorAccountRef || amountCents == null || !idempotencyKey) throw new AhavaError(AhavaErrorCode.VAL_MISSING_REQUIRED_FIELD, "Missing required fields", { requestId: req.id });
+
+    const senderWalletForAuth = await prisma.wallet.findUnique({ where: { id: senderWalletId }, select: { userId: true } });
+    if (senderWalletForAuth) assertOwnerOrAgent(req, senderWalletForAuth.userId);
 
     const sagaId = uuidv4();
     const debitResult = await callService("payment", "/payments", "POST", { senderWalletId, receiverWalletId: "PAYSHAP_ESCROW", amountCents, description: `PayShap to ${creditorName}`, idempotencyKey: `payshap-${idempotencyKey}`, paymentMethod: "PAYSHAP" });
@@ -161,7 +221,7 @@ app.post("/orchestrate/payshap", async (req: Request, res: Response, next: NextF
   } catch (error) { next(error); }
 });
 
-app.get("/orchestrate/saga/:sagaId", async (req: Request, res: Response, next: NextFunction) => {
+app.get("/orchestrate/saga/:sagaId", requireAuth, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { sagaId } = req.params;
     const keys = await redis.keys("saga:*");
@@ -186,4 +246,4 @@ export function startServer() {
 if (require.main === module) startServer();
 export default app;
 
-declare global { namespace Express { interface Request { id?: string; } } }
+declare global { namespace Express { interface Request { id?: string; userId?: string; role?: string; } } }
