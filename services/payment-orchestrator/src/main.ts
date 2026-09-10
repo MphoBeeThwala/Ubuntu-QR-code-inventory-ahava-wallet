@@ -56,13 +56,21 @@ const SERVICE_URLS = {
   aml: process.env.AML_SERVICE_URL || "http://localhost:6007",
 };
 
+// Per-attempt timeout — without it a hung downstream service blocks each
+// retry attempt indefinitely instead of failing fast into the next one,
+// defeating the point of the retry loop below. Matches the
+// AbortSignal.timeout() pattern used for the AML screening call in
+// payment-service/src/main.ts and the gateway proxy in
+// api-gateway/src/main.ts.
+const CALL_SERVICE_TIMEOUT_MS = Number(process.env.CALL_SERVICE_TIMEOUT_MS || 10_000);
+
 async function callService(service: string, endpoint: string, method: string, payload: Record<string, unknown>, retries = 3): Promise<Record<string, unknown>> {
   if (!checkCircuit(service)) throw new AhavaError(AhavaErrorCode.INTERNAL_SERVER_ERROR, `Service ${service} circuit OPEN`);
   const url = `${SERVICE_URLS[service as keyof typeof SERVICE_URLS]}${endpoint}`;
   let lastError: Error | null = null;
   for (let attempt = 0; attempt < retries; attempt++) {
     try {
-      const response = await fetch(url, { method, headers: { "Content-Type": "application/json", "X-Request-ID": uuidv4() }, body: JSON.stringify(payload) });
+      const response = await fetch(url, { method, headers: { "Content-Type": "application/json", "X-Request-ID": uuidv4() }, body: JSON.stringify(payload), signal: AbortSignal.timeout(CALL_SERVICE_TIMEOUT_MS) });
       if (!response.ok) throw new Error(`HTTP ${response.status}: ${await response.text()}`);
       const data = await response.json(); recordSuccess(service); return data as Record<string, unknown>;
     } catch (err) { lastError = err instanceof Error ? err : new Error(String(err)); if (attempt < retries - 1) await new Promise((r) => setTimeout(r, 1000 * (attempt + 1))); }

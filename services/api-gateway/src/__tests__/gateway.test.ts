@@ -35,6 +35,12 @@ jest.mock("ioredis", () => {
   }));
 });
 
+// Read once at module load into a constant in main.ts, so this must be set
+// before importing it below. Kept short so the timeout test actually
+// exercises AbortSignal.timeout() firing rather than waiting out the real
+// 15s default.
+process.env.PROXY_TIMEOUT_MS = "50";
+
 import app from "../main";
 import { setPublicKeyForTesting } from "../middleware/auth.middleware";
 
@@ -187,5 +193,48 @@ describe("API Gateway", () => {
     const [, fetchOpts] = fetchMock.mock.calls[0];
     const headers = (fetchOpts?.headers ?? {}) as Record<string, string>;
     expect(headers["X-Request-ID"]).toBe(res.headers["x-request-id"]);
+  });
+
+  it("returns 503 instead of hanging when the downstream service never responds", async () => {
+    const { privateKey, publicKey } = crypto.generateKeyPairSync("rsa", {
+      modulusLength: 2048,
+    });
+    setPublicKeyForTesting(
+      publicKey.export({ type: "pkcs1", format: "pem" }) as string,
+    );
+    const token = jwt.sign(
+      { sub: "user-1", deviceId: "device-1" },
+      privateKey.export({ type: "pkcs1", format: "pem" }),
+      {
+        algorithm: "RS256",
+        issuer: "ahava-ewallet",
+        audience: "ahava-api",
+        expiresIn: "5m",
+      },
+    );
+
+    // A fetch that never resolves on its own — only settles if the caller's
+    // AbortSignal fires, the same way undici's real fetch behaves against
+    // AbortSignal.timeout(). Without proxyRequest's timeout, this request
+    // would hang for the lifetime of the test run.
+    const hangingFetch = jest.fn(
+      (_url: string, init?: { signal?: AbortSignal }) =>
+        new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => {
+            const err = new Error("This operation was aborted");
+            err.name = "TimeoutError";
+            reject(err);
+          });
+        }),
+    );
+    (globalThis as unknown as { fetch: typeof fetch }).fetch =
+      hangingFetch as unknown as typeof fetch;
+
+    const res = await request(app)
+      .get("/wallets/lookup?walletNumber=AHV-0000-0001")
+      .set("Authorization", `Bearer ${token}`);
+
+    expect(res.status).toBe(503);
+    expect(res.body.success).toBe(false);
   });
 });

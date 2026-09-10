@@ -229,6 +229,13 @@ function serviceBaseUrlForPath(path: string): string | null {
   return null;
 }
 
+// Without this, a hung downstream service (wallet-service, payment-service,
+// etc.) hangs the gateway request indefinitely too — under load that holds
+// open connections until the process runs out of them. Matches the
+// AbortSignal.timeout() pattern already used for the AML screening call in
+// payment-service/src/main.ts.
+const PROXY_TIMEOUT_MS = Number(process.env.PROXY_TIMEOUT_MS || 15_000);
+
 async function proxyRequest(
   serviceBaseUrl: string,
   req: Request,
@@ -239,24 +246,40 @@ async function proxyRequest(
     : "";
   const forwardUrl = `${serviceBaseUrl}${req.path}${query}`;
 
-  const response = await fetch(forwardUrl, {
-    method: req.method,
-    headers: {
-      "Content-Type": "application/json",
-      ...(req.id && { "X-Request-ID": req.id }),
-      "X-Forwarded-For": req.ip || "",
-      ...(req.headers.authorization && {
-        Authorization: req.headers.authorization,
-      }),
-      ...(req.headers["x-device-id"]
-        ? { "X-Device-Id": req.headers["x-device-id"] as string }
-        : {}),
-    } as Record<string, string>,
-    body:
-      req.method !== "GET" && req.method !== "HEAD"
-        ? JSON.stringify(req.body)
-        : undefined,
-  });
+  // Awaited<ReturnType<typeof fetch>>, not the bare `Response` type name:
+  // this file imports Express's own Response into scope above, which would
+  // otherwise silently shadow the Fetch API's Response type here.
+  let response: Awaited<ReturnType<typeof fetch>>;
+  try {
+    response = await fetch(forwardUrl, {
+      method: req.method,
+      headers: {
+        "Content-Type": "application/json",
+        ...(req.id && { "X-Request-ID": req.id }),
+        "X-Forwarded-For": req.ip || "",
+        ...(req.headers.authorization && {
+          Authorization: req.headers.authorization,
+        }),
+        ...(req.headers["x-device-id"]
+          ? { "X-Device-Id": req.headers["x-device-id"] as string }
+          : {}),
+      } as Record<string, string>,
+      body:
+        req.method !== "GET" && req.method !== "HEAD"
+          ? JSON.stringify(req.body)
+          : undefined,
+      signal: AbortSignal.timeout(PROXY_TIMEOUT_MS),
+    });
+  } catch (error) {
+    if (error instanceof Error && error.name === "TimeoutError") {
+      throw new AhavaError(
+        AhavaErrorCode.INTERNAL_SERVICE_UNAVAILABLE,
+        `Upstream service did not respond within ${PROXY_TIMEOUT_MS}ms`,
+        { requestId: req.id },
+      );
+    }
+    throw error;
+  }
 
   const contentType = response.headers.get("content-type");
   if (contentType) res.setHeader("Content-Type", contentType);

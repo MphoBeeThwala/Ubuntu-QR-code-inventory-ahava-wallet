@@ -5,6 +5,14 @@ export interface SanctionsResult {
   matchDetails?: unknown;
 }
 
+// Without a timeout, a hung ComplyAdvantage call blocks the whole payment
+// (payment-service -> aml-service -> ComplyAdvantage is a synchronous chain
+// during checkout). Configurable so a slower environment isn't stuck with
+// this default.
+const COMPLY_ADVANTAGE_TIMEOUT_MS = Number(
+  process.env.COMPLYADVANTAGE_TIMEOUT_MS || 10_000,
+);
+
 export class ComplyAdvantageClient {
   private readonly baseUrl = "https://api.complyadvantage.com/v1";
 
@@ -36,6 +44,12 @@ export class ComplyAdvantageClient {
           fuzziness: 0.8,
           exact_match: false,
         }),
+        // node-fetch v2's built-in timeout (ms) — simpler than a manual
+        // AbortController for this library version, and a timed-out
+        // request throws a FetchError caught by the try/catch below,
+        // landing on the same fail-safe POTENTIAL_MATCH path as any other
+        // API-unavailable error.
+        timeout: COMPLY_ADVANTAGE_TIMEOUT_MS,
       });
 
       if (!response.ok) {
