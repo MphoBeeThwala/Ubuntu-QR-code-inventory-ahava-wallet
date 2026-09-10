@@ -1,4 +1,27 @@
 import request from "supertest";
+import * as nodeCrypto from "crypto";
+import * as jwt from "jsonwebtoken";
+
+// Real RSA keypair + JWT_PUBLIC_KEY env var: requireAgentRole's verifyJWT()
+// call (packages/shared-crypto, not mocked in this file) falls back to
+// reading this env var when no explicit key is passed. Same recipe as
+// wallet-service/payment-service/kyc-service/reporting-service's suites.
+const { publicKey: testPublicKey, privateKey: testPrivateKey } =
+  nodeCrypto.generateKeyPairSync("rsa", {
+    modulusLength: 2048,
+    publicKeyEncoding: { type: "pkcs1", format: "pem" },
+    privateKeyEncoding: { type: "pkcs1", format: "pem" },
+  });
+process.env.JWT_PUBLIC_KEY = testPublicKey;
+
+function agentAuthHeader(): string {
+  const token = jwt.sign(
+    { sub: "agent-user-1", role: "AGENT" },
+    testPrivateKey,
+    { algorithm: "RS256", issuer: "ahava-ewallet", expiresIn: "5m" },
+  );
+  return `Bearer ${token}`;
+}
 
 // ─── Mock BullMQ Worker BEFORE importing app ──────────────────────
 const workerHandlers: Record<string, (...args: any[]) => void> = {};
@@ -256,6 +279,20 @@ describe("POST /aml/screen-sanctions", () => {
     expect(res.status).toBe(400);
     expect(mockScreenSanctions).not.toHaveBeenCalled();
   });
+
+  // Regression coverage: this route must stay reachable with no
+  // Authorization header — payment-service calls it synchronously on
+  // every payment with none at all (see the comment on requireAgentRole's
+  // definition in main.ts). It's the one AML route deliberately NOT
+  // gated, unlike /aml/flag, /aml/flags, and /aml/str-file below.
+  it("does not require an Authorization header", async () => {
+    const res = await request(app).post("/aml/screen-sanctions").send({
+      senderUserId: "user-1",
+      recipientUserId: "user-2",
+      correlationId: "corr-no-auth",
+    });
+    expect(res.status).toBe(200);
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────
@@ -273,7 +310,8 @@ describe("POST /aml/flag", () => {
     const flag = { id: "flag-uuid-1", ...validFlag, status: "OPEN" };
     mockPrisma.amlFlag.create.mockResolvedValue(flag);
 
-    const res = await request(app).post("/aml/flag").send(validFlag);
+    const res = await request(app).post("/aml/flag")
+      .set("Authorization", agentAuthHeader()).send(validFlag);
 
     expect(res.status).toBe(201);
     expect(res.body.data.flag.id).toBe("flag-uuid-1");
@@ -304,6 +342,7 @@ describe("POST /aml/flag", () => {
 
     const res = await request(app)
       .post("/aml/flag")
+      .set("Authorization", agentAuthHeader())
       .send({ ...validFlag, severity: "CRITICAL" });
 
     expect(res.status).toBe(201);
@@ -319,7 +358,8 @@ describe("POST /aml/flag", () => {
     const flag = { id: "flag-uuid-3", ...validFlag, status: "OPEN" };
     mockPrisma.amlFlag.create.mockResolvedValue(flag);
 
-    const res = await request(app).post("/aml/flag").send(validFlag);
+    const res = await request(app).post("/aml/flag")
+      .set("Authorization", agentAuthHeader()).send(validFlag);
     expect(res.status).toBe(201);
     expect(mockPrisma.wallet.update).not.toHaveBeenCalled();
   });
@@ -327,6 +367,7 @@ describe("POST /aml/flag", () => {
   it("returns 400 when flagType is missing", async () => {
     const res = await request(app)
       .post("/aml/flag")
+      .set("Authorization", agentAuthHeader())
       .send({ severity: "HIGH", riskScore: 75 });
     expect(res.status).toBe(400);
   });
@@ -334,13 +375,15 @@ describe("POST /aml/flag", () => {
   it("returns 400 when riskScore is missing", async () => {
     const res = await request(app)
       .post("/aml/flag")
+      .set("Authorization", agentAuthHeader())
       .send({ flagType: "VELOCITY", severity: "HIGH" });
     expect(res.status).toBe(400);
   });
 
   it("sets X-Request-ID response header", async () => {
     mockPrisma.amlFlag.create.mockResolvedValue({ id: "f1", status: "OPEN" });
-    const res = await request(app).post("/aml/flag").send(validFlag);
+    const res = await request(app).post("/aml/flag")
+      .set("Authorization", agentAuthHeader()).send(validFlag);
     expect(res.headers["x-request-id"]).toBeDefined();
   });
 
@@ -349,6 +392,7 @@ describe("POST /aml/flag", () => {
 
     await request(app)
       .post("/aml/flag")
+      .set("Authorization", agentAuthHeader())
       .send({
         ...validFlag,
         evidence: { txCount: 20 },
@@ -377,7 +421,8 @@ describe("GET /aml/flags", () => {
       },
     ]);
 
-    const res = await request(app).get("/aml/flags");
+    const res = await request(app).get("/aml/flags")
+      .set("Authorization", agentAuthHeader());
     expect(res.status).toBe(200);
     expect(res.body.data.flags).toHaveLength(2);
     expect(res.body.data.total).toBe(2);
@@ -385,7 +430,8 @@ describe("GET /aml/flags", () => {
 
   it("filters by severity when ?severity= provided", async () => {
     mockPrisma.amlFlag.findMany.mockResolvedValue([]);
-    await request(app).get("/aml/flags?severity=CRITICAL");
+    await request(app).get("/aml/flags?severity=CRITICAL")
+      .set("Authorization", agentAuthHeader());
     expect(mockPrisma.amlFlag.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({ severity: "CRITICAL" }),
@@ -395,7 +441,8 @@ describe("GET /aml/flags", () => {
 
   it("returns empty array when no open flags", async () => {
     mockPrisma.amlFlag.findMany.mockResolvedValue([]);
-    const res = await request(app).get("/aml/flags");
+    const res = await request(app).get("/aml/flags")
+      .set("Authorization", agentAuthHeader());
     expect(res.status).toBe(200);
     expect(res.body.data.flags).toHaveLength(0);
   });
@@ -403,7 +450,8 @@ describe("GET /aml/flags", () => {
   it("returns 500 on unexpected flag query errors", async () => {
     mockPrisma.amlFlag.findMany.mockRejectedValue(new Error("db down"));
 
-    const res = await request(app).get("/aml/flags");
+    const res = await request(app).get("/aml/flags")
+      .set("Authorization", agentAuthHeader());
 
     expect(res.status).toBe(500);
     expect(res.body.error.code).toBe("INTERNAL_SERVER_ERROR");
@@ -431,6 +479,7 @@ describe("POST /aml/str-file", () => {
 
     const res = await request(app)
       .post("/aml/str-file")
+      .set("Authorization", agentAuthHeader())
       .send({ flagId: "flag-uuid-1" });
 
     expect(res.status).toBe(200);
@@ -450,7 +499,8 @@ describe("POST /aml/str-file", () => {
     });
     mockPrisma.auditLog.create.mockResolvedValue({});
 
-    await request(app).post("/aml/str-file").send({ flagId: "flag-uuid-1" });
+    await request(app).post("/aml/str-file")
+      .set("Authorization", agentAuthHeader()).send({ flagId: "flag-uuid-1" });
     expect(mockPrisma.auditLog.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({ action: "AML_STR_FILED" }),
@@ -459,7 +509,47 @@ describe("POST /aml/str-file", () => {
   });
 
   it("returns 400 when flagId is missing", async () => {
-    const res = await request(app).post("/aml/str-file").send({});
+    const res = await request(app).post("/aml/str-file")
+      .set("Authorization", agentAuthHeader()).send({});
     expect(res.status).toBe(400);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────
+// Regression coverage: /aml/flag, /aml/flags, and /aml/str-file had no
+// authorization at all — reachable defense-in-depth only (this service is
+// ClusterIP-only and missing from api-gateway's routing table), but any
+// caller with any valid token, or none, could raise/list AML flags and
+// file SARB suspicious transaction reports.
+describe("Authorization", () => {
+  it("rejects POST /aml/flag without an Authorization header", async () => {
+    const res = await request(app).post("/aml/flag").send({
+      flagType: "MANUAL_REVIEW",
+      severity: "LOW",
+      riskScore: 10,
+    });
+    expect(res.status).toBe(403);
+    expect(mockPrisma.amlFlag.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects GET /aml/flags without an agent role", async () => {
+    const token = jwt.sign(
+      { sub: "regular-customer-1" },
+      testPrivateKey,
+      { algorithm: "RS256", issuer: "ahava-ewallet", expiresIn: "5m" },
+    );
+    const res = await request(app)
+      .get("/aml/flags")
+      .set("Authorization", `Bearer ${token}`);
+    expect(res.status).toBe(403);
+    expect(mockPrisma.amlFlag.findMany).not.toHaveBeenCalled();
+  });
+
+  it("rejects POST /aml/str-file without an Authorization header", async () => {
+    const res = await request(app)
+      .post("/aml/str-file")
+      .send({ flagId: "flag-uuid-1" });
+    expect(res.status).toBe(403);
+    expect(mockPrisma.amlFlag.update).not.toHaveBeenCalled();
   });
 });

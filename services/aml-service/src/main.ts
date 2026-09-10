@@ -15,6 +15,7 @@ import { AmlEngine } from "./aml.engine";
 import { ComplyAdvantageClient } from "./comply-advantage.client";
 import { MlroNotifier } from "./mlro.notifier";
 import { writeAuditLog } from "@ahava/shared-audit";
+import { parseBearerToken, verifyJWT } from "@ahava/shared-crypto";
 
 // ─────────────────────────────────────────────────────────────────
 // SETUP
@@ -126,6 +127,49 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   next();
 });
 
+// Applied to the human/MLRO-facing routes only (/aml/flag, /aml/flags,
+// /aml/str-file) — NOT /aml/screen-sanctions, which payment-service calls
+// synchronously on every payment with no Authorization header at all (it's
+// a service-to-service call over the internal cluster network, not an
+// end-user action; this service is ClusterIP-only and not in api-gateway's
+// routing table, so the network boundary is that route's actual control).
+// Adding a customer-JWT check there would break every live payment. The
+// flag/report routes, by contrast, are meant for compliance staff via a
+// dashboard that doesn't exist yet — grepped every service and frontend,
+// nothing calls them today — so requireAgentRole is a free stopgap, same
+// pattern as reporting-service's identical fix this session.
+async function requireAgentRole(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  const token = parseBearerToken(req.headers.authorization);
+  if (!token) {
+    const err = new AhavaError(
+      AhavaErrorCode.AUTH_UNAUTHORIZED,
+      "Authorization header missing or malformed",
+      { requestId: req.id },
+    );
+    res.status(err.statusCode).json(createErrorResponse(err));
+    return;
+  }
+
+  try {
+    const payload = await verifyJWT(token);
+    if (payload.role !== "AGENT") {
+      throw new Error("insufficient role");
+    }
+    next();
+  } catch {
+    const err = new AhavaError(
+      AhavaErrorCode.AUTH_UNAUTHORIZED,
+      "This action requires an authorized agent account",
+      { requestId: req.id },
+    );
+    res.status(err.statusCode).json(createErrorResponse(err));
+  }
+}
+
 app.get("/health", (req, res) => {
   res.json(
     createSuccessResponse(
@@ -181,6 +225,7 @@ app.post(
 // POST /aml/flag - Raise AML flag manually (MLRO tool)
 app.post(
   "/aml/flag",
+  requireAgentRole,
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const {
@@ -243,6 +288,7 @@ app.post(
 // GET /aml/flags - List open flags (MLRO dashboard)
 app.get(
   "/aml/flags",
+  requireAgentRole,
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const severity = req.query.severity as AmlFlagSeverity | undefined;
@@ -265,6 +311,7 @@ app.get(
 // POST /aml/str-file - File Suspicious Transaction Report with SARB
 app.post(
   "/aml/str-file",
+  requireAgentRole,
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { flagId } = req.body;
