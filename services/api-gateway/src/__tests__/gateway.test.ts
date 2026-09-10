@@ -98,6 +98,54 @@ describe("API Gateway", () => {
     expect(res.body.error?.requestId).toBe(res.headers["x-request-id"]);
   });
 
+  it("rejects /auth/me without Authorization header", async () => {
+    // Regression test: isPublicPath used to prefix-match the whole /auth/*
+    // namespace as public, so /auth/me — which requires an authenticated
+    // caller — passed through the gateway with no token at all (it happened
+    // to be safe only because auth-service re-verifies the JWT itself).
+    // Only the exact routes that authenticate some other way (PIN, refresh
+    // token, or not yet) should be exempt.
+    const { publicKey } = crypto.generateKeyPairSync("rsa", {
+      modulusLength: 2048,
+    });
+    setPublicKeyForTesting(
+      publicKey.export({ type: "pkcs1", format: "pem" }) as string,
+    );
+
+    const res = await request(app).get("/auth/me");
+    expect(res.status).toBe(403);
+    expect(res.body.success).toBe(false);
+  });
+
+  it("allows /auth/login and /auth/device-bind without Authorization header", async () => {
+    const { publicKey } = crypto.generateKeyPairSync("rsa", {
+      modulusLength: 2048,
+    });
+    setPublicKeyForTesting(
+      publicKey.export({ type: "pkcs1", format: "pem" }) as string,
+    );
+
+    mockFetchOnce({
+      status: 200,
+      contentType: "application/json",
+      bodyText: JSON.stringify({ success: true, data: {} }),
+    });
+    const loginRes = await request(app)
+      .post("/auth/login")
+      .send({ phoneNumber: "+27821234567", pin: "1234", deviceId: "device-1" });
+    expect(loginRes.status).not.toBe(403);
+
+    mockFetchOnce({
+      status: 200,
+      contentType: "application/json",
+      bodyText: JSON.stringify({ success: true, data: {} }),
+    });
+    const bindRes = await request(app)
+      .post("/auth/device-bind")
+      .send({ userId: "user-1", pin: "1234", deviceId: "device-2" });
+    expect(bindRes.status).not.toBe(403);
+  });
+
   it("proxies requests and forwards X-Request-ID downstream", async () => {
     const { privateKey, publicKey } = crypto.generateKeyPairSync("rsa", {
       modulusLength: 2048,

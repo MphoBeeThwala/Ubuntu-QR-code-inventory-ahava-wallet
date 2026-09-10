@@ -15,12 +15,24 @@ import {
   createErrorResponse,
 } from "@ahava/shared-errors";
 
+// Only routes that authenticate the caller by a factor OTHER than a Bearer
+// JWT (PIN, refresh token, or nothing yet) belong here. Everything else
+// under /auth/* and /agents/auth/* (e.g. /auth/me, /auth/logout) requires
+// one — both are already called with a valid access token by every client
+// (see apps/pwa/lib/api-client.ts's request interceptor and
+// apps/mobile/lib/core/repositories/auth_repository.dart's logout(), which
+// passes requireAuth: true), so this list used to be a "startsWith" prefix
+// match covering the whole /auth/ namespace, which was broader than the
+// comment on this file (and the original jwtAuthMiddleware call site)
+// claimed and would have silently gone public for any future /auth/*
+// route that didn't re-verify identity itself.
 const PUBLIC_EXACT_PATHS = new Set([
   "/",
   "/health",
   "/auth/register",
   "/auth/login",
   "/auth/refresh",
+  "/auth/device-bind",
   "/agents/auth/login",
 ]);
 
@@ -36,11 +48,7 @@ function isPublicPath(req: Request): boolean {
   }
 
   const path = normalizePath(req.path);
-  if (PUBLIC_EXACT_PATHS.has(path)) {
-    return true;
-  }
-
-  return path.startsWith("/auth/") || path.startsWith("/agents/auth/");
+  return PUBLIC_EXACT_PATHS.has(path);
 }
 
 let cachedPublicKey: string | null = null;

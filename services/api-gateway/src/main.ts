@@ -179,8 +179,10 @@ app.use("/auth/login", authRateLimiter);
 app.use("/auth/device-bind", authRateLimiter);
 app.use("/payments", paymentRateLimiter);
 
-// JWT verification — rejects requests without a valid Bearer token
-// (public paths /health, /auth/register, /auth/login, /auth/refresh are exempt)
+// JWT verification — rejects requests without a valid Bearer token.
+// Exempt paths are the exact set in auth.middleware.ts's PUBLIC_EXACT_PATHS
+// (health check, plus the handful of auth routes that authenticate the
+// caller some other way — PIN, refresh token, or not at all yet).
 app.use(jwtAuthMiddleware);
 
 // ─────────────────────────────────────────────────────────────────
