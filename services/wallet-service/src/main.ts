@@ -12,7 +12,12 @@ import { Queue } from "bullmq";
 import { QUEUE_NAMES, getRedisConnectionConfig } from "@ahava/shared-events";
 import { sendSms, txSentMessage, txReceivedMessage } from "./sms";
 import { writeAuditLog } from "@ahava/shared-audit";
-import { decryptPII, fetchPIIEncryptionKey } from "@ahava/shared-crypto";
+import {
+  decryptPII,
+  fetchPIIEncryptionKey,
+  parseBearerToken,
+  verifyJWT,
+} from "@ahava/shared-crypto";
 import { metricsMiddleware, metricsEndpoint } from "@ahava/shared-observability";
 import { z } from "zod";
 
@@ -49,6 +54,55 @@ const prisma = new PrismaClient();
 const PORT = process.env.PORT || 6002;
 
 const redisConnection = getRedisConnectionConfig();
+
+// /wallets/:walletId/suspend and /freeze had NO authorization check at
+// all — any request carrying any valid customer JWT (issued to any regular
+// registered user, e.g. one they got by registering their own account)
+// could freeze or suspend ANY OTHER user's wallet by guessing/observing a
+// walletId, since these routes are reachable through api-gateway's generic
+// `/wallets/*` proxying with no additional restriction. aml-service's own
+// auto-suspend logic (services/aml-service/src/main.ts) never calls this
+// HTTP endpoint at all — it writes prisma.wallet.update() directly against
+// the shared database — so nothing legitimate currently depends on these
+// being reachable by ordinary users.
+//
+// This requires an agent-role token (the same role claim agent-service
+// issues for cash-in/cash-out) as a minimum bar until a dedicated
+// compliance/admin role exists — agents aren't really the right owner of
+// this action either, but it closes the "any random customer" attack
+// surface immediately using auth infrastructure that already exists,
+// rather than leaving it wide open while a proper role is designed.
+async function requireAgentRole(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  const token = parseBearerToken(req.headers.authorization);
+  if (!token) {
+    const err = new AhavaError(
+      AhavaErrorCode.AUTH_UNAUTHORIZED,
+      "Authorization header missing or malformed",
+      { requestId: req.id },
+    );
+    res.status(err.statusCode).json(createErrorResponse(err));
+    return;
+  }
+
+  try {
+    const payload = await verifyJWT(token);
+    if (payload.role !== "AGENT") {
+      throw new Error("insufficient role");
+    }
+    next();
+  } catch {
+    const err = new AhavaError(
+      AhavaErrorCode.AUTH_UNAUTHORIZED,
+      "This action requires an authorized agent account",
+      { requestId: req.id },
+    );
+    res.status(err.statusCode).json(createErrorResponse(err));
+  }
+}
 
 /** Generate wallet number: AHV-XXXX-XXXX-XXXX */
 function generateWalletNumber(): string {
@@ -464,6 +518,7 @@ app.get(
 // POST /wallets/:walletId/suspend - Suspend wallet (for AML)
 app.post(
   "/wallets/:walletId/suspend",
+  requireAgentRole,
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { walletId } = req.params;
@@ -502,6 +557,7 @@ app.post(
 // POST /wallets/:walletId/freeze - Freeze wallet (regulatory)
 app.post(
   "/wallets/:walletId/freeze",
+  requireAgentRole,
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { walletId } = req.params;

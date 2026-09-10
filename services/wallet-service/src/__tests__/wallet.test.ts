@@ -1,4 +1,31 @@
 import request from "supertest";
+import * as nodeCrypto from "crypto";
+import * as jwt from "jsonwebtoken";
+
+// Real RSA keypair + JWT_PUBLIC_KEY env var, not a mock: requireAgentRole's
+// verifyJWT() call (packages/shared-crypto) falls back to reading this env
+// var when no explicit key is passed, so signing real tokens here exercises
+// the actual verification path rather than stubbing it out. Same recipe as
+// services/agent-service/src/__tests__/agent.test.ts.
+const { publicKey: testPublicKey, privateKey: testPrivateKey } =
+  nodeCrypto.generateKeyPairSync("rsa", {
+    modulusLength: 2048,
+    publicKeyEncoding: { type: "pkcs1", format: "pem" },
+    privateKeyEncoding: { type: "pkcs1", format: "pem" },
+  });
+process.env.JWT_PUBLIC_KEY = testPublicKey;
+
+function signToken(claims: Record<string, unknown>): string {
+  return jwt.sign(claims, testPrivateKey, {
+    algorithm: "RS256",
+    issuer: "ahava-ewallet",
+    expiresIn: "5m",
+  });
+}
+
+function agentAuthHeader(): string {
+  return `Bearer ${signToken({ sub: "agent-user-1", role: "AGENT" })}`;
+}
 
 // ─── Mock PrismaClient ────────────────────────────────────────────
 const mockPrisma = {
@@ -322,6 +349,7 @@ describe("POST /wallets/:walletId/suspend", () => {
 
     const res = await request(app)
       .post("/wallets/wallet-uuid-1/suspend")
+      .set("Authorization", agentAuthHeader())
       .send({ reason: "AML Review" });
     expect(res.status).toBe(200);
     expect(mockPrisma.wallet.update).toHaveBeenCalledWith(
@@ -329,6 +357,30 @@ describe("POST /wallets/:walletId/suspend", () => {
         data: expect.objectContaining({ status: "SUSPENDED" }),
       }),
     );
+  });
+
+  // Regression coverage: this route used to have no authorization check at
+  // all — any authenticated customer (not just agents) could freeze or
+  // suspend any other user's wallet by walletId, with no ownership or role
+  // check whatsoever.
+  it("rejects without an Authorization header", async () => {
+    const res = await request(app)
+      .post("/wallets/wallet-uuid-1/suspend")
+      .send({ reason: "AML Review" });
+    expect(res.status).toBe(403);
+    expect(mockPrisma.wallet.update).not.toHaveBeenCalled();
+  });
+
+  it("rejects a valid token that lacks the AGENT role", async () => {
+    const res = await request(app)
+      .post("/wallets/wallet-uuid-1/suspend")
+      .set(
+        "Authorization",
+        `Bearer ${signToken({ sub: "regular-customer-1" })}`,
+      )
+      .send({ reason: "AML Review" });
+    expect(res.status).toBe(403);
+    expect(mockPrisma.wallet.update).not.toHaveBeenCalled();
   });
 });
 
@@ -341,6 +393,7 @@ describe("POST /wallets/:walletId/freeze", () => {
 
     const res = await request(app)
       .post("/wallets/wallet-uuid-1/freeze")
+      .set("Authorization", agentAuthHeader())
       .send({ reason: "Court Order" });
     expect(res.status).toBe(200);
     expect(mockPrisma.wallet.update).toHaveBeenCalledWith(
@@ -348,6 +401,14 @@ describe("POST /wallets/:walletId/freeze", () => {
         data: expect.objectContaining({ status: "FROZEN" }),
       }),
     );
+  });
+
+  it("rejects without an Authorization header", async () => {
+    const res = await request(app)
+      .post("/wallets/wallet-uuid-1/freeze")
+      .send({ reason: "Court Order" });
+    expect(res.status).toBe(403);
+    expect(mockPrisma.wallet.update).not.toHaveBeenCalled();
   });
 });
 
