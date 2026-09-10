@@ -15,6 +15,38 @@ import {
 } from "@ahava/shared-crypto";
 import { sendSms, welcomeMessage, loginAlertMessage } from "./sms";
 import { writeAuditLog } from "@ahava/shared-audit";
+import { z } from "zod";
+
+// Type-shape validation layered in front of, not instead of, the existing
+// business-rule checks (phone-format regex, PIN-length regex, etc.) — see
+// the identical helper in payment-service/src/main.ts for why.
+function validateBody<T extends z.ZodTypeAny>(
+  schema: T,
+  body: unknown,
+  requestId?: string,
+): z.infer<T> {
+  const result = schema.safeParse(body);
+  if (!result.success) {
+    const issue = result.error.issues[0];
+    throw new AhavaError(
+      AhavaErrorCode.VAL_INVALID_INPUT,
+      issue
+        ? `${issue.path.join(".") || "body"}: ${issue.message}`
+        : "Invalid request body",
+      { requestId },
+    );
+  }
+  return result.data;
+}
+
+const phoneAuthBodySchema = z.object({
+  phoneNumber: z.string().min(1).optional(),
+  pin: z.string().min(1).optional(),
+  deviceId: z.string().min(1).optional(),
+  deviceName: z.string().optional(),
+  userAgent: z.string().optional(),
+  ipAddress: z.string().optional(),
+});
 
 const app: express.Express = express();
 const prisma = new PrismaClient();
@@ -58,7 +90,7 @@ app.get("/auth/me", async (req: Request, res: Response, next: NextFunction) => {
 
 app.post("/auth/register", async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { phoneNumber, pin, deviceId, deviceName, userAgent, ipAddress } = req.body;
+    const { phoneNumber, pin, deviceId, deviceName, userAgent, ipAddress } = validateBody(phoneAuthBodySchema, req.body, req.id);
     if (!phoneNumber || !pin || !deviceId) throw new AhavaError(AhavaErrorCode.VAL_MISSING_REQUIRED_FIELD, "Missing required fields", { requestId: req.id });
     if (!/^(\+27|0)[1-9]\d{8}$/.test(phoneNumber.replace(/\s/g, ""))) throw new AhavaError(AhavaErrorCode.VAL_INVALID_PHONE, "Invalid phone format", { requestId: req.id });
     if (!/^\d{4,6}$/.test(pin)) throw new AhavaError(AhavaErrorCode.VAL_INVALID_INPUT, "PIN must be 4-6 digits", { requestId: req.id });
@@ -81,7 +113,7 @@ app.post("/auth/register", async (req: Request, res: Response, next: NextFunctio
 
 app.post("/auth/login", async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { phoneNumber, pin, deviceId, deviceName, userAgent, ipAddress } = req.body;
+    const { phoneNumber, pin, deviceId, deviceName, userAgent, ipAddress } = validateBody(phoneAuthBodySchema, req.body, req.id);
     if (!phoneNumber || !pin || !deviceId) throw new AhavaError(AhavaErrorCode.VAL_MISSING_REQUIRED_FIELD, "Missing required fields", { requestId: req.id });
     const phoneNumberHash = crypto.createHash("sha256").update(phoneNumber.trim().toLowerCase()).digest("hex");
     const user = await prisma.user.findUnique({ where: { phoneNumberHash } });

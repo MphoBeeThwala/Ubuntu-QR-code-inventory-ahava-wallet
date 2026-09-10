@@ -315,6 +315,14 @@ describe("POST /auth/register", () => {
     expect(res.body.error.code).toBe("VAL_MISSING_REQUIRED_FIELD");
   });
 
+  it("returns 400 when phoneNumber is the wrong type (zod shape check)", async () => {
+    const res = await request(app)
+      .post("/auth/register")
+      .send({ ...registerPayload(), phoneNumber: 27821234567 });
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe("VAL_INVALID_INPUT");
+  });
+
   it("returns 400 when deviceId is missing", async () => {
     const { deviceId: _omit, ...rest } = registerPayload();
     const res = await request(app).post("/auth/register").send(rest);

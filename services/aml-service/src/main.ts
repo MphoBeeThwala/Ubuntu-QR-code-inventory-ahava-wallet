@@ -140,6 +140,44 @@ app.get("/health", (req, res) => {
   );
 });
 
+// POST /aml/screen-sanctions - synchronous, blocking sanctions check.
+// Call this BEFORE moving money (payment-service does, on every /payments
+// request). Distinct from the runPostPaymentChecks() worker above, which
+// runs async risk-scoring AFTER a payment has already committed — sanctions
+// screening specifically must happen before funds move, at any amount.
+app.post(
+  "/aml/screen-sanctions",
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const {
+        senderUserId,
+        recipientUserId,
+        correlationId,
+        blockOnMatch = true,
+      } = req.body;
+
+      if (!senderUserId || !recipientUserId || !correlationId) {
+        throw new AhavaError(
+          AhavaErrorCode.VAL_MISSING_REQUIRED_FIELD,
+          "senderUserId, recipientUserId, and correlationId are required",
+          { requestId: req.id },
+        );
+      }
+
+      await amlEngine.screenSanctions({
+        senderUserId,
+        recipientUserId,
+        correlationId,
+        blockOnMatch,
+      });
+
+      res.json(createSuccessResponse({ cleared: true }, req.id));
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
 // POST /aml/flag - Raise AML flag manually (MLRO tool)
 app.post(
   "/aml/flag",

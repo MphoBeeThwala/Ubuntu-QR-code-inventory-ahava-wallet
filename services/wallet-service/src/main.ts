@@ -13,6 +13,35 @@ import { QUEUE_NAMES, getRedisConnectionConfig } from "@ahava/shared-events";
 import { sendSms, txSentMessage, txReceivedMessage } from "./sms";
 import { writeAuditLog } from "@ahava/shared-audit";
 import { decryptPII, fetchPIIEncryptionKey } from "@ahava/shared-crypto";
+import { z } from "zod";
+
+// Type-shape validation layered in front of, not instead of, the existing
+// business-rule checks (required-field presence, balance sufficiency,
+// etc.) — see the identical helper in payment-service/src/main.ts for why.
+function validateBody<T extends z.ZodTypeAny>(
+  schema: T,
+  body: unknown,
+  requestId?: string,
+): z.infer<T> {
+  const result = schema.safeParse(body);
+  if (!result.success) {
+    const issue = result.error.issues[0];
+    throw new AhavaError(
+      AhavaErrorCode.VAL_INVALID_INPUT,
+      issue
+        ? `${issue.path.join(".") || "body"}: ${issue.message}`
+        : "Invalid request body",
+      { requestId },
+    );
+  }
+  return result.data;
+}
+
+const qrPayBodySchema = z.object({
+  senderWalletId: z.string().min(1).optional(),
+  amountCents: z.coerce.number().optional(),
+  idempotencyKey: z.string().min(1).optional(),
+});
 
 const app = express();
 const prisma = new PrismaClient();
@@ -668,7 +697,11 @@ app.post(
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { qrHash } = req.params;
-      const { senderWalletId, amountCents, idempotencyKey } = req.body;
+      const { senderWalletId, amountCents, idempotencyKey } = validateBody(
+        qrPayBodySchema,
+        req.body,
+        req.id,
+      );
 
       if (!senderWalletId || !amountCents || !idempotencyKey) {
         throw new AhavaError(

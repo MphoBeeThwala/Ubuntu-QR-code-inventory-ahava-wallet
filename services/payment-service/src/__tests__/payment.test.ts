@@ -51,6 +51,12 @@ const mockPrisma = {
   wallet: {
     findUnique: jest.fn(),
     findFirst: jest.fn(),
+    // Added for the pre-transaction sanctions-screening lookup (P0
+    // follow-up: synchronous AML screening). Defaults to an empty array in
+    // beforeEach below, which makes screenSanctionsBlocking a no-op since
+    // neither sender nor receiver row is found — existing tests that don't
+    // care about screening don't need to configure this.
+    findMany: jest.fn(),
     update: jest.fn(),
   },
   paymentQrCode: {
@@ -174,6 +180,11 @@ beforeEach(() => {
   jest.clearAllMocks();
   mockPrisma.walletTransaction.findUnique.mockResolvedValue(null); // no existing txn by default
   mockPrisma.user.findUnique.mockResolvedValue(null);
+  mockPrisma.wallet.findMany.mockResolvedValue([]); // sanctions screening skipped by default
+  // Sanctions screening makes a real network call otherwise — tests that
+  // specifically exercise it (see "POST /payments — sanctions screening"
+  // below) opt back in and mock fetch themselves.
+  process.env.SANCTIONS_SCREENING_ENABLED = "false";
 });
 
 // ─── Health ───────────────────────────────────────────────────────────────────
@@ -234,6 +245,22 @@ describe("POST /payments — input validation", () => {
       .send({ ...validPayload(), amountCents: -500 });
     expect(res.status).toBe(400);
     expect(res.body.error.code).toBe("PAY_INVALID_AMOUNT");
+  });
+
+  it("returns 400 when senderWalletId is the wrong type (zod shape check)", async () => {
+    const res = await request(app)
+      .post("/payments")
+      .send({ ...validPayload(), senderWalletId: 12345 });
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe("VAL_INVALID_INPUT");
+  });
+
+  it("returns 400 when amountCents is a non-numeric string (zod shape check)", async () => {
+    const res = await request(app)
+      .post("/payments")
+      .send({ ...validPayload(), amountCents: "not-a-number" });
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe("VAL_INVALID_INPUT");
   });
 });
 
@@ -400,6 +427,79 @@ describe("POST /payments — successful payment", () => {
         }),
       }),
     );
+  });
+});
+
+// ─── Sanctions screening ────────────────────────────────────────────────────
+
+describe("POST /payments — sanctions screening", () => {
+  const originalFetch = global.fetch;
+
+  beforeEach(() => {
+    process.env.SANCTIONS_SCREENING_ENABLED = "true";
+    mockPrisma.wallet.findMany.mockResolvedValue([
+      { id: SENDER_ID, userId: "user-001" },
+      { id: RECEIVER_ID, userId: "user-002" },
+    ]);
+  });
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+    process.env.SANCTIONS_SCREENING_ENABLED = "false";
+  });
+
+  it("blocks the payment when aml-service reports a sanctions match", async () => {
+    global.fetch = jest
+      .fn()
+      .mockResolvedValue({ ok: false, status: 403 } as Response);
+
+    const payload = validPayload();
+    const res = await request(app).post("/payments").send(payload);
+
+    expect(res.status).toBe(403);
+    expect(res.body.error.code).toBe("AML_SANCTIONS_MATCH");
+    expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("fails closed (blocks the payment) when aml-service is unreachable", async () => {
+    global.fetch = jest.fn().mockRejectedValue(new Error("ECONNREFUSED"));
+
+    const payload = validPayload();
+    const res = await request(app).post("/payments").send(payload);
+
+    expect(res.status).toBe(503);
+    expect(res.body.error.code).toBe("EXT_COMPLY_ADVANTAGE_ERROR");
+    expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("proceeds with the payment when aml-service clears both parties", async () => {
+    global.fetch = jest
+      .fn()
+      .mockResolvedValue({ ok: true, status: 200 } as Response);
+
+    const payload = validPayload();
+    setupSuccessfulTransaction(payload);
+
+    const res = await request(app).post("/payments").send(payload);
+
+    expect(res.status).toBe(201);
+    expect(global.fetch).toHaveBeenCalledWith(
+      expect.stringContaining("/aml/screen-sanctions"),
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+
+  it("is skipped when SANCTIONS_SCREENING_ENABLED=false", async () => {
+    process.env.SANCTIONS_SCREENING_ENABLED = "false";
+    global.fetch = jest.fn();
+
+    const payload = validPayload();
+    setupSuccessfulTransaction(payload);
+
+    const res = await request(app).post("/payments").send(payload);
+
+    expect(res.status).toBe(201);
+    expect(global.fetch).not.toHaveBeenCalled();
   });
 });
 
