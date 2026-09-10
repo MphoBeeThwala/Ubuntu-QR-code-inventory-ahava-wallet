@@ -3,6 +3,20 @@ import { createHash } from 'crypto';
 
 const prisma = new PrismaClient();
 
+// Real argon2id hash of the PIN "1234" (memoryCost 65536, timeCost 3,
+// parallelism 4 — matching hashPin()'s parameters in
+// packages/shared-crypto/src/index.ts exactly, so verifyPin() can
+// actually validate it). The previous value here
+// ("$argon2id$v=19$...$...") was a truncated placeholder, not a real
+// hash — argon2.verify() throws on a malformed hash rather than
+// returning false, so logging in as ANY seeded demo user crashed
+// /auth/login with a 500 instead of either succeeding or cleanly
+// rejecting bad credentials. All demo accounts below share this PIN
+// for simplicity; this is seed/demo data only, never used in production.
+const DEMO_PIN = '1234';
+const DEMO_PIN_HASH =
+  '$argon2id$v=19$m=65536,t=3,p=4$i8cX17R+pXJGWxCTLezJQg$xCbUrSZZTfet8cRFMr5mWnIcYOK+R7+6w0NsPuNWma0';
+
 async function main() {
   // Clean existing demo data
   await prisma.walletTransaction.deleteMany();
@@ -17,7 +31,7 @@ async function main() {
       phoneNumberHash: createHash('sha256').update('+27821111111').digest('hex'),
       fullName: 'Thabo Consumer',
       preferredName: 'Thabo',
-      pinHash: '$argon2id$v=19$m=65536,t=3,p=4$c2FsdGVkZ2V0aW5nYXJnb252YWx1ZQ$...',
+      pinHash: DEMO_PIN_HASH,
       kycTier: 'TIER_1',
       kycStatus: 'VERIFIED',
       email: 'thabo@example.com',
@@ -31,7 +45,7 @@ async function main() {
       phoneNumberHash: createHash('sha256').update('+27822222222').digest('hex'),
       fullName: 'Lerato Shopper',
       preferredName: 'Lerato',
-      pinHash: '$argon2id$v=19$m=65536,t=3,p=4$c2FsdGVkZ2V0aW5nYXJnb252YWx1ZQ$...',
+      pinHash: DEMO_PIN_HASH,
       kycTier: 'TIER_1',
       kycStatus: 'VERIFIED',
     }
@@ -70,6 +84,7 @@ async function main() {
       phoneNumberHash: createHash('sha256').update('+27833333333').digest('hex'),
       fullName: 'Spaza Shop',
       preferredName: 'Spaza Shop',
+      pinHash: DEMO_PIN_HASH,
       kycTier: 'MERCHANT',
       kycStatus: 'VERIFIED',
       email: 'spaza@example.com',
@@ -94,6 +109,7 @@ async function main() {
       phoneNumberHash: createHash('sha256').update('+27844444444').digest('hex'),
       fullName: 'Agent Smith',
       preferredName: 'Agent Smith',
+      pinHash: DEMO_PIN_HASH,
       kycTier: 'TIER_2',
       kycStatus: 'VERIFIED',
     }
@@ -218,7 +234,7 @@ async function main() {
   }
 
   console.log('✅ Demo data seeded successfully!');
-  console.log('📋 Users created:');
+  console.log(`📋 Users created (all share PIN "${DEMO_PIN}"):`);
   console.log(`  - Consumer 1: ${consumer1.phoneNumber} (Wallet: ${wallet1.walletNumber}, Balance: R${wallet1.balance / 100})`);
   console.log(`  - Consumer 2: ${consumer2.phoneNumber} (Wallet: ${wallet2.walletNumber}, Balance: R${wallet2.balance / 100})`);
   console.log(`  - Merchant: ${merchant1.phoneNumber} (Wallet: ${merchantWallet.walletNumber})`);

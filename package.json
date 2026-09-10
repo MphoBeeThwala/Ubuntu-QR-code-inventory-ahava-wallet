@@ -32,7 +32,11 @@
     "generate": "pnpm --filter ./services/* exec npx prisma generate",
     "seed": "pnpm --filter ./services/* exec npx prisma db seed",
     "prisma:studio": "pnpm --filter ./services/* exec npx prisma studio",
-    "compliance:check": "tsx compliance/compliance_scripts.ts"
+    "compliance:check": "tsx compliance/compliance_scripts.ts",
+    "integration:up": "node scripts/integration-up.js",
+    "smoke": "node scripts/smoke-payment.js",
+    "integration:smoke": "node scripts/integration-smoke.js",
+    "load-test": "node scripts/load-test.js"
   },
   "devDependencies": {
     "@prisma/client": "5.22.0",
