@@ -13,6 +13,7 @@ import * as admin from "firebase-admin";
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const AfricasTalking = require("africastalking");
 import { SESClient, SendEmailCommand } from "@aws-sdk/client-ses";
+import { parseBearerToken, verifyJWT } from "@ahava/shared-crypto";
 import { z } from "zod";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -304,8 +305,68 @@ const notificationSendBodySchema = z.object({
   metadata: z.record(z.string()).optional(),
 });
 
+// This route is gateway-routed (api-gateway forwards /notifications/* here)
+// and had no authorization at all — unlike aml-service's /aml/screen-sanctions
+// or ledger-service's /ledger/batch (deliberately left open this session
+// because they're ClusterIP-only, missing from the gateway's routing
+// table, and have a real service-to-service caller today), this endpoint
+// is genuinely reachable from the public internet right now, so leaving
+// it open is a live spam/abuse vector (arbitrary push/SMS/email sends —
+// SMS and email cost real money per send — to any userId). Its one
+// intended caller, payment-orchestrator's "notify_recipient" saga step,
+// isn't reachable/wired today either (same as the aml/ledger cases), so
+// gating this breaks nothing real currently — but whoever wires that saga
+// step up for real will need to decide how it authenticates (a service
+// token, or something else), since it currently sends no Authorization
+// header at all.
+async function requireAuth(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  const token = parseBearerToken(req.headers.authorization);
+  if (!token) {
+    const err = new AhavaError(
+      AhavaErrorCode.AUTH_UNAUTHORIZED,
+      "Authorization header missing or malformed",
+      { requestId: req.id },
+    );
+    res.status(err.statusCode).json(createErrorResponse(err));
+    return;
+  }
+
+  try {
+    const payload = await verifyJWT(token);
+    req.userId = (payload.userId ?? payload.sub) as string | undefined;
+    req.role = payload.role as string | undefined;
+    if (!req.userId) {
+      throw new Error("token has no subject");
+    }
+    next();
+  } catch {
+    const err = new AhavaError(
+      AhavaErrorCode.AUTH_INVALID_TOKEN,
+      "Invalid or expired access token",
+      { requestId: req.id },
+    );
+    res.status(err.statusCode).json(createErrorResponse(err));
+  }
+}
+
+/** Throws unless the caller is an AGENT or the resource's actual owner. */
+function assertOwnerOrAgent(req: Request, resourceUserId: string): void {
+  if (req.role === "AGENT") return;
+  if (req.userId && req.userId === resourceUserId) return;
+  throw new AhavaError(
+    AhavaErrorCode.AUTH_UNAUTHORIZED,
+    "You do not have access to this resource",
+    { requestId: req.id },
+  );
+}
+
 app.post(
   "/notifications/send",
+  requireAuth,
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const {
@@ -326,6 +387,8 @@ app.post(
           { requestId: req.id },
         );
       }
+
+      assertOwnerOrAgent(req, userId);
 
       const notification = await prisma.notification.create({
         data: {
@@ -409,6 +472,8 @@ declare global {
   namespace Express {
     interface Request {
       id?: string;
+      userId?: string;
+      role?: string;
     }
   }
 }

@@ -7,6 +7,36 @@
  */
 
 import request from "supertest";
+import * as nodeCrypto from "crypto";
+import * as jwt from "jsonwebtoken";
+
+// Real RSA keypair + JWT_PUBLIC_KEY env var: requireAuth's verifyJWT() call
+// (packages/shared-crypto, not mocked in this file) falls back to reading
+// this env var when no explicit key is passed. Same recipe as
+// wallet-service/payment-service/kyc-service's test suites.
+const { publicKey: testPublicKey, privateKey: testPrivateKey } =
+  nodeCrypto.generateKeyPairSync("rsa", {
+    modulusLength: 2048,
+    publicKeyEncoding: { type: "pkcs1", format: "pem" },
+    privateKeyEncoding: { type: "pkcs1", format: "pem" },
+  });
+process.env.JWT_PUBLIC_KEY = testPublicKey;
+
+function signToken(claims: Record<string, unknown>): string {
+  return jwt.sign(claims, testPrivateKey, {
+    algorithm: "RS256",
+    issuer: "ahava-ewallet",
+    expiresIn: "5m",
+  });
+}
+
+function customerAuthHeader(userId = "user-001"): string {
+  return `Bearer ${signToken({ sub: userId })}`;
+}
+
+function agentAuthHeader(): string {
+  return `Bearer ${signToken({ sub: "agent-user-1", role: "AGENT" })}`;
+}
 
 // ─── Mocks ────────────────────────────────────────────────────────
 
@@ -297,7 +327,8 @@ describe("notification worker", () => {
 // ─────────────────────────────────────────────────────────────────
 describe("POST /notifications/send", () => {
   it("creates notification and enqueues job for PUSH channel", async () => {
-    const res = await request(app).post("/notifications/send").send({
+    const res = await request(app).post("/notifications/send")
+      .set("Authorization", customerAuthHeader()).send({
       userId: "user-001",
       channel: "PUSH",
       title: "Payment received",
@@ -311,7 +342,8 @@ describe("POST /notifications/send", () => {
   });
 
   it("stores notification in DB with correct fields", async () => {
-    await request(app).post("/notifications/send").send({
+    await request(app).post("/notifications/send")
+      .set("Authorization", customerAuthHeader()).send({
       userId: "user-001",
       channel: "SMS",
       title: "OTP Code",
@@ -334,6 +366,7 @@ describe("POST /notifications/send", () => {
   it("enqueues job with correct data for SMS channel", async () => {
     await request(app)
       .post("/notifications/send")
+      .set("Authorization", customerAuthHeader())
       .send({
         userId: "user-001",
         channel: "SMS",
@@ -359,7 +392,8 @@ describe("POST /notifications/send", () => {
   });
 
   it("enqueues job for EMAIL channel", async () => {
-    await request(app).post("/notifications/send").send({
+    await request(app).post("/notifications/send")
+      .set("Authorization", customerAuthHeader()).send({
       userId: "user-001",
       channel: "EMAIL",
       title: "Statement ready",
@@ -378,7 +412,8 @@ describe("POST /notifications/send", () => {
   });
 
   it("accepts IN_APP channel without device token", async () => {
-    const res = await request(app).post("/notifications/send").send({
+    const res = await request(app).post("/notifications/send")
+      .set("Authorization", customerAuthHeader()).send({
       userId: "user-001",
       channel: "IN_APP",
       title: "New Feature",
@@ -392,6 +427,7 @@ describe("POST /notifications/send", () => {
   it("sets X-Request-ID response header", async () => {
     const res = await request(app)
       .post("/notifications/send")
+      .set("Authorization", customerAuthHeader())
       .send({ userId: "user-001", channel: "IN_APP", title: "Test", body: "Test" });
 
     expect(res.headers["x-request-id"]).toBeDefined();
@@ -400,6 +436,7 @@ describe("POST /notifications/send", () => {
   it("returns 400 when userId is missing", async () => {
     const res = await request(app)
       .post("/notifications/send")
+      .set("Authorization", customerAuthHeader())
       .send({ channel: "SMS", body: "Hello" });
 
     expect(res.status).toBe(400);
@@ -409,6 +446,7 @@ describe("POST /notifications/send", () => {
   it("returns 400 when channel is missing", async () => {
     const res = await request(app)
       .post("/notifications/send")
+      .set("Authorization", customerAuthHeader())
       .send({ userId: "user-001", body: "Hello" });
 
     expect(res.status).toBe(400);
@@ -417,6 +455,7 @@ describe("POST /notifications/send", () => {
   it("returns 400 when body is missing", async () => {
     const res = await request(app)
       .post("/notifications/send")
+      .set("Authorization", customerAuthHeader())
       .send({ userId: "user-001", channel: "SMS" });
 
     expect(res.status).toBe(400);
@@ -427,8 +466,38 @@ describe("POST /notifications/send", () => {
 
     const res = await request(app)
       .post("/notifications/send")
+      .set("Authorization", customerAuthHeader())
       .send({ userId: "user-001", channel: "IN_APP", title: "Test", body: "Test" });
 
     expect(res.status).toBe(500);
+  });
+
+  // Regression coverage: this route had no authorization at all — it's
+  // gateway-routed (genuinely internet-reachable), so anyone could trigger
+  // arbitrary push/SMS/email sends (SMS and email cost real money per
+  // send) to any userId.
+  it("rejects without an Authorization header", async () => {
+    const res = await request(app)
+      .post("/notifications/send")
+      .send({ userId: "user-001", channel: "IN_APP", title: "Test", body: "Test" });
+    expect(res.status).toBe(403);
+    expect(mockNotificationCreate).not.toHaveBeenCalled();
+  });
+
+  it("rejects sending a notification to a different userId", async () => {
+    const res = await request(app)
+      .post("/notifications/send")
+      .set("Authorization", customerAuthHeader("a-different-user"))
+      .send({ userId: "user-001", channel: "IN_APP", title: "Test", body: "Test" });
+    expect(res.status).toBe(403);
+    expect(mockNotificationCreate).not.toHaveBeenCalled();
+  });
+
+  it("allows an agent to send a notification to any userId", async () => {
+    const res = await request(app)
+      .post("/notifications/send")
+      .set("Authorization", agentAuthHeader())
+      .send({ userId: "user-001", channel: "IN_APP", title: "Test", body: "Test" });
+    expect(res.status).toBe(201);
   });
 });
