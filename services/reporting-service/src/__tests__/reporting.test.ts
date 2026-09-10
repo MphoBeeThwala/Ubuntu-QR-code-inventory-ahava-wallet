@@ -1,4 +1,27 @@
 import request from "supertest";
+import * as nodeCrypto from "crypto";
+import * as jwt from "jsonwebtoken";
+
+// Real RSA keypair + JWT_PUBLIC_KEY env var: requireAgentRole's verifyJWT()
+// call (packages/shared-crypto, not mocked in this file) falls back to
+// reading this env var when no explicit key is passed. Same recipe as
+// wallet-service/payment-service/kyc-service's test suites.
+const { publicKey: testPublicKey, privateKey: testPrivateKey } =
+  nodeCrypto.generateKeyPairSync("rsa", {
+    modulusLength: 2048,
+    publicKeyEncoding: { type: "pkcs1", format: "pem" },
+    privateKeyEncoding: { type: "pkcs1", format: "pem" },
+  });
+process.env.JWT_PUBLIC_KEY = testPublicKey;
+
+function agentAuthHeader(): string {
+  const token = jwt.sign(
+    { sub: "agent-user-1", role: "AGENT" },
+    testPrivateKey,
+    { algorithm: "RS256", issuer: "ahava-ewallet", expiresIn: "5m" },
+  );
+  return `Bearer ${token}`;
+}
 
 // ─── Mock PrismaClient ────────────────────────────────────────────
 const mockPrisma = {
@@ -36,6 +59,7 @@ describe("GET /reports/vat", () => {
 
     const res = await request(app)
       .get("/reports/vat")
+      .set("Authorization", agentAuthHeader())
       .query({ periodStart: "2026-01-01", periodEnd: "2026-01-31" });
 
     expect(res.status).toBe(200);
@@ -53,6 +77,7 @@ describe("GET /reports/vat", () => {
 
     const res = await request(app)
       .get("/reports/vat")
+      .set("Authorization", agentAuthHeader())
       .query({ periodStart: "2026-01-01", periodEnd: "2026-01-31" });
 
     expect(res.status).toBe(200);
@@ -63,6 +88,7 @@ describe("GET /reports/vat", () => {
   it("returns 400 when periodStart is missing", async () => {
     const res = await request(app)
       .get("/reports/vat")
+      .set("Authorization", agentAuthHeader())
       .query({ periodEnd: "2026-01-31" });
     expect(res.status).toBe(400);
   });
@@ -70,6 +96,7 @@ describe("GET /reports/vat", () => {
   it("returns 400 when periodEnd is missing", async () => {
     const res = await request(app)
       .get("/reports/vat")
+      .set("Authorization", agentAuthHeader())
       .query({ periodStart: "2026-01-01" });
     expect(res.status).toBe(400);
   });
@@ -88,7 +115,8 @@ describe("GET /reports/reconciliation", () => {
         _count: { id: 10 },
       });
 
-    const res = await request(app).get("/reports/reconciliation");
+    const res = await request(app).get("/reports/reconciliation")
+      .set("Authorization", agentAuthHeader());
 
     expect(res.status).toBe(200);
     expect(res.body.data.reconciliation.balanced).toBe(true);
@@ -108,7 +136,8 @@ describe("GET /reports/reconciliation", () => {
         _count: { id: 10 },
       });
 
-    const res = await request(app).get("/reports/reconciliation");
+    const res = await request(app).get("/reports/reconciliation")
+      .set("Authorization", agentAuthHeader());
 
     expect(res.status).toBe(200);
     expect(res.body.data.reconciliation.balanced).toBe(false);
@@ -120,7 +149,8 @@ describe("GET /reports/reconciliation", () => {
       .mockResolvedValueOnce({ _sum: { amount: null }, _count: { id: 0 } })
       .mockResolvedValueOnce({ _sum: { amount: null }, _count: { id: 0 } });
 
-    const res = await request(app).get("/reports/reconciliation");
+    const res = await request(app).get("/reports/reconciliation")
+      .set("Authorization", agentAuthHeader());
     expect(res.status).toBe(200);
     expect(res.body.data.reconciliation.balanced).toBe(true);
   });
@@ -146,6 +176,7 @@ describe("GET /reports/sarb", () => {
 
     const res = await request(app)
       .get("/reports/sarb")
+      .set("Authorization", agentAuthHeader())
       .query({ year: "2026", month: "1" });
 
     expect(res.status).toBe(200);
@@ -160,12 +191,14 @@ describe("GET /reports/sarb", () => {
   });
 
   it("returns 400 when year is missing", async () => {
-    const res = await request(app).get("/reports/sarb").query({ month: "1" });
+    const res = await request(app).get("/reports/sarb")
+      .set("Authorization", agentAuthHeader()).query({ month: "1" });
     expect(res.status).toBe(400);
   });
 
   it("returns 400 when month is missing", async () => {
-    const res = await request(app).get("/reports/sarb").query({ year: "2026" });
+    const res = await request(app).get("/reports/sarb")
+      .set("Authorization", agentAuthHeader()).query({ year: "2026" });
     expect(res.status).toBe(400);
   });
 
@@ -180,8 +213,41 @@ describe("GET /reports/sarb", () => {
 
     const res = await request(app)
       .get("/reports/sarb")
+      .set("Authorization", agentAuthHeader())
       .query({ year: "2026", month: "3" });
     expect(res.status).toBe(200);
     expect(res.body.data.report.generatedAt).toBeDefined();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────
+// Regression coverage: this whole file had no authorization at all — any
+// caller (or none) could pull system-wide financial reports, including
+// /reports/sarb's individual large-transaction records with userIds.
+describe("Authorization", () => {
+  it("rejects /reports/vat without an Authorization header", async () => {
+    const res = await request(app)
+      .get("/reports/vat")
+      .query({ periodStart: "2026-01-01", periodEnd: "2026-01-31" });
+    expect(res.status).toBe(403);
+  });
+
+  it("rejects /reports/reconciliation without an agent role", async () => {
+    const token = jwt.sign(
+      { sub: "regular-customer-1" },
+      testPrivateKey,
+      { algorithm: "RS256", issuer: "ahava-ewallet", expiresIn: "5m" },
+    );
+    const res = await request(app)
+      .get("/reports/reconciliation")
+      .set("Authorization", `Bearer ${token}`);
+    expect(res.status).toBe(403);
+  });
+
+  it("rejects /reports/sarb without an Authorization header", async () => {
+    const res = await request(app)
+      .get("/reports/sarb")
+      .query({ year: "2026", month: "1" });
+    expect(res.status).toBe(403);
   });
 });

@@ -7,10 +7,55 @@ import {
   createSuccessResponse,
   createErrorResponse,
 } from "@ahava/shared-errors";
+import { parseBearerToken, verifyJWT } from "@ahava/shared-crypto";
 
 const app = express();
 const prisma = new PrismaClient();
 const PORT = process.env.PORT || 6006;
+
+// This file had no authorization at all — /reports/sarb returns individual
+// large-transaction records with userIds (FICA-reportable transactions
+// >= R5,000), and all three routes are system-wide aggregate financial
+// reports, not scoped to any individual caller, so there's no "owner" to
+// check against — only whether the caller should see compliance/finance
+// data at all. Not currently reachable through api-gateway (it's missing
+// from serviceBaseUrlForPath's routing table entirely, and this service's
+// k8s Service is ClusterIP-only, not internet-facing), but that's exactly
+// the kind of thing a routing-table or Service-type change could silently
+// undo — adding real auth now costs nothing and doesn't rely on network
+// topology staying exactly as it is today. Same requireAgentRole stopgap
+// pattern as wallet-service/kyc-service's elevated-action routes.
+async function requireAgentRole(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  const token = parseBearerToken(req.headers.authorization);
+  if (!token) {
+    const err = new AhavaError(
+      AhavaErrorCode.AUTH_UNAUTHORIZED,
+      "Authorization header missing or malformed",
+      { requestId: req.id },
+    );
+    res.status(err.statusCode).json(createErrorResponse(err));
+    return;
+  }
+
+  try {
+    const payload = await verifyJWT(token);
+    if (payload.role !== "AGENT") {
+      throw new Error("insufficient role");
+    }
+    next();
+  } catch {
+    const err = new AhavaError(
+      AhavaErrorCode.AUTH_UNAUTHORIZED,
+      "This action requires an authorized agent account",
+      { requestId: req.id },
+    );
+    res.status(err.statusCode).json(createErrorResponse(err));
+  }
+}
 
 app.use(express.json());
 app.use((req: Request, res: Response, next: NextFunction) => {
@@ -34,6 +79,7 @@ app.get("/health", (req, res) => {
 // GET /reports/vat - Generate VAT report
 app.get(
   "/reports/vat",
+  requireAgentRole,
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { periodStart, periodEnd } = req.query;
@@ -87,6 +133,7 @@ app.get(
 // GET /reports/reconciliation - Double-entry reconciliation report
 app.get(
   "/reports/reconciliation",
+  requireAgentRole,
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const [debits, credits] = await Promise.all([
@@ -129,6 +176,7 @@ app.get(
 // GET /reports/sarb - SARB monthly transaction report (FICA reporting)
 app.get(
   "/reports/sarb",
+  requireAgentRole,
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { year, month } = req.query;
