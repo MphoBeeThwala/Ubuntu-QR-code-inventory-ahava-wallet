@@ -5,6 +5,7 @@ import { AhavaError, AhavaErrorCode, createSuccessResponse, createErrorResponse 
 import { Queue } from "bullmq";
 import { QUEUE_NAMES, getRedisConnectionConfig } from "@ahava/shared-events";
 import { writeAuditLog } from "@ahava/shared-audit";
+import { parseBearerToken, verifyJWT } from "@ahava/shared-crypto";
 
 const app = express();
 const prisma = new PrismaClient();
@@ -18,6 +19,50 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   res.setHeader("X-Request-ID", req.id);
   next();
 });
+
+// Applied only to the read-only reporting routes (trial-balance, reconcile,
+// chart-of-accounts) — human/compliance-facing, no legitimate caller found
+// anywhere in the codebase. NOT applied to POST /ledger/entries or
+// /ledger/batch: the latter is called by payment-orchestrator's saga
+// ("ledger_entry" step) with no Authorization header at all (a
+// service-to-service call, same situation as aml-service's
+// /aml/screen-sanctions — see that fix's comment for the full reasoning),
+// and /ledger/entries has no caller either way but shares the same
+// service-to-service shape as /batch, so it's left consistent with it
+// rather than singled out. This service is ClusterIP-only and missing
+// from api-gateway's routing table, so nothing here is internet-reachable
+// today regardless.
+async function requireAgentRole(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  const token = parseBearerToken(req.headers.authorization);
+  if (!token) {
+    const err = new AhavaError(
+      AhavaErrorCode.AUTH_UNAUTHORIZED,
+      "Authorization header missing or malformed",
+      { requestId: req.id },
+    );
+    res.status(err.statusCode).json(createErrorResponse(err));
+    return;
+  }
+
+  try {
+    const payload = await verifyJWT(token);
+    if (payload.role !== "AGENT") {
+      throw new Error("insufficient role");
+    }
+    next();
+  } catch {
+    const err = new AhavaError(
+      AhavaErrorCode.AUTH_UNAUTHORIZED,
+      "This action requires an authorized agent account",
+      { requestId: req.id },
+    );
+    res.status(err.statusCode).json(createErrorResponse(err));
+  }
+}
 
 const CHART_OF_ACCOUNTS = {
   ASSETS: { CASH_FLOAT: "1001", CUSTOMER_WALLETS: "1100", FEE_POOL: "1200", ESCROW: "1300", BANK_ACCOUNT: "1500" },
@@ -62,7 +107,7 @@ app.post("/ledger/batch", async (req: Request, res: Response, next: NextFunction
   } catch (error) { next(error); }
 });
 
-app.get("/ledger/trial-balance", async (req: Request, res: Response, next: NextFunction) => {
+app.get("/ledger/trial-balance", requireAgentRole, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { date, accountCode } = req.query;
     const targetDate = date ? new Date(date as string) : new Date();
@@ -82,7 +127,7 @@ app.get("/ledger/trial-balance", async (req: Request, res: Response, next: NextF
   } catch (error) { next(error); }
 });
 
-app.get("/ledger/reconcile", async (req: Request, res: Response, next: NextFunction) => {
+app.get("/ledger/reconcile", requireAgentRole, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { walletId } = req.query;
     const wallet = walletId ? await prisma.wallet.findUnique({ where: { id: walletId as string }, select: { id: true, balance: true, walletNumber: true } }) : null;
@@ -96,7 +141,7 @@ app.get("/ledger/reconcile", async (req: Request, res: Response, next: NextFunct
   } catch (error) { next(error); }
 });
 
-app.get("/ledger/chart-of-accounts", (req: Request, res: Response) => { res.json(createSuccessResponse({ chart: CHART_OF_ACCOUNTS }, req.id)); });
+app.get("/ledger/chart-of-accounts", requireAgentRole, (req: Request, res: Response) => { res.json(createSuccessResponse({ chart: CHART_OF_ACCOUNTS }, req.id)); });
 
 app.use((err: Error, req: Request, res: Response, _next: NextFunction) => {
   if (err instanceof AhavaError) return res.status(err.statusCode).json(createErrorResponse(err));
