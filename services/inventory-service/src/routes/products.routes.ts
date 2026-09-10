@@ -8,12 +8,13 @@ import {
   createSuccessResponse,
 } from '@ahava/shared-errors';
 import { writeAuditLog } from '@ahava/shared-audit';
+import { requireAuth, assertOwnerOrAgent } from '../middleware/auth.middleware';
 
 const router: Router = Router();
 const prisma = new PrismaClient();
 
 // GET /products - List all products for a merchant
-router.get('/', async (req, res, next) => {
+router.get('/', requireAuth, async (req, res, next) => {
   try {
     const { merchantId } = req.query;
 
@@ -24,6 +25,8 @@ router.get('/', async (req, res, next) => {
         { requestId: req.id },
       );
     }
+
+    assertOwnerOrAgent(req, merchantId);
 
     const products = await prisma.inventoryProduct.findMany({
       where: {
@@ -66,7 +69,7 @@ router.get('/', async (req, res, next) => {
 });
 
 // POST /products - Create a new product
-router.post('/', async (req, res, next) => {
+router.post('/', requireAuth, async (req, res, next) => {
   try {
     const { merchantId, name, description, category, priceCents, costCents, sku, barcode, trackStock } =
       req.body;
@@ -78,6 +81,8 @@ router.post('/', async (req, res, next) => {
         { requestId: req.id },
       );
     }
+
+    assertOwnerOrAgent(req, merchantId);
 
     const merchant = await prisma.user.findUnique({
       where: { id: merchantId },
@@ -166,7 +171,7 @@ router.post('/', async (req, res, next) => {
 });
 
 // GET /products/:id - Get a single product
-router.get('/:id', async (req, res, next) => {
+router.get('/:id', requireAuth, async (req, res, next) => {
   try {
     const { id } = req.params;
 
@@ -191,6 +196,8 @@ router.get('/:id', async (req, res, next) => {
       );
     }
 
+    assertOwnerOrAgent(req, product.merchantId);
+
     res.json(
       createSuccessResponse(
         {
@@ -209,7 +216,7 @@ router.get('/:id', async (req, res, next) => {
 });
 
 // PATCH /products/:id - Update a product
-router.patch('/:id', async (req, res, next) => {
+router.patch('/:id', requireAuth, async (req, res, next) => {
   try {
     const { id } = req.params;
     const { name, description, category, priceCents, costCents, isActive } = req.body;
@@ -225,6 +232,8 @@ router.patch('/:id', async (req, res, next) => {
         { requestId: req.id },
       );
     }
+
+    assertOwnerOrAgent(req, existingProduct.merchantId);
 
     const updateData: any = {};
     if (name !== undefined) updateData.name = name;
@@ -274,7 +283,7 @@ router.patch('/:id', async (req, res, next) => {
 });
 
 // DELETE /products/:id - Soft delete a product
-router.delete('/:id', async (req, res, next) => {
+router.delete('/:id', requireAuth, async (req, res, next) => {
   try {
     const { id } = req.params;
 
@@ -289,6 +298,8 @@ router.delete('/:id', async (req, res, next) => {
         { requestId: req.id },
       );
     }
+
+    assertOwnerOrAgent(req, product.merchantId);
 
     await prisma.inventoryProduct.update({
       where: { id },

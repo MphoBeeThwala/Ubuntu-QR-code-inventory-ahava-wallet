@@ -5,21 +5,32 @@ import {
   AhavaErrorCode,
   createSuccessResponse,
 } from '@ahava/shared-errors';
+import { requireAuth, assertOwnerOrAgent } from '../middleware/auth.middleware';
 
 const router: Router = Router();
 const prisma = new PrismaClient();
 
 // GET /transactions - List inventory transactions for a merchant
-router.get('/', async (req, res, next) => {
+router.get('/', requireAuth, async (req, res, next) => {
   try {
     const { merchantId, productId, type, limit = 50, offset = 0 } = req.query;
 
-    const where: any = {};
-    if (merchantId) {
-      where.product = {
-        merchantId: merchantId as string,
-      };
+    // merchantId used to be optional — omitting it returned every
+    // merchant's transaction history unfiltered. Now required, and
+    // productId (ANDed into the same query below) can't be used to widen
+    // the scope past merchantId's own products.
+    if (!merchantId || typeof merchantId !== 'string') {
+      throw new AhavaError(
+        AhavaErrorCode.VAL_MISSING_REQUIRED_FIELD,
+        'merchantId is required',
+        { requestId: req.id },
+      );
     }
+    assertOwnerOrAgent(req, merchantId);
+
+    const where: any = {
+      product: { merchantId },
+    };
     if (productId) {
       where.productId = productId as string;
     }
@@ -70,7 +81,12 @@ router.get('/', async (req, res, next) => {
 });
 
 // POST /transactions/sale - Record a sale (called from payment service)
-router.post('/sale', async (req, res, next) => {
+// Nothing currently calls this despite the comment — grepped payment-service
+// and wallet-service for it, neither exists. Requires the product's owner
+// (or an agent) rather than leaving it open, so a merchant can't fabricate
+// sale records or deplete a competitor's stock through it if it's ever
+// wired up as designed.
+router.post('/sale', requireAuth, async (req, res, next) => {
   try {
     const { walletTransactionId, productId, quantity = 1 } = req.body;
 
@@ -94,6 +110,8 @@ router.post('/sale', async (req, res, next) => {
         { requestId: req.id },
       );
     }
+
+    assertOwnerOrAgent(req, product.merchantId);
 
     const walletTxn = await prisma.walletTransaction.findUnique({
       where: { id: walletTransactionId },

@@ -30,10 +30,22 @@ app.get('/health', (req, res) => {
   res.json(createSuccessResponse({ status: 'ok', service: 'inventory-service' }, req.id));
 });
 
-// Import routes
-import './routes/products.routes';
-import './routes/stock.routes';
-import './routes/transactions.routes';
+// Mount routes. api-gateway forwards the full request path unchanged (see
+// proxyRequest in services/api-gateway/src/main.ts — no prefix stripping),
+// and every other service in this codebase defines routes with that full
+// gateway-facing path baked in (e.g. wallet-service's
+// app.get("/wallets/:walletId", ...), not app.get("/:walletId", ...)
+// mounted under "/wallets"). These routers were previously imported only
+// for their side effects and never actually registered with app.use() at
+// all — none of products/stock/transactions routes were reachable via
+// HTTP; this service served nothing but /health.
+import productsRouter from './routes/products.routes';
+import stockRouter from './routes/stock.routes';
+import transactionsRouter from './routes/transactions.routes';
+
+app.use('/inventory/products', productsRouter);
+app.use('/inventory/stock', stockRouter);
+app.use('/inventory/transactions', transactionsRouter);
 
 // Error handling
 app.use((err: Error, req: Request, res: Response, _next: NextFunction) => {
@@ -63,6 +75,7 @@ declare global {
     interface Request {
       id?: string;
       userId?: string;
+      role?: string;
     }
   }
 }

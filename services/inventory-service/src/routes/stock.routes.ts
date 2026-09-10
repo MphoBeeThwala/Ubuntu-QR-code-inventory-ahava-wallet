@@ -6,17 +6,19 @@ import {
   createSuccessResponse,
 } from '@ahava/shared-errors';
 import { writeAuditLog } from '@ahava/shared-audit';
+import { requireAuth, assertOwnerOrAgent } from '../middleware/auth.middleware';
 
 const router: Router = Router();
 const prisma = new PrismaClient();
 
 // GET /stock/:productId - Get stock for a product
-router.get('/:productId', async (req, res, next) => {
+router.get('/:productId', requireAuth, async (req, res, next) => {
   try {
     const { productId } = req.params;
 
     const stock = await prisma.inventoryStock.findUnique({
       where: { productId },
+      include: { product: { select: { merchantId: true } } },
     });
 
     if (!stock) {
@@ -27,11 +29,14 @@ router.get('/:productId', async (req, res, next) => {
       );
     }
 
+    assertOwnerOrAgent(req, stock.product.merchantId);
+
+    const { product: _product, ...stockFields } = stock;
     res.json(
       createSuccessResponse(
         {
           stock: {
-            ...stock,
+            ...stockFields,
             productId: stock.productId,
           },
         },
@@ -44,7 +49,7 @@ router.get('/:productId', async (req, res, next) => {
 });
 
 // POST /stock/:productId/adjust - Adjust stock quantity
-router.post('/:productId/adjust', async (req, res, next) => {
+router.post('/:productId/adjust', requireAuth, async (req, res, next) => {
   try {
     const { productId } = req.params;
     const { quantityChange, reason, location } = req.body;
@@ -59,6 +64,7 @@ router.post('/:productId/adjust', async (req, res, next) => {
 
     const stock = await prisma.inventoryStock.findUnique({
       where: { productId },
+      include: { product: { select: { merchantId: true } } },
     });
 
     if (!stock) {
@@ -68,6 +74,8 @@ router.post('/:productId/adjust', async (req, res, next) => {
         { requestId: req.id },
       );
     }
+
+    assertOwnerOrAgent(req, stock.product.merchantId);
 
     const newQuantity = stock.quantity + quantityChange;
     if (newQuantity < 0) {
