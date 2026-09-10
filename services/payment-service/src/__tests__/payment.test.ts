@@ -29,6 +29,12 @@ const mockTx = {
     findFirst: jest.fn(),
     update: jest.fn(),
   },
+  // Added alongside the P0 fix that reconnects the ledger to the live
+  // payment path (see main.ts) — every /payments transaction now writes
+  // LedgerEntry rows, so the mock transaction client needs one too.
+  ledgerEntry: {
+    create: jest.fn(),
+  },
   auditLog: {
     create: jest.fn(),
   },
@@ -432,7 +438,10 @@ describe("POST /payments — fee calculation", () => {
       .send({ ...validPayload(), amountCents: 100, idempotencyKey: key });
 
     expect(res.status).toBe(201);
-    expect(res.body.data.transaction.fee).toBe(25);
+    // fee is now a string in the response — result.feeAmount is a BigInt
+    // (see the P0 fix for why: res.json() throws on a raw BigInt, and the
+    // previous code returned one on every successful payment).
+    expect(res.body.data.transaction.fee).toBe("25");
   });
 
   it("charges 0.5% fee for larger amounts", async () => {
@@ -445,7 +454,7 @@ describe("POST /payments — fee calculation", () => {
       .send({ ...validPayload(), amountCents: amount, idempotencyKey: key });
 
     expect(res.status).toBe(201);
-    expect(res.body.data.transaction.fee).toBe(500);
+    expect(res.body.data.transaction.fee).toBe("500");
   });
 
   it("tracks the fee separately while the transfer amount remains intact", async () => {
@@ -457,10 +466,13 @@ describe("POST /payments — fee calculation", () => {
       .post("/payments")
       .send({ ...validPayload(), amountCents: amount, idempotencyKey: key });
 
-    // debitTxn records the transfer amount while the fee is separate
+    // debitTxn records the transfer amount while the fee is separate.
+    // feeAmount/netAmount are written to the DB as real BigInt (only the
+    // HTTP response serializes them to strings), matching the BigInt
+    // columns in the schema.
     const debitCall = mockTx.walletTransaction.create.mock.calls[0][0];
-    expect(debitCall.data.feeAmount).toBe(50);
-    expect(debitCall.data.netAmount).toBe(amount);
+    expect(debitCall.data.feeAmount).toBe(50n);
+    expect(debitCall.data.netAmount).toBe(BigInt(amount));
   });
 });
 
@@ -756,7 +768,11 @@ describe("POST /payments — double-entry accounting", () => {
       (c: [{ where: { id: string } }]) => c[0].where.id === SENDER_ID,
     );
     expect(senderUpdate).toBeDefined();
-    expect(senderUpdate![0].data.balance).toEqual({ decrement: amount + fee });
+    // decrement is now BigInt (totalDebitCents), matching the balance
+    // column's real type — see the P0 fix for calculateTransferFee.
+    expect(senderUpdate![0].data.balance).toEqual({
+      decrement: BigInt(amount + fee),
+    });
   });
 
   it("wallet.update increments receiver balance by the purchase amount", async () => {
@@ -776,7 +792,9 @@ describe("POST /payments — double-entry accounting", () => {
       (c: [{ where: { id: string } }]) => c[0].where.id === RECEIVER_ID,
     );
     expect(receiverUpdate).toBeDefined();
-    expect(receiverUpdate![0].data.balance).toEqual({ increment: amount });
+    expect(receiverUpdate![0].data.balance).toEqual({
+      increment: BigInt(amount),
+    });
   });
 });
 

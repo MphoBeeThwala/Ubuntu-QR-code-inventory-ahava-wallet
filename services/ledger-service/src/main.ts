@@ -35,7 +35,7 @@ app.post("/ledger/entries", async (req: Request, res: Response, next: NextFuncti
     if (!transactionId || !walletId || !accountCode || amountCents == null) throw new AhavaError(AhavaErrorCode.VAL_MISSING_REQUIRED_FIELD, "Missing required fields", { requestId: req.id });
     const allCodes = Object.values(CHART_OF_ACCOUNTS).flatMap((c) => Object.values(c));
     if (!allCodes.includes(accountCode)) throw new AhavaError(AhavaErrorCode.VAL_INVALID_INPUT, `Invalid account code: ${accountCode}`, { requestId: req.id });
-    const entry = await prisma.$queryRaw`INSERT INTO ledger_entries (id, transaction_id, wallet_id, user_id, entry_type, account_code, amount_cents, currency, description, reference, counterparty_wallet_id, counterparty_account_code, metadata, created_at) VALUES (gen_random_uuid(), ${transactionId}, ${walletId}, ${userId}, ${entryType}, ${accountCode}, ${amountCents}, ${currency}, ${description || ""}, ${reference || ""}, ${counterpartyWalletId || null}, ${counterpartyAccountCode || null}, ${metadata ? JSON.stringify(metadata) : null}, NOW()) RETURNING *`;
+    const entry = await prisma.$queryRaw`INSERT INTO ledger_entries (id, "transactionId", "walletId", "userId", "entryType", "accountCode", "amountCents", currency, description, reference, "counterpartyWalletId", "counterpartyAccountCode", metadata, "createdAt") VALUES (gen_random_uuid(), ${transactionId}, ${walletId}, ${userId}, ${entryType}::"EntryType", ${accountCode}, ${amountCents}, ${currency}, ${description || ""}, ${reference || ""}, ${counterpartyWalletId || null}, ${counterpartyAccountCode || null}, ${metadata ? JSON.stringify(metadata) : null}, NOW()) RETURNING *`;
     await writeAuditLog(prisma, { userId, action: "LEDGER_ENTRY_CREATED", entityType: "ledger_entry", entityId: transactionId, newState: JSON.stringify({ accountCode, entryType, amountCents: amountCents.toString() }), serviceId: "ledger-service", correlationId: req.id });
     res.status(201).json(createSuccessResponse({ entry: (entry as any[])[0] }, req.id));
   } catch (error) { next(error); }
@@ -51,7 +51,7 @@ app.post("/ledger/batch", async (req: Request, res: Response, next: NextFunction
     const result = await prisma.$transaction(async (tx) => {
       const created = [];
       for (const entry of entries) {
-        const row = await tx.$queryRaw`INSERT INTO ledger_entries (id, transaction_id, wallet_id, user_id, entry_type, account_code, amount_cents, currency, description, reference, counterparty_wallet_id, counterparty_account_code, metadata, created_at) VALUES (gen_random_uuid(), ${entry.transactionId}, ${entry.walletId}, ${entry.userId}, ${entry.entryType}, ${entry.accountCode}, ${entry.amountCents}, ${entry.currency || "ZAR"}, ${entry.description || ""}, ${entry.reference || ""}, ${entry.counterpartyWalletId || null}, ${entry.counterpartyAccountCode || null}, ${entry.metadata ? JSON.stringify(entry.metadata) : null}, NOW()) RETURNING *`;
+        const row = await tx.$queryRaw`INSERT INTO ledger_entries (id, "transactionId", "walletId", "userId", "entryType", "accountCode", "amountCents", currency, description, reference, "counterpartyWalletId", "counterpartyAccountCode", metadata, "createdAt") VALUES (gen_random_uuid(), ${entry.transactionId}, ${entry.walletId}, ${entry.userId}, ${entry.entryType}::"EntryType", ${entry.accountCode}, ${entry.amountCents}, ${entry.currency || "ZAR"}, ${entry.description || ""}, ${entry.reference || ""}, ${entry.counterpartyWalletId || null}, ${entry.counterpartyAccountCode || null}, ${entry.metadata ? JSON.stringify(entry.metadata) : null}, NOW()) RETURNING *`;
         created.push((row as any[])[0]);
       }
       return created;
@@ -67,8 +67,8 @@ app.get("/ledger/trial-balance", async (req: Request, res: Response, next: NextF
     const { date, accountCode } = req.query;
     const targetDate = date ? new Date(date as string) : new Date();
     const targetDateEnd = new Date(targetDate); targetDateEnd.setHours(23, 59, 59, 999);
-    const whereClause = accountCode ? Prisma.sql`AND account_code = ${accountCode as string}` : Prisma.sql``;
-    const rows = await prisma.$queryRaw`SELECT account_code, entry_type, SUM(amount_cents) as total_cents, COUNT(*) as entry_count FROM ledger_entries WHERE created_at <= ${targetDateEnd} ${whereClause} GROUP BY account_code, entry_type ORDER BY account_code, entry_type`;
+    const whereClause = accountCode ? Prisma.sql`AND "accountCode" = ${accountCode as string}` : Prisma.sql``;
+    const rows = await prisma.$queryRaw`SELECT "accountCode" as account_code, "entryType" as entry_type, SUM("amountCents") as total_cents, COUNT(*) as entry_count FROM ledger_entries WHERE "createdAt" <= ${targetDateEnd} ${whereClause} GROUP BY "accountCode", "entryType" ORDER BY "accountCode", "entryType"`;
     const accounts: Record<string, { debits: bigint; credits: bigint; count: number }> = {};
     for (const row of rows as any[]) {
       const code = row.account_code;
@@ -86,7 +86,7 @@ app.get("/ledger/reconcile", async (req: Request, res: Response, next: NextFunct
   try {
     const { walletId } = req.query;
     const wallet = walletId ? await prisma.wallet.findUnique({ where: { id: walletId as string }, select: { id: true, balance: true, walletNumber: true } }) : null;
-    const ledgerBalance = await prisma.$queryRaw`SELECT COALESCE(SUM(CASE WHEN entry_type = 'DEBIT' THEN amount_cents ELSE 0 END), 0) as total_debits, COALESCE(SUM(CASE WHEN entry_type = 'CREDIT' THEN amount_cents ELSE 0 END), 0) as total_credits FROM ledger_entries WHERE account_code = ${CHART_OF_ACCOUNTS.ASSETS.CUSTOMER_WALLETS} ${walletId ? Prisma.sql`AND wallet_id = ${walletId as string}` : Prisma.sql``}`;
+    const ledgerBalance = await prisma.$queryRaw`SELECT COALESCE(SUM(CASE WHEN "entryType" = 'DEBIT' THEN "amountCents" ELSE 0 END), 0) as total_debits, COALESCE(SUM(CASE WHEN "entryType" = 'CREDIT' THEN "amountCents" ELSE 0 END), 0) as total_credits FROM ledger_entries WHERE "accountCode" = ${CHART_OF_ACCOUNTS.ASSETS.CUSTOMER_WALLETS} ${walletId ? Prisma.sql`AND "walletId" = ${walletId as string}` : Prisma.sql``}`;
     const lb = (ledgerBalance as any[])[0];
     const ledgerNet = BigInt(lb.total_credits) - BigInt(lb.total_debits);
     const walletSum = await prisma.wallet.aggregate({ _sum: { balance: true }, where: { isDeleted: false, status: "ACTIVE" } });

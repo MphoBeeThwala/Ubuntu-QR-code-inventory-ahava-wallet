@@ -26,6 +26,28 @@ const mockPrisma = {
   $transaction: jest.fn(),
 };
 
+// The transaction client passed into prisma.$transaction(async (tx) => ...)
+// callbacks — added alongside the P0 fix that moved /qr/:qrHash/pay's
+// balance check and writes inside one FOR UPDATE-locked transaction
+// (previously: an outside-the-lock findUnique + a bare array-form
+// $transaction([...]), which is what left it exposed to the overdraft
+// race the fix addresses) and reconnected it to the ledger.
+const mockTx = {
+  $queryRaw: jest.fn(),
+  walletTransaction: {
+    create: jest.fn(),
+  },
+  wallet: {
+    update: jest.fn(),
+  },
+  paymentQrCode: {
+    update: jest.fn(),
+  },
+  ledgerEntry: {
+    create: jest.fn(),
+  },
+};
+
 jest.mock("@prisma/client", () => ({
   PrismaClient: jest.fn().mockImplementation(() => mockPrisma),
 }));
@@ -46,6 +68,11 @@ jest.mock("@ahava/shared-events", () => ({
   QUEUE_NAMES: {
     WALLET_CREATED: "wallet:created",
   },
+  // Pre-existing gap: main.ts calls this at module load time to configure
+  // BullMQ, but this mock never provided it, so the whole suite failed to
+  // load ("getRedisConnectionConfig is not a function") before a single
+  // test ran — independent of the P0 fixes in this changeset.
+  getRedisConnectionConfig: jest.fn(() => ({})),
 }));
 
 // ─── Import app AFTER all mocks ───────────────────────────────────
@@ -469,17 +496,78 @@ describe("GET /qr/:qrHash", () => {
 // ─────────────────────────────────────────────────────────────────
 describe("POST /qr/:qrHash/pay", () => {
   const SENDER_ID = "sender-wallet-001";
-  const senderWallet = {
-    ...makeWallet({ id: SENDER_ID, balance: BigInt(100000) }),
-  };
   const debitTxn = { id: "debit-txn-001" };
+  const creditTxn = { id: "credit-txn-001" };
+
+  function lockedSenderRow(overrides: Record<string, unknown> = {}) {
+    return {
+      id: SENDER_ID,
+      userId: "user-uuid-sender",
+      isDeleted: false,
+      status: "ACTIVE",
+      balance: BigInt(100000),
+      walletNumber: "AHV-SEND-0001",
+      ...overrides,
+    };
+  }
+
+  function lockedReceiverRow(overrides: Record<string, unknown> = {}) {
+    return {
+      id: WALLET_ID,
+      userId: "user-uuid-1",
+      isDeleted: false,
+      status: "ACTIVE",
+      balance: BigInt(0),
+      walletNumber: "AHV-ABC1-DEF2-GHI3",
+      ...overrides,
+    };
+  }
+
+  // Configures the mocked $transaction to invoke the real callback (as
+  // Prisma does) against mockTx, and mockTx.$queryRaw to answer the two
+  // FOR UPDATE lock queries the route now issues — one for the wallet
+  // pair, one for the QR row — by sniffing which table the raw SQL
+  // targets, since a single mockResolvedValue can't tell them apart.
+  function setupLockedTransaction(opts: {
+    sender?: ReturnType<typeof lockedSenderRow>;
+    receiver?: ReturnType<typeof lockedReceiverRow>;
+    qrRow?: {
+      usageCount: number;
+      maxUsage: number | null;
+      isActive: boolean;
+      expiresAt: Date | null;
+    };
+  } = {}) {
+    const sender = opts.sender ?? lockedSenderRow();
+    const receiver = opts.receiver ?? lockedReceiverRow();
+    const qrRow =
+      opts.qrRow ?? { usageCount: 0, maxUsage: null, isActive: true, expiresAt: null };
+
+    mockTx.$queryRaw.mockImplementation((strings: TemplateStringsArray) => {
+      const sql = strings.join(" ");
+      if (sql.includes("FROM wallets")) return Promise.resolve([sender, receiver]);
+      if (sql.includes("FROM payment_qr_codes")) return Promise.resolve([qrRow]);
+      return Promise.resolve([]);
+    });
+    mockTx.walletTransaction.create
+      .mockResolvedValueOnce(debitTxn)
+      .mockResolvedValueOnce(creditTxn);
+    mockTx.wallet.update.mockResolvedValue({});
+    mockTx.paymentQrCode.update.mockResolvedValue({});
+    mockTx.ledgerEntry.create.mockResolvedValue({});
+
+    mockPrisma.$transaction.mockImplementation(
+      async (fn: (tx: typeof mockTx) => unknown) => fn(mockTx),
+    );
+
+    return { sender, receiver };
+  }
 
   beforeEach(() => {
     mockPrisma.paymentQrCode.findFirst.mockResolvedValue(
       makeQr({ wallet: makeWallet() }),
     );
-    mockPrisma.wallet.findUnique.mockResolvedValue(senderWallet);
-    mockPrisma.$transaction.mockResolvedValue([{}, {}, debitTxn, {}, {}]);
+    setupLockedTransaction();
   });
 
   it("debits sender and credits QR wallet on success", async () => {
@@ -493,6 +581,7 @@ describe("POST /qr/:qrHash/pay", () => {
     expect(res.body.data.transactionId).toBe("debit-txn-001");
     expect(res.body.data.amountCents).toBe(5000);
     expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(mockTx.ledgerEntry.create).toHaveBeenCalledTimes(2);
   });
 
   it("returns 400 when required fields are missing", async () => {
@@ -525,9 +614,11 @@ describe("POST /qr/:qrHash/pay", () => {
   });
 
   it("returns 402 when sender has insufficient balance", async () => {
-    mockPrisma.wallet.findUnique.mockResolvedValue(
-      makeWallet({ id: SENDER_ID, balance: BigInt(100) }),
-    );
+    // Balance is now checked inside the FOR UPDATE-locked transaction, so
+    // it's the locked row (mockTx.$queryRaw) that needs the low balance —
+    // the old pre-transaction mockPrisma.wallet.findUnique is no longer
+    // read by the route at all.
+    setupLockedTransaction({ sender: lockedSenderRow({ balance: BigInt(100) }) });
     const res = await request(app).post(`/qr/${QR_HASH}/pay`).send({
       senderWalletId: SENDER_ID,
       amountCents: 5000,

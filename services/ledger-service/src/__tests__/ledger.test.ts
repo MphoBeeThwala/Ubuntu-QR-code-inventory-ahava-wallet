@@ -35,7 +35,7 @@ describe('LedgerEntry Model', () => {
         data: {
           userId: user.id,
           walletNumber: 'AHV-0001-0001-0001',
-          balanceCents: BigInt(100000), // R1000
+          balance: BigInt(100000), // R1000
         },
       });
 
@@ -72,7 +72,7 @@ describe('LedgerEntry Model', () => {
         data: {
           userId: user.id,
           walletNumber: 'AHV-0001-0001-0002',
-          balanceCents: BigInt(100000),
+          balance: BigInt(100000),
         },
       });
 
@@ -116,7 +116,7 @@ describe('LedgerEntry Model', () => {
         data: {
           userId: user1.id,
           walletNumber: 'AHV-0001-0001-0003',
-          balanceCents: BigInt(100000),
+          balance: BigInt(100000),
         },
       });
 
@@ -124,7 +124,7 @@ describe('LedgerEntry Model', () => {
         data: {
           userId: user2.id,
           walletNumber: 'AHV-0001-0001-0004',
-          balanceCents: BigInt(100000),
+          balance: BigInt(100000),
         },
       });
 
@@ -200,7 +200,7 @@ describe('LedgerEntry Model', () => {
         data: {
           userId: user.id,
           walletNumber: 'AHV-0001-0001-0005',
-          balanceCents: BigInt(100000),
+          balance: BigInt(100000),
         },
       });
 
@@ -249,7 +249,7 @@ describe('LedgerEntry Model', () => {
         data: {
           userId: user.id,
           walletNumber: 'AHV-0001-0001-0006',
-          balanceCents: BigInt(100000),
+          balance: BigInt(100000),
         },
       });
 
@@ -300,7 +300,7 @@ describe('LedgerEntry Model', () => {
         data: {
           userId: user.id,
           walletNumber: 'AHV-0001-0001-0007',
-          balanceCents: BigInt(100000),
+          balance: BigInt(100000),
         },
       });
 
@@ -351,7 +351,7 @@ describe('LedgerEntry Model', () => {
         data: {
           userId: user.id,
           walletNumber: 'AHV-0001-0001-0008',
-          balanceCents: BigInt(100000), // Starting with R1000
+          balance: BigInt(100000), // Starting with R1000
         },
       });
 
@@ -427,7 +427,7 @@ describe('LedgerEntry Model', () => {
         data: {
           userId: user.id,
           walletNumber: 'AHV-0001-0001-0009',
-          balanceCents: BigInt(100000),
+          balance: BigInt(100000),
         },
       });
 
@@ -518,7 +518,7 @@ describe('LedgerEntry Model', () => {
         data: {
           userId: user.id,
           walletNumber: 'AHV-0001-0001-0010',
-          balanceCents: BigInt(100000),
+          balance: BigInt(100000),
         },
       });
 

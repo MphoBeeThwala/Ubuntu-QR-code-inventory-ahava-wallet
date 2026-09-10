@@ -1,5 +1,16 @@
 // services/auth-service/src/auth.service.ts
 // Banking-grade authentication. Argon2id PINs. RS256 JWTs. Device binding.
+//
+// NOT CURRENTLY WIRED IN: nothing imports this file. The service that
+// actually runs is ./main.ts, which reimplements register/login/refresh
+// directly. This class predates (or was written alongside, then never
+// merged into) main.ts's routes — see the engineering audit for how that
+// happened. Its PII-encryption-on-write pattern (encryptField, below) was
+// the one piece of genuine value main.ts was missing; that's now been
+// ported into main.ts directly using @ahava/shared-crypto's encryptPII.
+// Treat this file as a design reference, not a second implementation to
+// keep in sync — either delete it or replace main.ts's routes with this
+// class outright, but don't let both exist as if they're both live.
 
 import {
   PrismaClient,

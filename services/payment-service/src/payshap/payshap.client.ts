@@ -1,6 +1,16 @@
 // services/payment-service/src/payshap/payshap.client.ts
 // SARB PayShap integration — ISO 20022 pacs.008 payment initiation
 // Full mTLS, message signing, and idempotency per SARB PayShap spec v1.0
+//
+// NOT CURRENTLY WIRED IN, and the integration model below is not how
+// PayShap actually works: this targets a fabricated direct SARB endpoint
+// (see the base URL further down); real PayShap access goes through
+// BankservAfrica as the rapid-payments-programme operator, reached either
+// via a sponsoring bank or (once available) direct non-bank participation
+// under SARB's forthcoming activity-based licensing regime — see the
+// engineering + regulatory audit for the current, real path. Keep the mTLS
+// / message-signing plumbing here as a reference for whichever real
+// integration replaces it; don't point it at this URL.
 
 import axios, { AxiosInstance, InternalAxiosRequestConfig } from 'axios';
 import * as https from 'https';

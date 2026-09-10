@@ -1,12 +1,31 @@
 import { PrismaClient } from '@prisma/client';
-import { 
-  FEE_TYPES, 
+import {
+  FEE_TYPES,
   FEE_STATUS,
   FEE_ACCOUNT_CODES,
   CALCULATION_METHODS,
-  DEFAULT_FEES 
+  DEFAULT_FEES
 } from './constants/fees';
 
+// DOES NOT CURRENTLY COMPILE: imports from './constants/fees', which does
+// not exist anywhere in the repo (confirmed via `tsc --noEmit`) — this file
+// has never successfully built. Recreate that module (FEE_TYPES,
+// FEE_STATUS, FEE_ACCOUNT_CODES, CALCULATION_METHODS, DEFAULT_FEES) before
+// attempting to wire this in.
+//
+// NOT CURRENTLY WIRED IN: ../main.ts's live /payments route uses its own
+// inline flat 0.5%/min-25c fee logic instead of calculateFee() below, so
+// FeeConfiguration rows are never actually consulted. calculateFee() itself
+// is fine and worth wiring in eventually (DB-configurable, BigInt-safe).
+// recordFeeWithLedger() is NOT safe to call as-is: it opens its own
+// $transaction on a module-level `prisma` instance, so calling it from
+// inside main.ts's payment transaction would run on a second, separate
+// connection — breaking the atomicity the caller relies on — and its
+// credit-entry ledger row uses the literal strings "PLATFORM_WALLET" /
+// "SYSTEM" for walletId/userId, which are not valid values for those
+// columns (both are UUID-typed) and would fail at insert time. Refactor to
+// accept an optional `tx: Prisma.TransactionClient` and a real platform
+// wallet id before wiring this in.
 const prisma = new PrismaClient();
 
 interface FeeCalculationInput {

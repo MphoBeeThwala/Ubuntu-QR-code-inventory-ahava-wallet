@@ -6,13 +6,12 @@ import express, { Request, Response, NextFunction } from "express";
 import { v4 as uuidv4 } from "uuid";
 import { PrismaClient } from "@prisma/client";
 import * as crypto from "crypto";
-import * as jwt from "jsonwebtoken";
 import {
   AhavaError, AhavaErrorCode, createSuccessResponse, createErrorResponse,
 } from "@ahava/shared-errors";
 import {
   hashPin, verifyPin, generateAccessToken, generateRefreshToken,
-  parseBearerToken, decryptPII, fetchPIIEncryptionKey,
+  parseBearerToken, decryptPII, encryptPII, fetchPIIEncryptionKey, verifyJWT,
 } from "@ahava/shared-crypto";
 import { sendSms, welcomeMessage, loginAlertMessage } from "./sms";
 import { writeAuditLog } from "@ahava/shared-audit";
@@ -20,7 +19,10 @@ import { writeAuditLog } from "@ahava/shared-audit";
 const app: express.Express = express();
 const prisma = new PrismaClient();
 const PORT = process.env.PORT || 6001;
-const getJwtPrivateKey = () => (process.env.JWT_PRIVATE_KEY || "").replace(/\n/g, "\n");
+// Key loading (unescaping \n, AWS Secrets Manager, env fallback) lives in
+// @ahava/shared-crypto's fetchJWTPrivateKey/fetchJWTPublicKey — do not
+// re-implement it here. generateAccessToken/generateRefreshToken/verifyJWT
+// already call those when no key is passed explicitly.
 
 app.use(express.json());
 
@@ -43,14 +45,14 @@ app.get("/auth/me", async (req: Request, res: Response, next: NextFunction) => {
   try {
     const token = parseBearerToken(req.headers.authorization);
     if (!token) throw new AhavaError(AhavaErrorCode.AUTH_UNAUTHORIZED, "Authorization header missing", { requestId: req.id });
-    const publicKey = (process.env.JWT_PUBLIC_KEY || "").replace(/\n/g, "\n");
-    if (!publicKey) throw new AhavaError(AhavaErrorCode.INTERNAL_SERVER_ERROR, "JWT public key not configured", { requestId: req.id });
-    const payload = jwt.verify(token, publicKey, { algorithms: ["RS256"], issuer: "ahava-ewallet", audience: "ahava-api" }) as Record<string, unknown>;
+    const payload = await verifyJWT(token);
     const userId = (payload.userId ?? payload.sub) as string | undefined;
     if (!userId) throw new AhavaError(AhavaErrorCode.AUTH_INVALID_TOKEN, "Invalid token payload", { requestId: req.id });
     const user = await prisma.user.findUnique({ where: { id: userId }, select: { id: true, phoneNumber: true, kycTier: true, preferredLanguage: true, isDeleted: true } });
     if (!user || user.isDeleted) throw new AhavaError(AhavaErrorCode.AUTH_UNAUTHORIZED, "User not found", { requestId: req.id });
-    res.json(createSuccessResponse({ user: { id: user.id, phoneNumber: user.phoneNumber, kycTier: user.kycTier, preferredLanguage: user.preferredLanguage } }, req.id));
+    let mePhone = user.phoneNumber;
+    try { if (mePhone && mePhone.includes(":")) mePhone = decryptPII(mePhone, await fetchPIIEncryptionKey()); } catch {}
+    res.json(createSuccessResponse({ user: { id: user.id, phoneNumber: mePhone, kycTier: user.kycTier, preferredLanguage: user.preferredLanguage } }, req.id));
   } catch (error) { next(error); }
 });
 
@@ -63,16 +65,17 @@ app.post("/auth/register", async (req: Request, res: Response, next: NextFunctio
     const phoneNumberHash = crypto.createHash("sha256").update(phoneNumber.trim().toLowerCase()).digest("hex");
     if (await prisma.user.findUnique({ where: { phoneNumberHash } })) throw new AhavaError(AhavaErrorCode.CONFLICT_PHONE_ALREADY_REGISTERED, "Phone already registered", { requestId: req.id });
     const pinHash = await hashPin(pin);
-    const user = await prisma.user.create({ data: { phoneNumber, phoneNumberHash, pinHash, primaryDeviceId: deviceId, deviceBoundAt: new Date(), kycTier: "TIER_0", kycStatus: "PENDING", preferredLanguage: "en" } });
+    const encryptedPhone = encryptPII(phoneNumber, await fetchPIIEncryptionKey());
+    const user = await prisma.user.create({ data: { phoneNumber: encryptedPhone, phoneNumberHash, pinHash, primaryDeviceId: deviceId, deviceBoundAt: new Date(), kycTier: "TIER_0", kycStatus: "PENDING", preferredLanguage: "en" } });
     const walletNumber = `AHV-${user.id.substring(0, 8).toUpperCase()}`;
     const wallet = await prisma.wallet.create({ data: { userId: user.id, walletNumber, walletType: "PERSONAL", status: "ACTIVE", kycTier: "TIER_0", balance: 0, dailyLimit: 50000, monthlyLimit: 200000, maxBalance: 250000, perTransactionLimit: 50000 } });
-    const refreshTokenString = await generateRefreshToken(user.id, deviceId, "30d", getJwtPrivateKey());
+    const refreshTokenString = await generateRefreshToken(user.id, deviceId, "30d");
     const refreshTokenHash = crypto.createHash("sha256").update(refreshTokenString).digest("hex");
     await prisma.refreshToken.create({ data: { userId: user.id, tokenHash: refreshTokenHash, deviceId, deviceName: deviceName || "Unknown Device", ipAddress, userAgent, expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) } });
-    const accessToken = await generateAccessToken({ userId: user.id, phoneNumber, kycTier: user.kycTier, deviceId }, "15m", getJwtPrivateKey());
+    const accessToken = await generateAccessToken({ userId: user.id, phoneNumber, kycTier: user.kycTier, deviceId }, "15m");
     await writeAuditLog(prisma, { userId: user.id, action: "USER_REGISTERED", entityType: "User", entityId: user.id, serviceId: "auth-service", ipAddress, userAgent, deviceId });
     void sendSms(phoneNumber, welcomeMessage(walletNumber));
-    res.status(201).json(createSuccessResponse({ userId: user.id, walletId: wallet.id, walletNumber: wallet.walletNumber, accessToken, refreshToken: refreshTokenString, user: { phoneNumber: user.phoneNumber, kycTier: user.kycTier, preferredLanguage: user.preferredLanguage } }, req.id));
+    res.status(201).json(createSuccessResponse({ userId: user.id, walletId: wallet.id, walletNumber: wallet.walletNumber, accessToken, refreshToken: refreshTokenString, user: { phoneNumber, kycTier: user.kycTier, preferredLanguage: user.preferredLanguage } }, req.id));
   } catch (error) { next(error); }
 });
 
@@ -92,16 +95,16 @@ app.post("/auth/login", async (req: Request, res: Response, next: NextFunction) 
     }
     if (user.primaryDeviceId && user.primaryDeviceId !== deviceId) throw new AhavaError(AhavaErrorCode.AUTH_DEVICE_MISMATCH, "Device not recognized", { requestId: req.id });
     await prisma.user.update({ where: { id: user.id }, data: { failedPinAttempts: 0, pinLockedUntil: null } });
-    const refreshTokenString = await generateRefreshToken(user.id, deviceId, "30d", getJwtPrivateKey());
+    const refreshTokenString = await generateRefreshToken(user.id, deviceId, "30d");
     const refreshTokenHash = crypto.createHash("sha256").update(refreshTokenString).digest("hex");
     await prisma.refreshToken.create({ data: { userId: user.id, tokenHash: refreshTokenHash, deviceId, deviceName: deviceName || "Unknown Device", ipAddress, userAgent, expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) } });
-    const accessToken = await generateAccessToken({ userId: user.id, phoneNumber, kycTier: user.kycTier, deviceId }, "15m", getJwtPrivateKey());
+    const accessToken = await generateAccessToken({ userId: user.id, phoneNumber, kycTier: user.kycTier, deviceId }, "15m");
     await writeAuditLog(prisma, { userId: user.id, action: "USER_LOGIN", entityType: "User", entityId: user.id, serviceId: "auth-service", ipAddress, userAgent, deviceId });
     let loginPhone = phoneNumber;
     try { const encKey = await fetchPIIEncryptionKey(); if (user.phoneNumber && user.phoneNumber.includes(":")) loginPhone = decryptPII(user.phoneNumber, encKey); } catch {}
     void sendSms(loginPhone, loginAlertMessage(new Date().toLocaleString("en-ZA", { timeZone: "Africa/Johannesburg" })));
     const wallet = await prisma.wallet.findFirst({ where: { userId: user.id, status: "ACTIVE", isDeleted: false }, select: { id: true, walletNumber: true }, orderBy: { createdAt: "asc" } });
-    res.json(createSuccessResponse({ userId: user.id, accessToken, refreshToken: refreshTokenString, user: { phoneNumber: user.phoneNumber, kycTier: user.kycTier }, ...(wallet && { walletId: wallet.id, walletNumber: wallet.walletNumber }) }, req.id));
+    res.json(createSuccessResponse({ userId: user.id, accessToken, refreshToken: refreshTokenString, user: { phoneNumber: loginPhone, kycTier: user.kycTier }, ...(wallet && { walletId: wallet.id, walletNumber: wallet.walletNumber }) }, req.id));
   } catch (error) { next(error); }
 });
 
@@ -115,7 +118,7 @@ app.post("/auth/refresh", async (req: Request, res: Response, next: NextFunction
     if (storedToken.expiresAt < new Date()) throw new AhavaError(AhavaErrorCode.AUTH_SESSION_EXPIRED, "Refresh token expired", { requestId: req.id });
     const user = await prisma.user.findUnique({ where: { id: userId } });
     if (!user || user.isDeleted) throw new AhavaError(AhavaErrorCode.AUTH_UNAUTHORIZED, "User not found", { requestId: req.id });
-    const newAccessToken = await generateAccessToken({ userId: user.id, phoneNumber: user.phoneNumber, kycTier: user.kycTier, deviceId }, "15m", getJwtPrivateKey());
+    const newAccessToken = await generateAccessToken({ userId: user.id, phoneNumber: user.phoneNumber, kycTier: user.kycTier, deviceId }, "15m");
     res.json(createSuccessResponse({ accessToken: newAccessToken }, req.id));
   } catch (error) { next(error); }
 });
