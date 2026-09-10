@@ -1,6 +1,18 @@
 // services/payment-service/src/payment.service.ts
 // Senior banking-grade payment processor.
 // Every payment: idempotency check → limit validation → sanctions screen → atomic debit/credit → audit log → notify.
+//
+// NOT CURRENTLY WIRED IN: nothing imports this file. The service that
+// actually runs is ./main.ts. Two things here are worth keeping as
+// reference: (1) this file calls AmlEngine.screenSanctions(...) — a real,
+// blocking, pre-transaction sanctions check in aml-service/src/aml.engine.ts
+// — BEFORE moving money; main.ts only screens asynchronously after the
+// transaction commits (see the audit's AML finding). Wiring synchronous
+// sanctions screening into main.ts is the natural next step after this
+// P0 fix pass. (2) its idempotency check is Redis GET-then-later-SETEX,
+// which is NOT atomic (a TOCTOU race) — main.ts's DB-unique-constraint
+// approach is the correct pattern; don't port this part over.
+// Also imports ./payshap/payshap.client.ts — see that file's own note.
 
 import { Prisma, PrismaClient } from "@prisma/client";
 import crypto from "crypto";

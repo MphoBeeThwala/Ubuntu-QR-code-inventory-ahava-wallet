@@ -45,6 +45,16 @@ const mockVerifyPin = jest.fn();
 const mockGenerateAccessToken = jest.fn();
 const mockGenerateRefreshToken = jest.fn();
 const mockParseBearerToken = jest.fn();
+// Added alongside the P0 fix for the JWT key-unescape bug and the
+// plaintext-PII-on-registration gap — main.ts now calls these directly
+// instead of hand-rolling key loading / never encrypting at all.
+const mockEncryptPII = jest
+  .fn()
+  .mockImplementation((plaintext: string) => `enc:${plaintext}`);
+const mockDecryptPII = jest
+  .fn()
+  .mockImplementation((ciphertext: string) => ciphertext.replace(/^enc:/, ""));
+const mockFetchPIIEncryptionKey = jest.fn().mockResolvedValue("test-key");
 
 jest.mock("@ahava/shared-crypto", () => ({
   hashPin: (...args: unknown[]) => mockHashPin(...args),
@@ -53,6 +63,14 @@ jest.mock("@ahava/shared-crypto", () => ({
   generateRefreshToken: (...args: unknown[]) =>
     mockGenerateRefreshToken(...args),
   parseBearerToken: (...args: unknown[]) => mockParseBearerToken(...args),
+  encryptPII: (...args: unknown[]) => mockEncryptPII(...args),
+  decryptPII: (...args: unknown[]) => mockDecryptPII(...args),
+  fetchPIIEncryptionKey: (...args: unknown[]) =>
+    mockFetchPIIEncryptionKey(...args),
+  // /auth/me now calls verifyJWT() instead of jwt.verify() directly —
+  // reuse the existing mockJwtVerify so every test that already configures
+  // it (mockJwtVerify.mockReturnValue(...)) keeps working unchanged.
+  verifyJWT: (...args: unknown[]) => mockJwtVerify(...args),
 }));
 
 const mockJwtVerify = jest.fn();
@@ -153,7 +171,15 @@ describe("GET /auth/me", () => {
   });
 
   it("returns 500 when JWT public key is not configured", async () => {
-    process.env.JWT_PUBLIC_KEY = "";
+    // Key loading (and the "no key available" error) now lives entirely in
+    // @ahava/shared-crypto's verifyJWT -> fetchJWTPublicKey -> fetchSecret,
+    // not in a local env-var check in main.ts (see the P0 fix for the
+    // JWT key-unescape bug) — simulate the same failure at that boundary.
+    mockJwtVerify.mockImplementationOnce(() => {
+      throw new Error(
+        "Failed to fetch secret '/ahava/dev/jwt-public-key' and no env fallback (JWT_PUBLIC_KEY) found",
+      );
+    });
 
     const res = await request(app)
       .get("/auth/me")

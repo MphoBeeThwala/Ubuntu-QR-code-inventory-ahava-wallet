@@ -146,8 +146,38 @@ type WalletRow = {
   walletNumber: string;
 };
 
-function calculateTransferFee(amountCents: number): number {
-  return Math.max(25, Math.floor(amountCents * 0.005));
+// Mirrors services/ledger-service's CHART_OF_ACCOUNTS. Duplicated here
+// rather than imported because these are separately deployed services with
+// no shared "chart of accounts" package yet — extracting one is a good
+// follow-up once more than two services need it.
+const LEDGER_ACCOUNT_CUSTOMER_WALLETS = "1100";
+
+// BigInt-safe: 0.5% of the transfer, minimum 25 cents. Was previously
+// `Math.floor(amountCents * 0.005)` on a plain `number`, which is exact for
+// small values but loses precision as amounts grow — BigInt basis-point
+// math has no such ceiling.
+function calculateTransferFee(amountCents: bigint): bigint {
+  const feeBps = (amountCents * 50n) / 10000n; // 50 bps = 0.5%
+  return feeBps > 25n ? feeBps : 25n;
+}
+
+// amount/feeAmount/netAmount/balanceBefore/balanceAfter are BigInt columns;
+// res.json() throws on a raw BigInt, so every WalletTransaction returned to
+// a client must go through this first. Guards each field individually
+// (rather than assuming all five are always present as bigint) since not
+// every caller selects every column.
+function serializeWalletTxn<T extends Record<string, unknown>>(t: T) {
+  const out: Record<string, unknown> = { ...t };
+  for (const key of [
+    "amount",
+    "feeAmount",
+    "netAmount",
+    "balanceBefore",
+    "balanceAfter",
+  ]) {
+    if (typeof out[key] === "bigint") out[key] = (out[key] as bigint).toString();
+  }
+  return out;
 }
 
 // POST /payments - Create payment transaction (atomic double-entry)
@@ -240,7 +270,10 @@ app.post(
       if (existingTxn) {
         if (existingTxn.status === "COMPLETED") {
           return res.json(
-            createSuccessResponse({ transaction: existingTxn }, req.id),
+            createSuccessResponse(
+              { transaction: serializeWalletTxn(existingTxn) },
+              req.id,
+            ),
           );
         }
         throw new AhavaError(
@@ -308,14 +341,13 @@ app.post(
             );
           }
 
-          const feeAmount = calculateTransferFee(amountCents);
-          const totalDebitCents = amountCents + feeAmount;
-          const senderBalanceAfter =
-            senderWallet.balance - BigInt(totalDebitCents);
-          const receiverBalanceAfter =
-            receiverWallet.balance + BigInt(amountCents);
+          const amountCentsBig = BigInt(amountCents);
+          const feeAmount = calculateTransferFee(amountCentsBig);
+          const totalDebitCents = amountCentsBig + feeAmount;
+          const senderBalanceAfter = senderWallet.balance - totalDebitCents;
+          const receiverBalanceAfter = receiverWallet.balance + amountCentsBig;
 
-          if (senderWallet.balance < BigInt(totalDebitCents)) {
+          if (senderWallet.balance < totalDebitCents) {
             throw new AhavaError(
               AhavaErrorCode.WAL_INSUFFICIENT_BALANCE,
               "Insufficient funds",
@@ -329,9 +361,9 @@ app.post(
               transactionType: "DEBIT",
               status: "COMPLETED",
               paymentMethod: paymentMethod || "UBUNTUPAY_WALLET",
-              amount: amountCents,
+              amount: amountCentsBig,
               feeAmount,
-              netAmount: amountCents,
+              netAmount: amountCentsBig,
               balanceBefore: senderWallet.balance,
               balanceAfter: senderBalanceAfter,
               counterpartyWalletId: receiverWalletIdFinal,
@@ -349,9 +381,9 @@ app.post(
               transactionType: "CREDIT",
               status: "COMPLETED",
               paymentMethod: paymentMethod || "UBUNTUPAY_WALLET",
-              amount: amountCents,
+              amount: amountCentsBig,
               feeAmount: 0,
-              netAmount: amountCents,
+              netAmount: amountCentsBig,
               balanceBefore: receiverWallet.balance,
               balanceAfter: receiverBalanceAfter,
               counterpartyWalletId: senderWalletId,
@@ -366,25 +398,68 @@ app.post(
           });
           await tx.wallet.update({
             where: { id: receiverWalletIdFinal },
-            data: { balance: { increment: amountCents } },
+            data: { balance: { increment: amountCentsBig } },
+          });
+
+          // ───────────────────────────────────────────────────────────
+          // LEDGER: every balance movement above must have a matching
+          // debit/credit pair here. Previously this transaction moved
+          // wallet balances directly and never touched ledger_entries at
+          // all — the double-entry ledger existed but no live payment
+          // ever wrote to it. transactionId groups the whole payment's
+          // entries so /ledger/batch-style balance checks (sum of DEBITs
+          // == sum of CREDITs) and /ledger/reconcile hold for this one
+          // event. Account code 1100 covers every Ubuntu Pay wallet
+          // (personal and fee-pool) because /ledger/reconcile currently
+          // sums ALL active wallet balances against it — segregating the
+          // fee pool onto its own account code is a good follow-up once
+          // reconcile is extended to handle more than one account.
+          // ───────────────────────────────────────────────────────────
+          await tx.ledgerEntry.create({
+            data: {
+              transactionId: debitTxn.id,
+              walletId: senderWalletId,
+              userId: senderWallet.userId,
+              entryType: "DEBIT",
+              accountCode: LEDGER_ACCOUNT_CUSTOMER_WALLETS,
+              amountCents: amountCentsBig,
+              description: description || "Wallet transfer",
+              reference: idempotencyKey,
+              counterpartyWalletId: receiverWalletIdFinal,
+              counterpartyAccountCode: LEDGER_ACCOUNT_CUSTOMER_WALLETS,
+            },
+          });
+          await tx.ledgerEntry.create({
+            data: {
+              transactionId: debitTxn.id,
+              walletId: receiverWalletIdFinal,
+              userId: receiverWallet.userId,
+              entryType: "CREDIT",
+              accountCode: LEDGER_ACCOUNT_CUSTOMER_WALLETS,
+              amountCents: amountCentsBig,
+              description: description || "Wallet transfer",
+              reference: idempotencyKey,
+              counterpartyWalletId: senderWalletId,
+              counterpartyAccountCode: LEDGER_ACCOUNT_CUSTOMER_WALLETS,
+            },
           });
 
           const feeIdempotencyKey = `fee-${idempotencyKey}`;
           const feePoolWallet = await tx.wallet.findFirst({
             where: { walletType: "FEE_POOL" },
           });
-          if (feePoolWallet && feeAmount > 0) {
+          if (feePoolWallet && feeAmount > 0n) {
             await tx.walletTransaction.create({
               data: {
                 walletId: feePoolWallet.id,
                 transactionType: "FEE",
                 status: "COMPLETED",
                 paymentMethod: "UBUNTUPAY_WALLET",
-                amount: BigInt(feeAmount),
+                amount: feeAmount,
                 feeAmount: 0,
-                netAmount: BigInt(feeAmount),
+                netAmount: feeAmount,
                 balanceBefore: feePoolWallet.balance,
-                balanceAfter: feePoolWallet.balance + BigInt(feeAmount),
+                balanceAfter: feePoolWallet.balance + feeAmount,
                 description: `Fee for ${idempotencyKey}`,
                 idempotencyKey: feeIdempotencyKey,
               },
@@ -392,6 +467,34 @@ app.post(
             await tx.wallet.update({
               where: { id: feePoolWallet.id },
               data: { balance: { increment: feeAmount } },
+            });
+            await tx.ledgerEntry.create({
+              data: {
+                transactionId: debitTxn.id,
+                walletId: senderWalletId,
+                userId: senderWallet.userId,
+                entryType: "DEBIT",
+                accountCode: LEDGER_ACCOUNT_CUSTOMER_WALLETS,
+                amountCents: feeAmount,
+                description: `Fee for ${idempotencyKey}`,
+                reference: idempotencyKey,
+                counterpartyWalletId: feePoolWallet.id,
+                counterpartyAccountCode: LEDGER_ACCOUNT_CUSTOMER_WALLETS,
+              },
+            });
+            await tx.ledgerEntry.create({
+              data: {
+                transactionId: debitTxn.id,
+                walletId: feePoolWallet.id,
+                userId: null,
+                entryType: "CREDIT",
+                accountCode: LEDGER_ACCOUNT_CUSTOMER_WALLETS,
+                amountCents: feeAmount,
+                description: `Fee for ${idempotencyKey}`,
+                reference: idempotencyKey,
+                counterpartyWalletId: senderWalletId,
+                counterpartyAccountCode: LEDGER_ACCOUNT_CUSTOMER_WALLETS,
+              },
             });
           }
 
@@ -432,7 +535,7 @@ app.post(
           walletId: senderWalletId,
           userId: result.senderUserId,
           amountCents,
-          feeAmountCents: result.feeAmount,
+          feeAmountCents: result.feeAmount.toString(),
           paymentMethod: paymentMethod || "UBUNTUPAY_WALLET",
           counterpartyWalletId: receiverWalletIdFinal,
           description,
@@ -449,10 +552,10 @@ app.post(
         createSuccessResponse(
           {
             transaction: {
-              debit: result.debitTxn,
-              credit: result.creditTxn,
-              fee: result.feeAmount,
-              totalDebitedCents: result.totalDebitCents,
+              debit: serializeWalletTxn(result.debitTxn),
+              credit: serializeWalletTxn(result.creditTxn),
+              fee: result.feeAmount.toString(),
+              totalDebitedCents: result.totalDebitCents.toString(),
             },
           },
           req.id,

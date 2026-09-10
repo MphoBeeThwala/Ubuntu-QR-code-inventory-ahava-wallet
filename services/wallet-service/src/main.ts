@@ -1,7 +1,7 @@
 import express, { Request, Response, NextFunction } from "express";
 import crypto from "crypto";
 import { v4 as uuidv4 } from "uuid";
-import { PrismaClient } from "@prisma/client";
+import { Prisma, PrismaClient } from "@prisma/client";
 import {
   AhavaError,
   AhavaErrorCode,
@@ -12,6 +12,7 @@ import { Queue } from "bullmq";
 import { QUEUE_NAMES, getRedisConnectionConfig } from "@ahava/shared-events";
 import { sendSms, txSentMessage, txReceivedMessage } from "./sms";
 import { writeAuditLog } from "@ahava/shared-audit";
+import { decryptPII, fetchPIIEncryptionKey } from "@ahava/shared-crypto";
 
 const app = express();
 const prisma = new PrismaClient();
@@ -32,6 +33,20 @@ function compactIdempotencyKey(prefix: string, key: string): string {
     .digest("hex")
     .slice(0, 36);
 }
+
+// Mirrors services/ledger-service's CHART_OF_ACCOUNTS — see the same
+// constant in payment-service/src/main.ts for why it's duplicated rather
+// than shared, and why both wallets in a QR payment use this one code.
+const LEDGER_ACCOUNT_CUSTOMER_WALLETS = "1100";
+
+type LockedWalletRow = {
+  id: string;
+  userId: string;
+  isDeleted: boolean;
+  status: string;
+  balance: bigint;
+  walletNumber: string;
+};
 
 /** Serialize BigInt fields to strings for JSON */
 function serializeWallet(w: Record<string, unknown>) {
@@ -716,42 +731,6 @@ app.post(
         }
       }
 
-      const senderWallet = await prisma.wallet.findUnique({
-        where: { id: senderWalletId, isDeleted: false },
-      });
-
-      if (!senderWallet) {
-        throw new AhavaError(
-          AhavaErrorCode.WAL_NOT_FOUND,
-          "Sender wallet not found",
-          { requestId: req.id },
-        );
-      }
-
-      if (senderWallet.status === "SUSPENDED") {
-        throw new AhavaError(
-          AhavaErrorCode.WAL_WALLET_SUSPENDED,
-          "Sender wallet is suspended",
-          { requestId: req.id },
-        );
-      }
-
-      if (senderWallet.status === "FROZEN") {
-        throw new AhavaError(
-          AhavaErrorCode.WAL_WALLET_FROZEN,
-          "Sender wallet is frozen",
-          { requestId: req.id },
-        );
-      }
-
-      if (Number(senderWallet.balance) < payAmount) {
-        throw new AhavaError(
-          AhavaErrorCode.WAL_INSUFFICIENT_BALANCE,
-          "Insufficient balance",
-          { requestId: req.id },
-        );
-      }
-
       if (senderWalletId === qr.walletId) {
         throw new AhavaError(
           AhavaErrorCode.PAY_SELF_TRANSFER,
@@ -760,7 +739,6 @@ app.post(
         );
       }
 
-      const receiverWallet = qr.wallet;
       const debitIdempotencyKey = compactIdempotencyKey(
         "qr-debit",
         idempotencyKey,
@@ -769,60 +747,184 @@ app.post(
         "qr-credit",
         idempotencyKey,
       );
+      const payAmountBig = BigInt(payAmount);
 
-      const [, , debitTxn] = await prisma.$transaction([
-        prisma.wallet.update({
-          where: { id: senderWalletId },
-          data: { balance: { decrement: payAmount } },
-        }),
-        prisma.wallet.update({
-          where: { id: qr.walletId },
-          data: { balance: { increment: payAmount } },
-        }),
-        prisma.walletTransaction.create({
-          data: {
-            walletId: senderWalletId,
-            transactionType: "DEBIT",
-            paymentMethod: "UBUNTUPAY_WALLET",
-            amount: payAmount,
-            feeAmount: 0,
-            netAmount: payAmount,
-            balanceBefore: senderWallet.balance,
-            balanceAfter: BigInt(Number(senderWallet.balance) - payAmount),
-            status: "COMPLETED",
-            description:
-              qr.description || `QR payment to ${receiverWallet.walletNumber}`,
-            counterpartyWalletId: qr.walletId,
-            paymentQrId: qr.id,
-            idempotencyKey: debitIdempotencyKey,
-          },
-        }),
-        prisma.walletTransaction.create({
-          data: {
-            walletId: qr.walletId,
-            transactionType: "CREDIT",
-            paymentMethod: "UBUNTUPAY_WALLET",
-            amount: payAmount,
-            feeAmount: 0,
-            netAmount: payAmount,
-            balanceBefore: receiverWallet.balance,
-            balanceAfter: BigInt(Number(receiverWallet.balance) + payAmount),
-            status: "COMPLETED",
-            description: qr.description || `QR payment received`,
-            counterpartyWalletId: senderWalletId,
-            paymentQrId: qr.id,
-            idempotencyKey: creditIdempotencyKey,
-          },
-        }),
-        prisma.paymentQrCode.update({
-          where: { id: qr.id },
-          data: {
-            usageCount: { increment: 1 },
-            usedAt: new Date(),
-            isActive: qr.maxUsage === 1 ? false : true,
-          },
-        }),
-      ]);
+      // ───────────────────────────────────────────────────────────────
+      // Previously: balance/status were checked with a plain findUnique
+      // BEFORE this point, then the wallet updates + transaction rows ran
+      // in a bare array-form $transaction with no row locking and no
+      // re-check inside it. Two concurrent scans of the same QR code
+      // could both pass the outside-the-lock balance check and both
+      // debit, driving the sender's balance negative — and, separately,
+      // a single-use QR's usageCount/maxUsage check was read outside any
+      // lock too, so it could be paid twice concurrently before either
+      // request's increment landed. Both are fixed by moving every check
+      // and every write inside one FOR UPDATE-locked transaction.
+      // ───────────────────────────────────────────────────────────────
+      const result = await prisma.$transaction(
+        async (tx: Prisma.TransactionClient) => {
+          const [firstId, secondId] =
+            senderWalletId < qr.walletId
+              ? [senderWalletId, qr.walletId]
+              : [qr.walletId, senderWalletId];
+
+          const lockedWallets = await tx.$queryRaw<LockedWalletRow[]>`
+            SELECT id, "userId" AS "userId", "isDeleted" AS "isDeleted", status, balance, "walletNumber" AS "walletNumber"
+            FROM wallets
+            WHERE id IN (${firstId}::uuid, ${secondId}::uuid)
+            ORDER BY id
+            FOR UPDATE
+          `;
+
+          const senderWallet = lockedWallets.find((w) => w.id === senderWalletId);
+          const receiverWallet = lockedWallets.find((w) => w.id === qr.walletId);
+
+          if (!senderWallet || senderWallet.isDeleted) {
+            throw new AhavaError(
+              AhavaErrorCode.WAL_NOT_FOUND,
+              "Sender wallet not found",
+              { requestId: req.id },
+            );
+          }
+          if (!receiverWallet) {
+            throw new AhavaError(
+              AhavaErrorCode.WAL_NOT_FOUND,
+              "Receiver wallet not found",
+              { requestId: req.id },
+            );
+          }
+          if (senderWallet.status === "SUSPENDED") {
+            throw new AhavaError(
+              AhavaErrorCode.WAL_WALLET_SUSPENDED,
+              "Sender wallet is suspended",
+              { requestId: req.id },
+            );
+          }
+          if (senderWallet.status === "FROZEN") {
+            throw new AhavaError(
+              AhavaErrorCode.WAL_WALLET_FROZEN,
+              "Sender wallet is frozen",
+              { requestId: req.id },
+            );
+          }
+          if (senderWallet.balance < payAmountBig) {
+            throw new AhavaError(
+              AhavaErrorCode.WAL_INSUFFICIENT_BALANCE,
+              "Insufficient balance",
+              { requestId: req.id },
+            );
+          }
+
+          // Re-check single-use/expiry inside the lock: a second concurrent
+          // request that reached here after the first committed will see
+          // the updated row and correctly reject.
+          const lockedQr = await tx.$queryRaw<
+            { usageCount: number; maxUsage: number | null; isActive: boolean; expiresAt: Date | null }[]
+          >`SELECT "usageCount" AS "usageCount", "maxUsage" AS "maxUsage", "isActive" AS "isActive", "expiresAt" AS "expiresAt" FROM payment_qr_codes WHERE id = ${qr.id}::uuid FOR UPDATE`;
+          const qrRow = lockedQr[0];
+          if (!qrRow || !qrRow.isActive) {
+            throw new AhavaError(AhavaErrorCode.QR_NOT_FOUND, "QR code not found or inactive", { requestId: req.id });
+          }
+          if (qrRow.expiresAt && qrRow.expiresAt < new Date()) {
+            throw new AhavaError(AhavaErrorCode.QR_EXPIRED, "QR code has expired", { requestId: req.id });
+          }
+          if (qrRow.maxUsage !== null && qrRow.usageCount >= qrRow.maxUsage) {
+            throw new AhavaError(AhavaErrorCode.QR_MAX_USAGE_REACHED, "QR code has already been used", { requestId: req.id });
+          }
+
+          const senderBalanceAfter = senderWallet.balance - payAmountBig;
+          const receiverBalanceAfter = receiverWallet.balance + payAmountBig;
+
+          const debitTxn = await tx.walletTransaction.create({
+            data: {
+              walletId: senderWalletId,
+              transactionType: "DEBIT",
+              paymentMethod: "UBUNTUPAY_WALLET",
+              amount: payAmountBig,
+              feeAmount: 0,
+              netAmount: payAmountBig,
+              balanceBefore: senderWallet.balance,
+              balanceAfter: senderBalanceAfter,
+              status: "COMPLETED",
+              description:
+                qr.description || `QR payment to ${receiverWallet.walletNumber}`,
+              counterpartyWalletId: qr.walletId,
+              paymentQrId: qr.id,
+              idempotencyKey: debitIdempotencyKey,
+            },
+          });
+          const creditTxn = await tx.walletTransaction.create({
+            data: {
+              walletId: qr.walletId,
+              transactionType: "CREDIT",
+              paymentMethod: "UBUNTUPAY_WALLET",
+              amount: payAmountBig,
+              feeAmount: 0,
+              netAmount: payAmountBig,
+              balanceBefore: receiverWallet.balance,
+              balanceAfter: receiverBalanceAfter,
+              status: "COMPLETED",
+              description: qr.description || `QR payment received`,
+              counterpartyWalletId: senderWalletId,
+              paymentQrId: qr.id,
+              idempotencyKey: creditIdempotencyKey,
+            },
+          });
+
+          await tx.wallet.update({
+            where: { id: senderWalletId },
+            data: { balance: { decrement: payAmountBig } },
+          });
+          await tx.wallet.update({
+            where: { id: qr.walletId },
+            data: { balance: { increment: payAmountBig } },
+          });
+          await tx.paymentQrCode.update({
+            where: { id: qr.id },
+            data: {
+              usageCount: { increment: 1 },
+              usedAt: new Date(),
+              isActive: qr.maxUsage === 1 ? false : true,
+            },
+          });
+
+          // Ledger: same rationale as payment-service's /payments route —
+          // every balance movement gets a matching debit/credit pair.
+          await tx.ledgerEntry.create({
+            data: {
+              transactionId: debitTxn.id,
+              walletId: senderWalletId,
+              userId: senderWallet.userId,
+              entryType: "DEBIT",
+              accountCode: LEDGER_ACCOUNT_CUSTOMER_WALLETS,
+              amountCents: payAmountBig,
+              description: qr.description || "QR payment",
+              reference: idempotencyKey,
+              counterpartyWalletId: qr.walletId,
+              counterpartyAccountCode: LEDGER_ACCOUNT_CUSTOMER_WALLETS,
+            },
+          });
+          await tx.ledgerEntry.create({
+            data: {
+              transactionId: debitTxn.id,
+              walletId: qr.walletId,
+              userId: receiverWallet.userId,
+              entryType: "CREDIT",
+              accountCode: LEDGER_ACCOUNT_CUSTOMER_WALLETS,
+              amountCents: payAmountBig,
+              description: qr.description || "QR payment",
+              reference: idempotencyKey,
+              counterpartyWalletId: senderWalletId,
+              counterpartyAccountCode: LEDGER_ACCOUNT_CUSTOMER_WALLETS,
+            },
+          });
+
+          return { debitTxn, creditTxn, senderWallet, receiverWallet };
+        },
+        { timeout: 10_000 },
+      );
+
+      const { debitTxn, senderWallet, receiverWallet } = result;
 
       res.status(201).json(
         createSuccessResponse(
@@ -840,7 +942,6 @@ app.post(
       const newSenderBalance = Number(senderWallet.balance) - payAmount;
       const newReceiverBalance = Number(receiverWallet.balance) + payAmount;
 
-      // Look up phone numbers (stored as base64 in DB)
       const [senderUser, receiverUser] = await Promise.all([
         prisma.user.findUnique({
           where: { id: senderWallet.userId },
@@ -852,11 +953,23 @@ app.post(
         }),
       ]);
 
+      // phoneNumber is stored via @ahava/shared-crypto's encryptPII, which
+      // produces "<ivHex>:<authTagHex>:<cipherHex>" — not base64. The
+      // previous `Buffer.from(phoneNumber, "base64")` decoded neither an
+      // encrypted nor a plaintext number correctly and silently sent SMS
+      // to garbage numbers. decryptPII understands the real format; the
+      // ":" check keeps this working for any still-plaintext legacy rows.
+      const decryptPhone = async (raw: string): Promise<string> => {
+        if (!raw.includes(":")) return raw;
+        try {
+          return decryptPII(raw, await fetchPIIEncryptionKey());
+        } catch {
+          return raw;
+        }
+      };
+
       if (senderUser) {
-        const senderPhone = Buffer.from(
-          senderUser.phoneNumber,
-          "base64",
-        ).toString("utf-8");
+        const senderPhone = await decryptPhone(senderUser.phoneNumber);
         void sendSms(
           senderPhone,
           txSentMessage(
@@ -867,10 +980,7 @@ app.post(
         );
       }
       if (receiverUser) {
-        const receiverPhone = Buffer.from(
-          receiverUser.phoneNumber,
-          "base64",
-        ).toString("utf-8");
+        const receiverPhone = await decryptPhone(receiverUser.phoneNumber);
         void sendSms(
           receiverPhone,
           txReceivedMessage(
