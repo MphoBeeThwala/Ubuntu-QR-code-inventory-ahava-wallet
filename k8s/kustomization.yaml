@@ -13,3 +13,7 @@ resources:
   - aml-service.yaml
   - ussd-service.yaml
   - agent-service.yaml
+  - ledger-service.yaml
+  - payment-orchestrator.yaml
+  - payshap-mock.yaml
+  - inventory-service.yaml

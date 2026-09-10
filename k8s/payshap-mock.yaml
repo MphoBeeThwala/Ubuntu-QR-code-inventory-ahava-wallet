@@ -1,0 +1,83 @@
+# payshap-mock is a local/staging simulator for PayShap, not a real
+# integration (see services/payment-service/src/payshap/README or the
+# engineering audit) — deploy it to non-production namespaces only.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payshap-mock
+  namespace: ahava
+  labels:
+    app: payshap-mock
+    app.kubernetes.io/part-of: ahava-ewallet
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: payshap-mock
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: payshap-mock
+    spec:
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: payshap-mock
+          image: ahava/payshap-mock:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 6011
+              name: http
+          envFrom:
+            - configMapRef:
+                name: ahava-config
+            - secretRef:
+                name: ahava-secrets
+          env:
+            - name: PORT
+              value: "6011"
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "250m"
+              memory: "256Mi"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 6011
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 6011
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: payshap-mock
+  namespace: ahava
+  labels:
+    app: payshap-mock
+spec:
+  type: ClusterIP
+  selector:
+    app: payshap-mock
+  ports:
+    - name: http
+      port: 6011
+      targetPort: 6011
