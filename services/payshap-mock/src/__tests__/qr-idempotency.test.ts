@@ -1,24 +1,45 @@
-import { PrismaClient } from '@prisma/client';
+// Mock Prisma client for testing. Declared and registered BEFORE the
+// `import ... from '../utils/qr-idempotency'` below — ts-jest keeps plain
+// `const`/`import` statements in their textual order (only `jest.mock()`
+// calls themselves get hoisted above requires), so if the import of the
+// module under test came first, its own `const prisma = new PrismaClient()`
+// would run before `mockPrisma` was assigned, hitting a temporal-dead-zone
+// ReferenceError.
+//
+// Must also return the SAME object from every `new PrismaClient()` call —
+// the previous version used `.mockImplementation(() => ({...}))`, which
+// built a brand new object (with brand new, unconfigured jest.fn()s) on
+// every call. qr-idempotency.ts constructs its own `prisma` at module load
+// time, so the test's `prisma.qrPayment.findUnique.mockResolvedValue(...)`
+// was configuring a completely different mock instance than the one the
+// module under test was actually calling — every mockResolvedValue was a
+// no-op, and every assertion against a mock call was checking a jest.fn()
+// that had never been invoked. This is why the whole suite reported wrong
+// results (found duplicates where there weren't any, empty where there
+// should have been data) despite `npm test` never having been runnable at
+// all until this fix (no jest/@types/jest were declared as dependencies in
+// package.json).
+const mockPrisma = {
+  qrPayment: {
+    findUnique: jest.fn(),
+    create: jest.fn(),
+    updateMany: jest.fn(),
+  },
+};
+
+jest.mock('@prisma/client', () => ({
+  PrismaClient: jest.fn().mockImplementation(() => mockPrisma),
+}));
+
+const prisma = mockPrisma;
+
 import {
   checkQrIdempotency,
   recordQrPayment,
   updateQrPaymentStatus,
   isQrCodeExpired,
   cleanupExpiredQrPayments,
-} from './qr-idempotency';
-
-// Mock Prisma client for testing
-jest.mock('@prisma/client', () => ({
-  PrismaClient: jest.fn().mockImplementation(() => ({
-    qrPayment: {
-      findUnique: jest.fn(),
-      create: jest.fn(),
-      updateMany: jest.fn(),
-    },
-  })),
-}));
-
-const prisma = new PrismaClient() as any;
+} from '../utils/qr-idempotency';
 
 describe('QR Payment Idempotency (BATCH 3)', () => {
   beforeEach(() => {
@@ -67,7 +88,7 @@ describe('QR Payment Idempotency (BATCH 3)', () => {
       const result = await checkQrIdempotency('qr_123', 'txn_456');
 
       expect(result.isDuplicate).toBe(true);
-      expect(result.existingPayment.transactionId).toBe('txn_456');
+      expect(result.existingPayment?.transactionId).toBe('txn_456');
     });
 
     it('should handle errors gracefully and return isDuplicate=false', async () => {
@@ -254,13 +275,15 @@ describe('QR Payment Idempotency (BATCH 3)', () => {
 });
 
 describe('QR Payment End-to-End Idempotency', () => {
-  let prisma: any;
+  // Same mockPrisma singleton as above — see the comment at the top of
+  // this file for why it must be the same object qr-idempotency.ts
+  // itself constructs, not a fresh one per describe block.
+  const prisma = mockPrisma;
 
   beforeEach(() => {
-    prisma = new PrismaClient();
-    jest.spyOn(prisma.qrPayment, 'findUnique').mockImplementation();
-    jest.spyOn(prisma.qrPayment, 'create').mockImplementation();
-    jest.spyOn(prisma.qrPayment, 'updateMany').mockImplementation();
+    prisma.qrPayment.findUnique.mockReset();
+    prisma.qrPayment.create.mockReset();
+    prisma.qrPayment.updateMany.mockReset();
   });
 
   it('should prevent duplicate QR code generation', async () => {
@@ -302,7 +325,7 @@ describe('QR Payment End-to-End Idempotency', () => {
     const result = await checkQrIdempotency('qr_123', 'txn_456');
 
     expect(result.isDuplicate).toBe(true);
-    expect(result.existingPayment.status).toBe('COMPLETED');
+    expect(result.existingPayment?.status).toBe('COMPLETED');
   });
 
   it('should allow same QR code with different transaction IDs if first payment failed', async () => {

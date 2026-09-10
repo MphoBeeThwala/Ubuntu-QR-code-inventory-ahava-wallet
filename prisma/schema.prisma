@@ -189,7 +189,7 @@ model User {
   kycDocuments         KycDocument[]
   notifications        Notification[]
   auditLogs            AuditLog[]
-  agent                Agent?
+  agentProfile         Agent?
   youthWalletControls  YouthWalletControl[]
   inventoryProducts    InventoryProduct[]
 
@@ -782,7 +782,11 @@ model InventoryTransaction {
   type                  String    @db.VarChar(20) // STOCK_IN | STOCK_OUT | SALE
   quantity              Int
   unitPriceCents        BigInt?
-  totalCents            BigInt
+  // Nullable: SALE transactions always compute this; STOCK_IN/STOCK_OUT
+  // adjustments (see inventory-service's stock.routes.ts) don't carry a
+  // monetary value in the general case (a restock or write-off count
+  // correction, not a purchase/sale).
+  totalCents            BigInt?
   walletTransactionId   String?   @db.Uuid
   notes                 String?
   createdAt             DateTime  @default(now())

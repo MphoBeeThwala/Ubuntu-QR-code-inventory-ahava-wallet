@@ -126,7 +126,7 @@ describe('BigInt JSON Serialization - Payment Orchestrator', () => {
       const parsedAmount = BigInt(stringAmount);
       
       expect(parsedAmount).toBe(BigInt(1000));
-      expect(parsedAmount).toBeInstanceOf(BigInt);
+      expect(typeof parsedAmount).toBe('bigint');
     });
 
     it('should handle large string amounts correctly with BigInt()', () => {

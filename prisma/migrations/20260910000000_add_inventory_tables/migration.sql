@@ -45,7 +45,7 @@ CREATE TABLE "inventory_transactions" (
     "type" VARCHAR(20) NOT NULL,
     "quantity" INTEGER NOT NULL,
     "unitPriceCents" BIGINT,
-    "totalCents" BIGINT NOT NULL,
+    "totalCents" BIGINT,
     "walletTransactionId" UUID,
     "notes" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,

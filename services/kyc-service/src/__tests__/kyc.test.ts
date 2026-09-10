@@ -46,6 +46,12 @@ jest.mock("@ahava/shared-events", () => ({
     KYC_DOCUMENT_UPLOADED: "kyc:document:uploaded",
     NOTIFICATION_QUEUED: "notifications:dispatch",
   },
+  getRedisConnectionConfig: jest.fn().mockReturnValue({
+    host: "127.0.0.1",
+    port: 6379,
+    maxRetriesPerRequest: null,
+    enableReadyCheck: false,
+  }),
 }));
 
 // ─── Import app AFTER all mocks ───────────────────────────────────
