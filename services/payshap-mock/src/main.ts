@@ -15,18 +15,22 @@ const PORT = process.env.PORT || 6011;
 app.use(express.json());
 
 // QR Payment Idempotency Middleware
-async function qrIdempotencyMiddleware(req, res, next) {
+async function qrIdempotencyMiddleware(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) {
   try {
     const qrCodeId = req.body.qrCodeId;
     const transactionId = req.body.transactionId;
-    
+
     if (!qrCodeId) {
       return next();
     }
 
     const checkResult = await checkQrIdempotency(qrCodeId, transactionId);
 
-    if (checkResult.isDuplicate) {
+    if (checkResult.isDuplicate && checkResult.existingPayment) {
       const existingPayment = checkResult.existingPayment;
       return res.status(409).json({
         error: 'DUPLICATE_PAYMENT',
@@ -153,8 +157,12 @@ app.get('/payshap/qr/:id', async (req, res) => {
 
 // Process payment with idempotency check
 app.post('/payshap/pay', qrIdempotencyMiddleware, async (req, res) => {
+  // Declared here, not inside the try block, specifically so the catch
+  // block below can still read it — it previously read `qrCodeId` from a
+  // `const` scoped to the try block, which throws ReferenceError on any
+  // error, masking the real failure with a crash instead of a clean 500.
+  const qrCodeId = req.body.qrCodeId;
   try {
-    const qrCodeId = req.body.qrCodeId;
     const transactionId = req.body.transactionId;
     const amountCents = req.body.amountCents;
 

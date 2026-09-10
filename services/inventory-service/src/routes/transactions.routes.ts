@@ -48,7 +48,7 @@ router.get('/', async (req, res, next) => {
     const serialized = transactions.map((t) => ({
       ...t,
       unitPriceCents: t.unitPriceCents?.toString() ?? null,
-      totalCents: t.totalCents.toString(),
+      totalCents: t.totalCents?.toString() ?? null,
       product: {
         ...t.product,
         priceCents: t.product.priceCents.toString(),
@@ -135,7 +135,7 @@ router.post('/sale', async (req, res, next) => {
           transaction: {
             ...inventoryTxn,
             unitPriceCents: inventoryTxn.unitPriceCents?.toString() ?? null,
-            totalCents: inventoryTxn.totalCents.toString(),
+            totalCents: inventoryTxn.totalCents?.toString() ?? null,
           },
         },
         req.id,

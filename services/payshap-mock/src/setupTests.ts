@@ -1,5 +1,3 @@
-import { PrismaClient } from '@prisma/client';
-
 // Mock Prisma Client for unit tests
 jest.mock('@prisma/client', () => ({
   PrismaClient: jest.fn().mockImplementation(() => ({
@@ -28,14 +26,3 @@ beforeAll(() => {
 afterAll(() => {
   jest.clearAllMocks();
 });
-
-// Make PrismaClient available globally for tests
-declare global {
-  namespace NodeJS {
-    interface Global {
-      prisma: any;
-    }
-  }
-}
-
-global.prisma = new PrismaClient();

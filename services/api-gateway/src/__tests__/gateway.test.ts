@@ -1,6 +1,40 @@
 import request from "supertest";
 import crypto from "crypto";
 import * as jwt from "jsonwebtoken";
+
+// rate-limit.middleware constructs a real ioredis client (with an
+// always-retrying retryStrategy) at import time. Without a Redis server in
+// the test environment that client reconnects forever, leaving an open
+// handle that keeps the process alive after the test run finishes — jest
+// never exits, it just hangs past its process-level timeout. Mocked here,
+// before importing main (which pulls in the middleware), so no real socket
+// is ever opened.
+//
+// rate-limit-redis drives this mock through two Lua-script-shaped calls it
+// issues on every request: `SCRIPT LOAD <lua>`, which must resolve to a
+// string (the script SHA), and `EVALSHA <sha> ...`, which must resolve to a
+// 2-element array `[totalHits, ttlMs]` — see loadIncrementScript/get in
+// rate-limit-redis/dist/index.cjs. Any other shape throws "unexpected reply
+// from redis client" before the request handler ever runs.
+//
+// `call` is a plain function, not `jest.fn()`, deliberately: this suite's
+// `beforeEach` runs `jest.resetAllMocks()`, which (unlike `clearAllMocks`)
+// strips implementations set via `jest.fn(impl)` back to a bare stub — that
+// silently broke rate limiting on every test after the first.
+jest.mock("ioredis", () => {
+  return jest.fn().mockImplementation(() => ({
+    on: () => {},
+    call: (...args: unknown[]) => {
+      const command = String(args[0]).toUpperCase();
+      if (command === "SCRIPT") return Promise.resolve("mocked-script-sha1");
+      if (command === "EVALSHA" || command === "EVAL") return Promise.resolve([1, 60000]);
+      return Promise.resolve(undefined);
+    },
+    quit: () => Promise.resolve(undefined),
+    disconnect: () => {},
+  }));
+});
+
 import app from "../main";
 import { setPublicKeyForTesting } from "../middleware/auth.middleware";
 
