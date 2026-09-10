@@ -1,0 +1,100 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payment-orchestrator
+  namespace: ahava
+  labels:
+    app: payment-orchestrator
+    app.kubernetes.io/part-of: ahava-ewallet
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: payment-orchestrator
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: payment-orchestrator
+    spec:
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: payment-orchestrator
+          image: ahava/payment-orchestrator:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 6005
+              name: http
+          envFrom:
+            - configMapRef:
+                name: ahava-config
+            - secretRef:
+                name: ahava-secrets
+          env:
+            - name: PORT
+              value: "6005"
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 6005
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 6005
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: payment-orchestrator
+  namespace: ahava
+  labels:
+    app: payment-orchestrator
+spec:
+  type: ClusterIP
+  selector:
+    app: payment-orchestrator
+  ports:
+    - name: http
+      port: 6005
+      targetPort: 6005
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: payment-orchestrator-hpa
+  namespace: ahava
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: payment-orchestrator
+  minReplicas: 2
+  maxReplicas: 6
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
