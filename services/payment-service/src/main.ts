@@ -11,6 +11,7 @@ import {
 } from "@ahava/shared-errors";
 import { QUEUE_NAMES, getRedisConnectionConfig } from "@ahava/shared-events";
 import { writeAuditLog } from "@ahava/shared-audit";
+import { parseBearerToken, verifyJWT } from "@ahava/shared-crypto";
 import { z } from "zod";
 import { metricsMiddleware, metricsEndpoint } from "@ahava/shared-observability";
 
@@ -37,6 +38,62 @@ function validateBody<T extends z.ZodTypeAny>(
     );
   }
   return result.data;
+}
+
+// senderWalletId (POST /payments) and walletId (POST /payments/qr) used to
+// be trusted straight from the request body with no check that the
+// authenticated caller actually owns them — any customer could move money
+// out of, or generate a receiving QR against, ANY OTHER wallet just by
+// supplying its id. requireAuth verifies the caller's JWT (the same
+// pattern used for services/wallet-service's identical fix) and populates
+// req.userId/req.role; assertOwnerOrAgent is checked once the relevant
+// wallet's actual owner is known. AGENT tokens bypass this — agents
+// legitimately act on customers' wallets during cash-in/cash-out.
+async function requireAuth(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  const token = parseBearerToken(req.headers.authorization);
+  if (!token) {
+    const err = new AhavaError(
+      AhavaErrorCode.AUTH_UNAUTHORIZED,
+      "Authorization header missing or malformed",
+      { requestId: req.id },
+    );
+    res.status(err.statusCode).json(createErrorResponse(err));
+    return;
+  }
+
+  try {
+    const payload = await verifyJWT(token);
+    req.userId = (payload.userId ?? payload.sub) as string | undefined;
+    req.role = payload.role as string | undefined;
+    if (!req.userId) {
+      throw new Error("token has no subject");
+    }
+    next();
+  } catch {
+    const err = new AhavaError(
+      AhavaErrorCode.AUTH_INVALID_TOKEN,
+      "Invalid or expired access token",
+      { requestId: req.id },
+    );
+    res.status(err.statusCode).json(createErrorResponse(err));
+  }
+}
+
+/** Throws (caught by the route's own try/catch) unless the caller is an
+ * AGENT or the resource's actual owner. Call only once the resource's
+ * owner is known — req.userId is only meaningful once requireAuth ran. */
+function assertOwnerOrAgent(req: Request, resourceUserId: string): void {
+  if (req.role === "AGENT") return;
+  if (req.userId && req.userId === resourceUserId) return;
+  throw new AhavaError(
+    AhavaErrorCode.AUTH_UNAUTHORIZED,
+    "You do not have access to this resource",
+    { requestId: req.id },
+  );
 }
 
 const paymentsBodySchema = z.object({
@@ -149,6 +206,7 @@ app.get("/metrics", metricsEndpoint);
 // POST /payments/qr - Generate a payment QR code (static or dynamic)
 app.post(
   "/payments/qr",
+  requireAuth,
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const {
@@ -177,7 +235,13 @@ app.post(
 
       const wallet = await prisma.wallet.findUnique({
         where: { id: walletId },
-        select: { id: true, walletNumber: true, status: true, isDeleted: true },
+        select: {
+          id: true,
+          userId: true,
+          walletNumber: true,
+          status: true,
+          isDeleted: true,
+        },
       });
 
       if (!wallet || wallet.isDeleted) {
@@ -185,6 +249,9 @@ app.post(
           requestId: req.id,
         });
       }
+
+      assertOwnerOrAgent(req, wallet.userId);
+
       if (wallet.status !== "ACTIVE") {
         throw new AhavaError(
           AhavaErrorCode.WAL_WALLET_SUSPENDED,
@@ -291,6 +358,7 @@ function serializeWalletTxn<T extends Record<string, unknown>>(t: T) {
 // POST /payments - Create payment transaction (atomic double-entry)
 app.post(
   "/payments",
+  requireAuth,
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const {
@@ -312,6 +380,26 @@ app.post(
           "Missing required fields: senderWalletId, recipient, amountCents, idempotencyKey",
           { requestId: req.id },
         );
+      }
+
+      // CRITICAL: senderWalletId used to be trusted straight from the
+      // request body with no check that the authenticated caller actually
+      // owned it — any customer could drain funds from ANY wallet just by
+      // supplying its id here. Deliberately its own dedicated lookup,
+      // first thing after the presence check, rather than piggybacked on
+      // the sanctions-screening wallet lookup further down (which isn't
+      // guaranteed to run before it, and a later refactor of screening
+      // could silently carry the ownership check away with it). A missing
+      // wallet here is left to the FOR UPDATE-locked transaction below,
+      // which independently re-verifies existence and is the actual
+      // source of truth for "does this wallet exist" — this check only
+      // narrows down to "if it exists, do you own it".
+      const senderWalletForAuth = await prisma.wallet.findUnique({
+        where: { id: senderWalletId },
+        select: { userId: true },
+      });
+      if (senderWalletForAuth) {
+        assertOwnerOrAgent(req, senderWalletForAuth.userId);
       }
 
       if (!receiverWalletId && !receiverWalletNumber && !recipientPhone) {
@@ -729,6 +817,8 @@ declare global {
   namespace Express {
     interface Request {
       id?: string;
+      userId?: string;
+      role?: string;
     }
   }
 }

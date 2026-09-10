@@ -27,6 +27,13 @@ function agentAuthHeader(): string {
   return `Bearer ${signToken({ sub: "agent-user-1", role: "AGENT" })}`;
 }
 
+// Matches makeWallet()'s default userId unless a test needs a different
+// caller (e.g. the sender side of a QR payment, whose wallet is a separate
+// mock with its own userId).
+function customerAuthHeader(userId = "user-uuid-1"): string {
+  return `Bearer ${signToken({ sub: userId })}`;
+}
+
 // ─── Mock PrismaClient ────────────────────────────────────────────
 const mockPrisma = {
   user: {
@@ -158,6 +165,7 @@ describe("POST /wallets", () => {
 
     const res = await request(app)
       .post("/wallets")
+      .set("Authorization", customerAuthHeader("user-uuid-1"))
       .send({ userId: "user-uuid-1" });
 
     expect(res.status).toBe(201);
@@ -176,6 +184,7 @@ describe("POST /wallets", () => {
 
     const res = await request(app)
       .post("/wallets")
+      .set("Authorization", customerAuthHeader("user-uuid-1"))
       .send({ userId: "user-uuid-1" });
     expect(res.status).toBe(201);
     expect(mockPrisma.wallet.create).toHaveBeenCalledWith(
@@ -189,7 +198,10 @@ describe("POST /wallets", () => {
   });
 
   it("returns 400 when userId is missing", async () => {
-    const res = await request(app).post("/wallets").send({});
+    const res = await request(app)
+      .post("/wallets")
+      .set("Authorization", customerAuthHeader())
+      .send({});
     expect(res.status).toBe(400);
   });
 
@@ -197,8 +209,18 @@ describe("POST /wallets", () => {
     mockPrisma.user.findUnique.mockResolvedValue(null);
     const res = await request(app)
       .post("/wallets")
+      .set("Authorization", customerAuthHeader("nonexistent"))
       .send({ userId: "nonexistent" });
     expect(res.status).toBe(403);
+  });
+
+  it("rejects creating a wallet for a different userId", async () => {
+    const res = await request(app)
+      .post("/wallets")
+      .set("Authorization", customerAuthHeader("user-uuid-1"))
+      .send({ userId: "someone-elses-user-id" });
+    expect(res.status).toBe(403);
+    expect(mockPrisma.wallet.create).not.toHaveBeenCalled();
   });
 });
 
@@ -207,7 +229,9 @@ describe("GET /wallets/:walletId", () => {
   it("returns 200 with wallet details and serialised BigInts", async () => {
     mockPrisma.wallet.findUnique.mockResolvedValue(makeWallet());
 
-    const res = await request(app).get("/wallets/wallet-uuid-1");
+    const res = await request(app)
+      .get("/wallets/wallet-uuid-1")
+      .set("Authorization", customerAuthHeader("user-uuid-1"));
     expect(res.status).toBe(200);
     expect(res.body.data.wallet.balance).toBe("100000");
     expect(res.body.data.wallet.dailyLimit).toBe("50000");
@@ -215,7 +239,9 @@ describe("GET /wallets/:walletId", () => {
 
   it("returns 404 when wallet is not found", async () => {
     mockPrisma.wallet.findUnique.mockResolvedValue(null);
-    const res = await request(app).get("/wallets/nonexistent");
+    const res = await request(app)
+      .get("/wallets/nonexistent")
+      .set("Authorization", customerAuthHeader());
     expect(res.status).toBe(404);
   });
 
@@ -223,8 +249,26 @@ describe("GET /wallets/:walletId", () => {
     mockPrisma.wallet.findUnique.mockResolvedValue(
       makeWallet({ isDeleted: true }),
     );
-    const res = await request(app).get("/wallets/wallet-uuid-1");
+    const res = await request(app)
+      .get("/wallets/wallet-uuid-1")
+      .set("Authorization", customerAuthHeader("user-uuid-1"));
     expect(res.status).toBe(404);
+  });
+
+  it("rejects a non-owner, non-agent caller", async () => {
+    mockPrisma.wallet.findUnique.mockResolvedValue(makeWallet());
+    const res = await request(app)
+      .get("/wallets/wallet-uuid-1")
+      .set("Authorization", customerAuthHeader("a-different-user"));
+    expect(res.status).toBe(403);
+  });
+
+  it("allows an agent to view any wallet's details", async () => {
+    mockPrisma.wallet.findUnique.mockResolvedValue(makeWallet());
+    const res = await request(app)
+      .get("/wallets/wallet-uuid-1")
+      .set("Authorization", agentAuthHeader());
+    expect(res.status).toBe(200);
   });
 });
 
@@ -236,22 +280,37 @@ describe("GET /wallets/lookup", () => {
       user: { fullName: "Thabo Nkosi" },
     });
 
-    const res = await request(app).get(
-      "/wallets/lookup?walletNumber=AHV-ABC1-DEF2-GHI3",
-    );
+    const res = await request(app)
+      .get("/wallets/lookup?walletNumber=AHV-ABC1-DEF2-GHI3")
+      .set("Authorization", customerAuthHeader());
     expect(res.status).toBe(200);
     expect(res.body.data.wallet.holderName).toBe("Thabo Nkosi");
+    // Regression coverage: this response used to include the recipient's
+    // raw balance, leaking it to any sender who merely looked up their
+    // wallet number before paying.
+    expect(res.body.data.wallet.balance).toBeUndefined();
   });
 
   it("returns 400 when walletNumber query param is missing", async () => {
-    const res = await request(app).get("/wallets/lookup");
+    const res = await request(app)
+      .get("/wallets/lookup")
+      .set("Authorization", customerAuthHeader());
     expect(res.status).toBe(400);
   });
 
   it("returns 404 for unknown walletNumber", async () => {
     mockPrisma.wallet.findUnique.mockResolvedValue(null);
-    const res = await request(app).get("/wallets/lookup?walletNumber=AHV-XXXX");
+    const res = await request(app)
+      .get("/wallets/lookup?walletNumber=AHV-XXXX")
+      .set("Authorization", customerAuthHeader());
     expect(res.status).toBe(404);
+  });
+
+  it("rejects without an Authorization header", async () => {
+    const res = await request(app).get(
+      "/wallets/lookup?walletNumber=AHV-ABC1-DEF2-GHI3",
+    );
+    expect(res.status).toBe(403);
   });
 });
 
@@ -268,24 +327,41 @@ describe("GET /wallets/:walletId/transactions", () => {
       },
     ]);
 
-    const res = await request(app).get("/wallets/wallet-uuid-1/transactions");
+    const res = await request(app)
+      .get("/wallets/wallet-uuid-1/transactions")
+      .set("Authorization", customerAuthHeader("user-uuid-1"));
     expect(res.status).toBe(200);
     expect(res.body.data.transactions).toHaveLength(1);
   });
 
   it("returns 404 when wallet not found", async () => {
     mockPrisma.wallet.findUnique.mockResolvedValue(null);
-    const res = await request(app).get("/wallets/nonexistent/transactions");
+    const res = await request(app)
+      .get("/wallets/nonexistent/transactions")
+      .set("Authorization", customerAuthHeader());
     expect(res.status).toBe(404);
   });
 
   it("caps limit at 250", async () => {
     mockPrisma.wallet.findUnique.mockResolvedValue(makeWallet());
     mockPrisma.walletTransaction.findMany.mockResolvedValue([]);
-    await request(app).get("/wallets/wallet-uuid-1/transactions?limit=9999");
+    await request(app)
+      .get("/wallets/wallet-uuid-1/transactions?limit=9999")
+      .set("Authorization", customerAuthHeader("user-uuid-1"));
     expect(mockPrisma.walletTransaction.findMany).toHaveBeenCalledWith(
       expect.objectContaining({ take: 250 }),
     );
+  });
+
+  // Regression coverage: any authenticated user could previously read any
+  // other user's transaction history just by knowing/guessing a walletId.
+  it("rejects a non-owner, non-agent caller", async () => {
+    mockPrisma.wallet.findUnique.mockResolvedValue(makeWallet());
+    const res = await request(app)
+      .get("/wallets/wallet-uuid-1/transactions")
+      .set("Authorization", customerAuthHeader("a-different-user"));
+    expect(res.status).toBe(403);
+    expect(mockPrisma.walletTransaction.findMany).not.toHaveBeenCalled();
   });
 });
 
@@ -294,13 +370,16 @@ describe("GET /wallets/:walletId/balance", () => {
   it("returns computed available balance", async () => {
     mockPrisma.wallet.findUnique.mockResolvedValue({
       id: "w1",
+      userId: "user-uuid-1",
       balance: BigInt(100000),
       pendingBalance: BigInt(10000),
       reservedBalance: BigInt(5000),
       currency: "ZAR",
     });
 
-    const res = await request(app).get("/wallets/wallet-uuid-1/balance");
+    const res = await request(app)
+      .get("/wallets/wallet-uuid-1/balance")
+      .set("Authorization", customerAuthHeader("user-uuid-1"));
     expect(res.status).toBe(200);
     expect(res.body.data.balance.available).toBe("85000");
     expect(res.body.data.balance.total).toBe("100000");
@@ -309,8 +388,27 @@ describe("GET /wallets/:walletId/balance", () => {
 
   it("returns 404 when wallet not found", async () => {
     mockPrisma.wallet.findUnique.mockResolvedValue(null);
-    const res = await request(app).get("/wallets/nonexistent/balance");
+    const res = await request(app)
+      .get("/wallets/nonexistent/balance")
+      .set("Authorization", customerAuthHeader());
     expect(res.status).toBe(404);
+  });
+
+  // Regression coverage: any authenticated user could previously read any
+  // other user's balance just by knowing/guessing a walletId.
+  it("rejects a non-owner, non-agent caller", async () => {
+    mockPrisma.wallet.findUnique.mockResolvedValue({
+      id: "w1",
+      userId: "user-uuid-1",
+      balance: BigInt(100000),
+      pendingBalance: BigInt(0),
+      reservedBalance: BigInt(0),
+      currency: "ZAR",
+    });
+    const res = await request(app)
+      .get("/wallets/wallet-uuid-1/balance")
+      .set("Authorization", customerAuthHeader("a-different-user"));
+    expect(res.status).toBe(403);
   });
 });
 
@@ -327,6 +425,7 @@ describe("POST /wallets/:walletId/limits", () => {
 
     const res = await request(app)
       .post("/wallets/wallet-uuid-1/limits")
+      .set("Authorization", agentAuthHeader())
       .send({ dailyLimit: 100000 });
     expect(res.status).toBe(200);
   });
@@ -335,8 +434,18 @@ describe("POST /wallets/:walletId/limits", () => {
     mockPrisma.wallet.findUnique.mockResolvedValue(null);
     const res = await request(app)
       .post("/wallets/nonexistent/limits")
+      .set("Authorization", agentAuthHeader())
       .send({ dailyLimit: 100000 });
     expect(res.status).toBe(404);
+  });
+
+  it("rejects without an agent role", async () => {
+    const res = await request(app)
+      .post("/wallets/wallet-uuid-1/limits")
+      .set("Authorization", customerAuthHeader("user-uuid-1"))
+      .send({ dailyLimit: 100000 });
+    expect(res.status).toBe(403);
+    expect(mockPrisma.wallet.update).not.toHaveBeenCalled();
   });
 });
 
@@ -445,6 +554,7 @@ describe("POST /wallets/:walletId/qr", () => {
 
     const res = await request(app)
       .post(`/wallets/${WALLET_ID}/qr`)
+      .set("Authorization", customerAuthHeader("user-uuid-1"))
       .send({ qrType: "STATIC" });
 
     expect(res.status).toBe(201);
@@ -465,6 +575,7 @@ describe("POST /wallets/:walletId/qr", () => {
 
     const res = await request(app)
       .post(`/wallets/${WALLET_ID}/qr`)
+      .set("Authorization", customerAuthHeader("user-uuid-1"))
       .send({ qrType: "DYNAMIC", amountCents: 5000 });
 
     expect(res.status).toBe(201);
@@ -477,6 +588,7 @@ describe("POST /wallets/:walletId/qr", () => {
 
     const res = await request(app)
       .post(`/wallets/${WALLET_ID}/qr`)
+      .set("Authorization", customerAuthHeader("user-uuid-1"))
       .send({ qrType: "DYNAMIC" });
 
     expect(res.status).toBe(400);
@@ -487,6 +599,7 @@ describe("POST /wallets/:walletId/qr", () => {
 
     const res = await request(app)
       .post(`/wallets/${WALLET_ID}/qr`)
+      .set("Authorization", customerAuthHeader())
       .send({ qrType: "STATIC" });
 
     expect(res.status).toBe(404);
@@ -499,9 +612,22 @@ describe("POST /wallets/:walletId/qr", () => {
 
     const res = await request(app)
       .post(`/wallets/${WALLET_ID}/qr`)
+      .set("Authorization", customerAuthHeader("user-uuid-1"))
       .send({ qrType: "STATIC" });
 
     expect(res.status).toBe(403);
+  });
+
+  it("rejects generating a QR for a wallet the caller does not own", async () => {
+    mockPrisma.wallet.findUnique.mockResolvedValue(makeWallet());
+
+    const res = await request(app)
+      .post(`/wallets/${WALLET_ID}/qr`)
+      .set("Authorization", customerAuthHeader("a-different-user"))
+      .send({ qrType: "STATIC" });
+
+    expect(res.status).toBe(403);
+    expect(mockPrisma.paymentQrCode.create).not.toHaveBeenCalled();
   });
 });
 
@@ -522,7 +648,9 @@ describe("GET /qr/:qrHash", () => {
       }),
     );
 
-    const res = await request(app).get(`/qr/${QR_HASH}`);
+    const res = await request(app)
+      .get(`/qr/${QR_HASH}`)
+      .set("Authorization", customerAuthHeader());
     expect(res.status).toBe(200);
     expect(res.body.data.qrType).toBe("STATIC");
     expect(res.body.data.walletNumber).toBe("AHV-ABC1-DEF2-GHI3");
@@ -533,7 +661,9 @@ describe("GET /qr/:qrHash", () => {
 
   it("returns 404 when QR not found", async () => {
     mockPrisma.paymentQrCode.findFirst.mockResolvedValue(null);
-    const res = await request(app).get("/qr/nonexistent");
+    const res = await request(app)
+      .get("/qr/nonexistent")
+      .set("Authorization", customerAuthHeader());
     expect(res.status).toBe(404);
   });
 
@@ -541,7 +671,9 @@ describe("GET /qr/:qrHash", () => {
     mockPrisma.paymentQrCode.findFirst.mockResolvedValue(
       makeQr({ expiresAt: new Date(Date.now() - 1000) }),
     );
-    const res = await request(app).get(`/qr/${QR_HASH}`);
+    const res = await request(app)
+      .get(`/qr/${QR_HASH}`)
+      .set("Authorization", customerAuthHeader());
     expect(res.status).toBe(410);
   });
 
@@ -549,8 +681,15 @@ describe("GET /qr/:qrHash", () => {
     mockPrisma.paymentQrCode.findFirst.mockResolvedValue(
       makeQr({ maxUsage: 1, usageCount: 1 }),
     );
-    const res = await request(app).get(`/qr/${QR_HASH}`);
+    const res = await request(app)
+      .get(`/qr/${QR_HASH}`)
+      .set("Authorization", customerAuthHeader());
     expect(res.status).toBe(400);
+  });
+
+  it("rejects without an Authorization header", async () => {
+    const res = await request(app).get(`/qr/${QR_HASH}`);
+    expect(res.status).toBe(403);
   });
 });
 
@@ -632,11 +771,14 @@ describe("POST /qr/:qrHash/pay", () => {
   });
 
   it("debits sender and credits QR wallet on success", async () => {
-    const res = await request(app).post(`/qr/${QR_HASH}/pay`).send({
-      senderWalletId: SENDER_ID,
-      amountCents: 5000,
-      idempotencyKey: "idem-001",
-    });
+    const res = await request(app)
+      .post(`/qr/${QR_HASH}/pay`)
+      .set("Authorization", customerAuthHeader("user-uuid-sender"))
+      .send({
+        senderWalletId: SENDER_ID,
+        amountCents: 5000,
+        idempotencyKey: "idem-001",
+      });
 
     expect(res.status).toBe(201);
     expect(res.body.data.transactionId).toBe("debit-txn-001");
@@ -645,30 +787,78 @@ describe("POST /qr/:qrHash/pay", () => {
     expect(mockTx.ledgerEntry.create).toHaveBeenCalledTimes(2);
   });
 
+  // CRITICAL regression coverage: senderWalletId used to be trusted
+  // straight from the request body with no check that the authenticated
+  // caller actually owned it — any customer could drain funds from ANY
+  // wallet just by supplying its id here.
+  it("rejects paying from a wallet the caller does not own", async () => {
+    const res = await request(app)
+      .post(`/qr/${QR_HASH}/pay`)
+      .set("Authorization", customerAuthHeader("a-completely-different-user"))
+      .send({
+        senderWalletId: SENDER_ID,
+        amountCents: 5000,
+        idempotencyKey: "idem-theft-attempt",
+      });
+
+    expect(res.status).toBe(403);
+    expect(mockTx.walletTransaction.create).not.toHaveBeenCalled();
+    expect(mockTx.wallet.update).not.toHaveBeenCalled();
+  });
+
+  it("allows an agent to pay on a customer's behalf", async () => {
+    const res = await request(app)
+      .post(`/qr/${QR_HASH}/pay`)
+      .set("Authorization", agentAuthHeader())
+      .send({
+        senderWalletId: SENDER_ID,
+        amountCents: 5000,
+        idempotencyKey: "idem-agent-assisted",
+      });
+
+    expect(res.status).toBe(201);
+  });
+
+  it("rejects without an Authorization header", async () => {
+    const res = await request(app).post(`/qr/${QR_HASH}/pay`).send({
+      senderWalletId: SENDER_ID,
+      amountCents: 5000,
+      idempotencyKey: "idem-no-auth",
+    });
+    expect(res.status).toBe(403);
+  });
+
   it("returns 400 when required fields are missing", async () => {
     const res = await request(app)
       .post(`/qr/${QR_HASH}/pay`)
+      .set("Authorization", customerAuthHeader("user-uuid-sender"))
       .send({ senderWalletId: SENDER_ID });
     expect(res.status).toBe(400);
   });
 
   it("returns 400 when senderWalletId is the wrong type (zod shape check)", async () => {
-    const res = await request(app).post(`/qr/${QR_HASH}/pay`).send({
-      senderWalletId: 12345,
-      amountCents: 5000,
-      idempotencyKey: "idem-002",
-    });
+    const res = await request(app)
+      .post(`/qr/${QR_HASH}/pay`)
+      .set("Authorization", customerAuthHeader("user-uuid-sender"))
+      .send({
+        senderWalletId: 12345,
+        amountCents: 5000,
+        idempotencyKey: "idem-002",
+      });
     expect(res.status).toBe(400);
     expect(res.body.error.code).toBe("VAL_INVALID_INPUT");
   });
 
   it("returns 404 when QR not found", async () => {
     mockPrisma.paymentQrCode.findFirst.mockResolvedValue(null);
-    const res = await request(app).post(`/qr/${QR_HASH}/pay`).send({
-      senderWalletId: SENDER_ID,
-      amountCents: 5000,
-      idempotencyKey: "ik-1",
-    });
+    const res = await request(app)
+      .post(`/qr/${QR_HASH}/pay`)
+      .set("Authorization", customerAuthHeader("user-uuid-sender"))
+      .send({
+        senderWalletId: SENDER_ID,
+        amountCents: 5000,
+        idempotencyKey: "ik-1",
+      });
     expect(res.status).toBe(404);
   });
 
@@ -676,11 +866,14 @@ describe("POST /qr/:qrHash/pay", () => {
     mockPrisma.paymentQrCode.findFirst.mockResolvedValue(
       makeQr({ expiresAt: new Date(Date.now() - 1000), wallet: makeWallet() }),
     );
-    const res = await request(app).post(`/qr/${QR_HASH}/pay`).send({
-      senderWalletId: SENDER_ID,
-      amountCents: 5000,
-      idempotencyKey: "ik-1",
-    });
+    const res = await request(app)
+      .post(`/qr/${QR_HASH}/pay`)
+      .set("Authorization", customerAuthHeader("user-uuid-sender"))
+      .send({
+        senderWalletId: SENDER_ID,
+        amountCents: 5000,
+        idempotencyKey: "ik-1",
+      });
     expect(res.status).toBe(410);
   });
 
@@ -690,11 +883,14 @@ describe("POST /qr/:qrHash/pay", () => {
     // the old pre-transaction mockPrisma.wallet.findUnique is no longer
     // read by the route at all.
     setupLockedTransaction({ sender: lockedSenderRow({ balance: BigInt(100) }) });
-    const res = await request(app).post(`/qr/${QR_HASH}/pay`).send({
-      senderWalletId: SENDER_ID,
-      amountCents: 5000,
-      idempotencyKey: "ik-1",
-    });
+    const res = await request(app)
+      .post(`/qr/${QR_HASH}/pay`)
+      .set("Authorization", customerAuthHeader("user-uuid-sender"))
+      .send({
+        senderWalletId: SENDER_ID,
+        amountCents: 5000,
+        idempotencyKey: "ik-1",
+      });
     expect(res.status).toBe(402);
   });
 
@@ -702,11 +898,14 @@ describe("POST /qr/:qrHash/pay", () => {
     mockPrisma.paymentQrCode.findFirst.mockResolvedValue(
       makeQr({ walletId: SENDER_ID, wallet: makeWallet({ id: SENDER_ID }) }),
     );
-    const res = await request(app).post(`/qr/${QR_HASH}/pay`).send({
-      senderWalletId: SENDER_ID,
-      amountCents: 5000,
-      idempotencyKey: "ik-1",
-    });
+    const res = await request(app)
+      .post(`/qr/${QR_HASH}/pay`)
+      .set("Authorization", customerAuthHeader("user-uuid-sender"))
+      .send({
+        senderWalletId: SENDER_ID,
+        amountCents: 5000,
+        idempotencyKey: "ik-1",
+      });
     expect(res.status).toBe(400);
   });
 
@@ -718,11 +917,14 @@ describe("POST /qr/:qrHash/pay", () => {
         wallet: makeWallet(),
       }),
     );
-    const res = await request(app).post(`/qr/${QR_HASH}/pay`).send({
-      senderWalletId: SENDER_ID,
-      amountCents: 9999,
-      idempotencyKey: "ik-1",
-    });
+    const res = await request(app)
+      .post(`/qr/${QR_HASH}/pay`)
+      .set("Authorization", customerAuthHeader("user-uuid-sender"))
+      .send({
+        senderWalletId: SENDER_ID,
+        amountCents: 9999,
+        idempotencyKey: "ik-1",
+      });
     expect(res.status).toBe(400);
     expect(res.body.error.code).toBe("PAY_INVALID_AMOUNT");
   });

@@ -15,8 +15,41 @@
  */
 
 import request from "supertest";
+import * as nodeCrypto from "crypto";
+import * as jwt from "jsonwebtoken";
 
 // ─── Mocks must be declared before any imports that trigger module loading ────
+
+// Real RSA keypair + JWT_PUBLIC_KEY env var: requireAuth's verifyJWT() call
+// (packages/shared-crypto) falls back to reading this env var when no
+// explicit key is passed, so signing real tokens here exercises the actual
+// verification path. Same recipe as services/wallet-service and
+// services/agent-service's test suites.
+const { publicKey: testPublicKey, privateKey: testPrivateKey } =
+  nodeCrypto.generateKeyPairSync("rsa", {
+    modulusLength: 2048,
+    publicKeyEncoding: { type: "pkcs1", format: "pem" },
+    privateKeyEncoding: { type: "pkcs1", format: "pem" },
+  });
+process.env.JWT_PUBLIC_KEY = testPublicKey;
+
+function signToken(claims: Record<string, unknown>): string {
+  return jwt.sign(claims, testPrivateKey, {
+    algorithm: "RS256",
+    issuer: "ahava-ewallet",
+    expiresIn: "5m",
+  });
+}
+
+// Matches makeSenderWallet()'s default userId unless a test needs a
+// different caller.
+function customerAuthHeader(userId = "user-001"): string {
+  return `Bearer ${signToken({ sub: userId })}`;
+}
+
+function agentAuthHeader(): string {
+  return `Bearer ${signToken({ sub: "agent-user-1", role: "AGENT" })}`;
+}
 
 const mockTx = {
   $queryRaw: jest.fn(),
@@ -79,7 +112,15 @@ jest.mock("bullmq", () => ({
   Queue: jest.fn().mockImplementation(() => ({ add: mockQueueAdd })),
 }));
 
-jest.mock("@ahava/shared-crypto", () => ({}));
+// Used to be mocked to {} outright — harmless when nothing in main.ts
+// called into shared-crypto, but requireAuth (added for the wallet-
+// ownership fix) now calls parseBearerToken/verifyJWT for real, and an
+// empty mock made those undefined, throwing TypeError on every request.
+// jest.requireActual + JWT_PUBLIC_KEY above exercises the real
+// verification path instead of stubbing it out.
+jest.mock("@ahava/shared-crypto", () =>
+  jest.requireActual("@ahava/shared-crypto"),
+);
 
 // ─── Import app AFTER mocks are set up ────────────────────────────────────────
 import app, { startServer } from "../main";
@@ -204,7 +245,8 @@ describe("POST /payments — input validation", () => {
   it("returns 400 when senderWalletId is missing", async () => {
     const payload = validPayload();
     const { senderWalletId: _omit, ...rest } = payload;
-    const res = await request(app).post("/payments").send(rest);
+    const res = await request(app).post("/payments")
+      .set("Authorization", customerAuthHeader()).send(rest);
     expect(res.status).toBe(400);
     expect(res.body.success).toBe(false);
     expect(res.body.error.code).toBe("VAL_MISSING_REQUIRED_FIELD");
@@ -212,21 +254,24 @@ describe("POST /payments — input validation", () => {
 
   it("returns 400 when receiverWalletId is missing", async () => {
     const { receiverWalletId: _omit, ...rest } = validPayload();
-    const res = await request(app).post("/payments").send(rest);
+    const res = await request(app).post("/payments")
+      .set("Authorization", customerAuthHeader()).send(rest);
     expect(res.status).toBe(400);
     expect(res.body.error.code).toBe("VAL_MISSING_REQUIRED_FIELD");
   });
 
   it("returns 400 when amountCents is missing", async () => {
     const { amountCents: _omit, ...rest } = validPayload();
-    const res = await request(app).post("/payments").send(rest);
+    const res = await request(app).post("/payments")
+      .set("Authorization", customerAuthHeader()).send(rest);
     expect(res.status).toBe(400);
     expect(res.body.error.code).toBe("VAL_MISSING_REQUIRED_FIELD");
   });
 
   it("returns 400 when idempotencyKey is missing", async () => {
     const { idempotencyKey: _omit, ...rest } = validPayload();
-    const res = await request(app).post("/payments").send(rest);
+    const res = await request(app).post("/payments")
+      .set("Authorization", customerAuthHeader()).send(rest);
     expect(res.status).toBe(400);
     expect(res.body.error.code).toBe("VAL_MISSING_REQUIRED_FIELD");
   });
@@ -234,6 +279,7 @@ describe("POST /payments — input validation", () => {
   it("returns 400 when amountCents is zero", async () => {
     const res = await request(app)
       .post("/payments")
+      .set("Authorization", customerAuthHeader())
       .send({ ...validPayload(), amountCents: 0 });
     expect(res.status).toBe(400);
     expect(res.body.error.code).toBe("PAY_INVALID_AMOUNT");
@@ -242,6 +288,7 @@ describe("POST /payments — input validation", () => {
   it("returns 400 when amountCents is negative", async () => {
     const res = await request(app)
       .post("/payments")
+      .set("Authorization", customerAuthHeader())
       .send({ ...validPayload(), amountCents: -500 });
     expect(res.status).toBe(400);
     expect(res.body.error.code).toBe("PAY_INVALID_AMOUNT");
@@ -250,6 +297,7 @@ describe("POST /payments — input validation", () => {
   it("returns 400 when senderWalletId is the wrong type (zod shape check)", async () => {
     const res = await request(app)
       .post("/payments")
+      .set("Authorization", customerAuthHeader())
       .send({ ...validPayload(), senderWalletId: 12345 });
     expect(res.status).toBe(400);
     expect(res.body.error.code).toBe("VAL_INVALID_INPUT");
@@ -258,6 +306,7 @@ describe("POST /payments — input validation", () => {
   it("returns 400 when amountCents is a non-numeric string (zod shape check)", async () => {
     const res = await request(app)
       .post("/payments")
+      .set("Authorization", customerAuthHeader())
       .send({ ...validPayload(), amountCents: "not-a-number" });
     expect(res.status).toBe(400);
     expect(res.body.error.code).toBe("VAL_INVALID_INPUT");
@@ -272,7 +321,8 @@ describe("POST /payments — idempotency", () => {
     const existingTxn = makeDebitTxn(payload.idempotencyKey);
     mockPrisma.walletTransaction.findUnique.mockResolvedValue(existingTxn);
 
-    const res = await request(app).post("/payments").send(payload);
+    const res = await request(app).post("/payments")
+      .set("Authorization", customerAuthHeader()).send(payload);
 
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
@@ -289,7 +339,8 @@ describe("POST /payments — idempotency", () => {
       idempotencyKey: payload.idempotencyKey,
     });
 
-    const res = await request(app).post("/payments").send(payload);
+    const res = await request(app).post("/payments")
+      .set("Authorization", customerAuthHeader()).send(payload);
     expect(res.status).toBe(409);
     expect(res.body.error.code).toBe("PAY_DUPLICATE_IDEMPOTENCY_KEY");
     expect(mockPrisma.$transaction).not.toHaveBeenCalled();
@@ -300,12 +351,14 @@ describe("POST /payments — idempotency", () => {
     const { debit } = setupSuccessfulTransaction(payload);
 
     // First call succeeds
-    const first = await request(app).post("/payments").send(payload);
+    const first = await request(app).post("/payments")
+      .set("Authorization", customerAuthHeader()).send(payload);
     expect(first.status).toBe(201);
 
     // Second call: simulate existing completed txn
     mockPrisma.walletTransaction.findUnique.mockResolvedValue(debit);
-    const second = await request(app).post("/payments").send(payload);
+    const second = await request(app).post("/payments")
+      .set("Authorization", customerAuthHeader()).send(payload);
 
     expect(second.status).toBe(200);
     expect(second.body.data.transaction.id).toBe(debit.id);
@@ -321,7 +374,8 @@ describe("POST /payments — successful payment", () => {
     const payload = validPayload();
     const { debit, credit } = setupSuccessfulTransaction(payload);
 
-    const res = await request(app).post("/payments").send(payload);
+    const res = await request(app).post("/payments")
+      .set("Authorization", customerAuthHeader()).send(payload);
 
     expect(res.status).toBe(201);
     expect(res.body.success).toBe(true);
@@ -333,7 +387,8 @@ describe("POST /payments — successful payment", () => {
     const payload = validPayload();
     setupSuccessfulTransaction(payload);
 
-    await request(app).post("/payments").send(payload);
+    await request(app).post("/payments")
+      .set("Authorization", customerAuthHeader()).send(payload);
 
     expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
   });
@@ -342,7 +397,8 @@ describe("POST /payments — successful payment", () => {
     const payload = validPayload();
     setupSuccessfulTransaction(payload);
 
-    await request(app).post("/payments").send(payload);
+    await request(app).post("/payments")
+      .set("Authorization", customerAuthHeader()).send(payload);
 
     // The raw query must be called; the WHERE clause must include both IDs
     expect(mockTx.$queryRaw).toHaveBeenCalledTimes(1);
@@ -359,7 +415,8 @@ describe("POST /payments — successful payment", () => {
     const payload = validPayload();
     setupSuccessfulTransaction(payload);
 
-    await request(app).post("/payments").send(payload);
+    await request(app).post("/payments")
+      .set("Authorization", customerAuthHeader()).send(payload);
 
     expect(mockQueueAdd).toHaveBeenCalledWith(
       expect.stringContaining("payments_created"),
@@ -375,7 +432,8 @@ describe("POST /payments — successful payment", () => {
     const payload = validPayload();
     setupSuccessfulTransaction(payload);
 
-    const res = await request(app).post("/payments").send(payload);
+    const res = await request(app).post("/payments")
+      .set("Authorization", customerAuthHeader()).send(payload);
     expect(res.headers["x-request-id"]).toBeDefined();
   });
 
@@ -388,7 +446,8 @@ describe("POST /payments — successful payment", () => {
     mockPrisma.wallet.findFirst.mockResolvedValueOnce({ id: RECEIVER_ID });
     setupSuccessfulTransaction(payload);
 
-    const res = await request(app).post("/payments").send(payload);
+    const res = await request(app).post("/payments")
+      .set("Authorization", customerAuthHeader()).send(payload);
 
     expect(res.status).toBe(201);
     expect(mockPrisma.wallet.findFirst).toHaveBeenCalledWith(
@@ -410,7 +469,8 @@ describe("POST /payments — successful payment", () => {
       .mockResolvedValueOnce(null);
     setupSuccessfulTransaction(payload);
 
-    const res = await request(app).post("/payments").send(payload);
+    const res = await request(app).post("/payments")
+      .set("Authorization", customerAuthHeader()).send(payload);
 
     expect(res.status).toBe(201);
     expect(mockPrisma.user.findUnique).toHaveBeenCalledWith(
@@ -454,7 +514,8 @@ describe("POST /payments — sanctions screening", () => {
       .mockResolvedValue({ ok: false, status: 403 } as Response);
 
     const payload = validPayload();
-    const res = await request(app).post("/payments").send(payload);
+    const res = await request(app).post("/payments")
+      .set("Authorization", customerAuthHeader()).send(payload);
 
     expect(res.status).toBe(403);
     expect(res.body.error.code).toBe("AML_SANCTIONS_MATCH");
@@ -465,7 +526,8 @@ describe("POST /payments — sanctions screening", () => {
     global.fetch = jest.fn().mockRejectedValue(new Error("ECONNREFUSED"));
 
     const payload = validPayload();
-    const res = await request(app).post("/payments").send(payload);
+    const res = await request(app).post("/payments")
+      .set("Authorization", customerAuthHeader()).send(payload);
 
     expect(res.status).toBe(503);
     expect(res.body.error.code).toBe("EXT_COMPLY_ADVANTAGE_ERROR");
@@ -480,7 +542,8 @@ describe("POST /payments — sanctions screening", () => {
     const payload = validPayload();
     setupSuccessfulTransaction(payload);
 
-    const res = await request(app).post("/payments").send(payload);
+    const res = await request(app).post("/payments")
+      .set("Authorization", customerAuthHeader()).send(payload);
 
     expect(res.status).toBe(201);
     expect(global.fetch).toHaveBeenCalledWith(
@@ -496,7 +559,8 @@ describe("POST /payments — sanctions screening", () => {
     const payload = validPayload();
     setupSuccessfulTransaction(payload);
 
-    const res = await request(app).post("/payments").send(payload);
+    const res = await request(app).post("/payments")
+      .set("Authorization", customerAuthHeader()).send(payload);
 
     expect(res.status).toBe(201);
     expect(global.fetch).not.toHaveBeenCalled();
@@ -535,6 +599,7 @@ describe("POST /payments — fee calculation", () => {
 
     const res = await request(app)
       .post("/payments")
+      .set("Authorization", customerAuthHeader())
       .send({ ...validPayload(), amountCents: 100, idempotencyKey: key });
 
     expect(res.status).toBe(201);
@@ -551,6 +616,7 @@ describe("POST /payments — fee calculation", () => {
 
     const res = await request(app)
       .post("/payments")
+      .set("Authorization", customerAuthHeader())
       .send({ ...validPayload(), amountCents: amount, idempotencyKey: key });
 
     expect(res.status).toBe(201);
@@ -564,6 +630,7 @@ describe("POST /payments — fee calculation", () => {
 
     await request(app)
       .post("/payments")
+      .set("Authorization", customerAuthHeader())
       .send({ ...validPayload(), amountCents: amount, idempotencyKey: key });
 
     // debitTxn records the transfer amount while the fee is separate.
@@ -594,7 +661,8 @@ describe("POST /payments — balance enforcement", () => {
       async (fn: (tx: typeof mockTx) => unknown) => fn(mockTx),
     );
 
-    const res = await request(app).post("/payments").send(payload);
+    const res = await request(app).post("/payments")
+      .set("Authorization", customerAuthHeader()).send(payload);
 
     expect(res.status).toBe(402);
     expect(res.body.error.code).toBe("WAL_INSUFFICIENT_BALANCE");
@@ -629,7 +697,52 @@ describe("POST /payments — balance enforcement", () => {
 
     const res = await request(app)
       .post("/payments")
+      .set("Authorization", customerAuthHeader())
       .send({ ...validPayload(), amountCents: amount, idempotencyKey: key });
+
+    expect(res.status).toBe(201);
+  });
+});
+
+// ─── Authorization ────────────────────────────────────────────────────────────
+// CRITICAL regression coverage: senderWalletId used to be trusted straight
+// from the request body with no check that the authenticated caller
+// actually owned it — any customer could drain funds from ANY wallet just
+// by supplying its id as senderWalletId.
+
+describe("POST /payments — authorization", () => {
+  it("rejects without an Authorization header", async () => {
+    const res = await request(app).post("/payments").send(validPayload());
+    expect(res.status).toBe(403);
+    expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("rejects paying from a wallet the caller does not own", async () => {
+    setupSuccessfulTransaction(validPayload());
+    // The dedicated ownership lookup (prisma.wallet.findUnique, separate
+    // from the sanctions-screening wallet.findMany below) needs to resolve
+    // the sender's real owner for assertOwnerOrAgent to have anything to
+    // compare against.
+    mockPrisma.wallet.findUnique.mockResolvedValue({ userId: "user-001" });
+
+    const res = await request(app)
+      .post("/payments")
+      .set("Authorization", customerAuthHeader("a-completely-different-user"))
+      .send(validPayload());
+
+    expect(res.status).toBe(403);
+    expect(mockTx.walletTransaction.create).not.toHaveBeenCalled();
+    expect(mockTx.wallet.update).not.toHaveBeenCalled();
+  });
+
+  it("allows an agent to pay on a customer's behalf", async () => {
+    setupSuccessfulTransaction(validPayload());
+    mockPrisma.wallet.findUnique.mockResolvedValue({ userId: "user-001" });
+
+    const res = await request(app)
+      .post("/payments")
+      .set("Authorization", agentAuthHeader())
+      .send(validPayload());
 
     expect(res.status).toBe(201);
   });
@@ -653,7 +766,8 @@ describe("POST /payments — wallet status validation", () => {
       async (fn: (tx: typeof mockTx) => unknown) => fn(mockTx),
     );
 
-    const res = await request(app).post("/payments").send(payload);
+    const res = await request(app).post("/payments")
+      .set("Authorization", customerAuthHeader()).send(payload);
 
     expect(res.status).toBe(403);
     expect(res.body.error.code).toBe("WAL_WALLET_SUSPENDED");
@@ -675,7 +789,8 @@ describe("POST /payments — wallet status validation", () => {
       async (fn: (tx: typeof mockTx) => unknown) => fn(mockTx),
     );
 
-    const res = await request(app).post("/payments").send(payload);
+    const res = await request(app).post("/payments")
+      .set("Authorization", customerAuthHeader()).send(payload);
 
     expect(res.status).toBe(403);
     expect(res.body.error.code).toBe("WAL_WALLET_SUSPENDED");
@@ -690,7 +805,8 @@ describe("POST /payments — wallet status validation", () => {
       async (fn: (tx: typeof mockTx) => unknown) => fn(mockTx),
     );
 
-    const res = await request(app).post("/payments").send(payload);
+    const res = await request(app).post("/payments")
+      .set("Authorization", customerAuthHeader()).send(payload);
 
     expect(res.status).toBe(404);
     expect(res.body.error.code).toBe("WAL_NOT_FOUND");
@@ -705,7 +821,8 @@ describe("POST /payments — wallet status validation", () => {
       async (fn: (tx: typeof mockTx) => unknown) => fn(mockTx),
     );
 
-    const res = await request(app).post("/payments").send(payload);
+    const res = await request(app).post("/payments")
+      .set("Authorization", customerAuthHeader()).send(payload);
 
     expect(res.status).toBe(404);
     expect(res.body.error.code).toBe("PAY_COUNTERPARTY_NOT_FOUND");
@@ -726,7 +843,8 @@ describe("POST /payments — wallet status validation", () => {
       async (fn: (tx: typeof mockTx) => unknown) => fn(mockTx),
     );
 
-    const res = await request(app).post("/payments").send(payload);
+    const res = await request(app).post("/payments")
+      .set("Authorization", customerAuthHeader()).send(payload);
 
     expect(res.status).toBe(403);
     expect(res.body.error.code).toBe("WAL_WALLET_SUSPENDED");
@@ -737,6 +855,7 @@ describe("POST /payments — wallet status validation", () => {
 
     const res = await request(app)
       .post("/payments")
+      .set("Authorization", customerAuthHeader())
       .send({
         ...validPayload(),
         receiverWalletId: undefined,
@@ -754,6 +873,7 @@ describe("POST /payments — wallet status validation", () => {
 
     const res = await request(app)
       .post("/payments")
+      .set("Authorization", customerAuthHeader())
       .send({
         ...validPayload(),
         receiverWalletId: undefined,
@@ -792,7 +912,8 @@ describe("POST /payments — fee pool", () => {
       async (fn: (tx: typeof mockTx) => unknown) => fn(mockTx),
     );
 
-    await request(app).post("/payments").send(payload);
+    await request(app).post("/payments")
+      .set("Authorization", customerAuthHeader()).send(payload);
 
     // walletTransaction.create called 3 times: debit, credit, fee
     expect(mockTx.walletTransaction.create).toHaveBeenCalledTimes(3);
@@ -805,7 +926,8 @@ describe("POST /payments — fee pool", () => {
     const payload = validPayload();
     setupSuccessfulTransaction(payload); // mockTx.wallet.findFirst returns null
 
-    await request(app).post("/payments").send(payload);
+    await request(app).post("/payments")
+      .set("Authorization", customerAuthHeader()).send(payload);
 
     // Only debit + credit = 2 calls, no fee
     expect(mockTx.walletTransaction.create).toHaveBeenCalledTimes(2);
@@ -843,6 +965,7 @@ describe("POST /payments — double-entry accounting", () => {
 
     await request(app)
       .post("/payments")
+      .set("Authorization", customerAuthHeader())
       .send({ ...validPayload(), amountCents: amount, idempotencyKey: key });
 
     const debitCall = mockTx.walletTransaction.create.mock.calls[0][0];
@@ -862,6 +985,7 @@ describe("POST /payments — double-entry accounting", () => {
 
     await request(app)
       .post("/payments")
+      .set("Authorization", customerAuthHeader())
       .send({ ...validPayload(), amountCents: amount, idempotencyKey: key });
 
     const senderUpdate = mockTx.wallet.update.mock.calls.find(
@@ -886,6 +1010,7 @@ describe("POST /payments — double-entry accounting", () => {
 
     await request(app)
       .post("/payments")
+      .set("Authorization", customerAuthHeader())
       .send({ ...validPayload(), amountCents: amount, idempotencyKey: key });
 
     const receiverUpdate = mockTx.wallet.update.mock.calls.find(
@@ -901,7 +1026,8 @@ describe("POST /payments — double-entry accounting", () => {
 // ─── QR Code Endpoints ────────────────────────────────────────────────────────
 describe("POST /payments/qr — QR code generation", () => {
   it("returns 400 when walletId is missing", async () => {
-    const res = await request(app).post("/payments/qr").send({
+    const res = await request(app).post("/payments/qr")
+      .set("Authorization", customerAuthHeader()).send({
       amountCents: 1000,
     });
     expect(res.status).toBe(400);
@@ -909,7 +1035,8 @@ describe("POST /payments/qr — QR code generation", () => {
   });
 
   it("returns 400 when amountCents is missing for DYNAMIC QR", async () => {
-    const res = await request(app).post("/payments/qr").send({
+    const res = await request(app).post("/payments/qr")
+      .set("Authorization", customerAuthHeader()).send({
       walletId: SENDER_ID,
       qrType: "DYNAMIC",
     });
@@ -922,7 +1049,8 @@ describe("POST /payments/qr — QR code generation", () => {
       ...makeSenderWallet(),
       isDeleted: true,
     });
-    const res = await request(app).post("/payments/qr").send({
+    const res = await request(app).post("/payments/qr")
+      .set("Authorization", customerAuthHeader()).send({
       walletId: SENDER_ID,
       amountCents: 1000,
     });
@@ -934,7 +1062,8 @@ describe("POST /payments/qr — QR code generation", () => {
       ...makeSenderWallet(),
       status: "SUSPENDED",
     });
-    const res = await request(app).post("/payments/qr").send({
+    const res = await request(app).post("/payments/qr")
+      .set("Authorization", customerAuthHeader()).send({
       walletId: SENDER_ID,
       amountCents: 1000,
     });
@@ -953,7 +1082,8 @@ describe("POST /payments/qr — QR code generation", () => {
       isActive: true,
     });
 
-    const res = await request(app).post("/payments/qr").send({
+    const res = await request(app).post("/payments/qr")
+      .set("Authorization", customerAuthHeader()).send({
       walletId: SENDER_ID,
       amountCents: 1000,
     });
@@ -975,7 +1105,8 @@ describe("POST /payments/qr — QR code generation", () => {
       isActive: true,
     });
 
-    const res = await request(app).post("/payments/qr").send({
+    const res = await request(app).post("/payments/qr")
+      .set("Authorization", customerAuthHeader()).send({
       walletId: SENDER_ID,
       qrType: "STATIC",
       description: "Pay me",
@@ -993,13 +1124,26 @@ describe("POST /payments/qr — QR code generation", () => {
       }),
     );
   });
+
+  it("rejects generating a QR for a wallet the caller does not own", async () => {
+    mockPrisma.wallet.findUnique.mockResolvedValue(makeSenderWallet());
+
+    const res = await request(app)
+      .post("/payments/qr")
+      .set("Authorization", customerAuthHeader("a-different-user"))
+      .send({ walletId: SENDER_ID, amountCents: 1000 });
+
+    expect(res.status).toBe(403);
+    expect(mockPrisma.paymentQrCode.create).not.toHaveBeenCalled();
+  });
 });
 
 describe("POST /payments — error handling", () => {
   it("returns 500 on unexpected database error", async () => {
     mockPrisma.$transaction.mockRejectedValue(new Error("DB connection lost"));
 
-    const res = await request(app).post("/payments").send(validPayload());
+    const res = await request(app).post("/payments")
+      .set("Authorization", customerAuthHeader()).send(validPayload());
 
     expect(res.status).toBe(500);
     expect(res.body.error.code).toBe("INTERNAL_SERVER_ERROR");
@@ -1008,7 +1152,8 @@ describe("POST /payments — error handling", () => {
   it("does NOT publish AML event if transaction throws", async () => {
     mockPrisma.$transaction.mockRejectedValue(new Error("TX failed"));
 
-    await request(app).post("/payments").send(validPayload());
+    await request(app).post("/payments")
+      .set("Authorization", customerAuthHeader()).send(validPayload());
 
     expect(mockQueueAdd).not.toHaveBeenCalled();
   });
@@ -1018,7 +1163,8 @@ describe("POST /payments — error handling", () => {
     setupSuccessfulTransaction(payload);
     mockQueueAdd.mockRejectedValue(new Error("Redis unavailable"));
 
-    const res = await request(app).post("/payments").send(payload);
+    const res = await request(app).post("/payments")
+      .set("Authorization", customerAuthHeader()).send(payload);
 
     expect(res.status).toBe(201);
   });

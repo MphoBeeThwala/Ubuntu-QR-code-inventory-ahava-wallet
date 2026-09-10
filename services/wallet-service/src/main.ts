@@ -104,6 +104,71 @@ async function requireAgentRole(
   }
 }
 
+// Same problem as suspend/freeze, but across nearly every other route in
+// this file: wallet detail, balance, transaction history, QR generation,
+// and — most seriously — QR payment all trusted whatever walletId/
+// senderWalletId the request body or URL contained, with no check that the
+// caller actually owns it. That's not just an information leak on the
+// read routes (any authenticated customer could read any other customer's
+// balance and transaction history); on POST /qr/:qrHash/pay it meant any
+// authenticated customer could drain funds from ANY OTHER wallet just by
+// supplying its id as senderWalletId — a direct theft vector, not merely
+// disclosure. payment-service/src/main.ts's POST /payments had the
+// identical gap for peer-to-peer transfers; fixed there too.
+//
+// requireAuth verifies the JWT (same as requireAgentRole) but accepts any
+// valid token, populating req.userId/req.role for handlers to check
+// against a resource's actual owner via assertOwnerOrAgent below. AGENT
+// tokens bypass ownership checks — agents legitimately act on customers'
+// wallets during cash-in/cash-out and in-person QR assistance.
+async function requireAuth(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  const token = parseBearerToken(req.headers.authorization);
+  if (!token) {
+    const err = new AhavaError(
+      AhavaErrorCode.AUTH_UNAUTHORIZED,
+      "Authorization header missing or malformed",
+      { requestId: req.id },
+    );
+    res.status(err.statusCode).json(createErrorResponse(err));
+    return;
+  }
+
+  try {
+    const payload = await verifyJWT(token);
+    req.userId = (payload.userId ?? payload.sub) as string | undefined;
+    req.role = payload.role as string | undefined;
+    if (!req.userId) {
+      throw new Error("token has no subject");
+    }
+    next();
+  } catch {
+    const err = new AhavaError(
+      AhavaErrorCode.AUTH_INVALID_TOKEN,
+      "Invalid or expired access token",
+      { requestId: req.id },
+    );
+    res.status(err.statusCode).json(createErrorResponse(err));
+  }
+}
+
+/** Throws (caught by the route's own try/catch, same as every other
+ * AhavaError in this file) unless the caller is an AGENT or the resource's
+ * actual owner. Call after fetching the resource — req.userId is only
+ * meaningful once requireAuth has run for this request. */
+function assertOwnerOrAgent(req: Request, resourceUserId: string): void {
+  if (req.role === "AGENT") return;
+  if (req.userId && req.userId === resourceUserId) return;
+  throw new AhavaError(
+    AhavaErrorCode.AUTH_UNAUTHORIZED,
+    "You do not have access to this resource",
+    { requestId: req.id },
+  );
+}
+
 /** Generate wallet number: AHV-XXXX-XXXX-XXXX */
 function generateWalletNumber(): string {
   const seg = () => Math.random().toString(36).slice(2, 6).toUpperCase();
@@ -177,6 +242,7 @@ app.get("/metrics", metricsEndpoint);
 // POST /wallets - Create a new wallet for a user
 app.post(
   "/wallets",
+  requireAuth,
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { userId, walletType } = req.body;
@@ -188,6 +254,8 @@ app.post(
           { requestId: req.id },
         );
       }
+
+      assertOwnerOrAgent(req, userId);
 
       const user = await prisma.user.findUnique({
         where: { id: userId, isDeleted: false },
@@ -281,8 +349,15 @@ app.post(
 );
 
 // GET /wallets/lookup?walletNumber=AHV-xxxx-xxxx  (MUST be before /:walletId)
+// Intentionally cross-user: this is how a sender resolves a recipient's
+// wallet before paying them (see apps/mobile's payment flow), so it stays
+// open to any authenticated caller rather than owner-only. It must NOT
+// return the recipient's balance, though — a sender has no legitimate
+// reason to see a stranger's balance just from looking up their wallet
+// number, and the response used to include it.
 app.get(
   "/wallets/lookup",
+  requireAuth,
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const walletNumber = req.query.walletNumber as string;
@@ -317,7 +392,6 @@ app.get(
               id: wallet.id,
               walletNumber: wallet.walletNumber,
               holderName: wallet.user?.fullName ?? wallet.walletNumber,
-              balance: wallet.balance.toString(),
               status: wallet.status,
             },
           },
@@ -331,8 +405,11 @@ app.get(
 );
 
 // GET /wallets/:walletId - Get wallet details
+// serializeWallet returns the full row (balance, limits, spend totals) —
+// owner or agent only, unlike /wallets/lookup above.
 app.get(
   "/wallets/:walletId",
+  requireAuth,
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { walletId } = req.params;
@@ -346,6 +423,8 @@ app.get(
           requestId: req.id,
         });
       }
+
+      assertOwnerOrAgent(req, wallet.userId);
 
       res.json(
         createSuccessResponse(
@@ -362,6 +441,7 @@ app.get(
 // GET /wallets/:walletId/transactions - Get transaction history
 app.get(
   "/wallets/:walletId/transactions",
+  requireAuth,
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { walletId } = req.params;
@@ -377,6 +457,8 @@ app.get(
           requestId: req.id,
         });
       }
+
+      assertOwnerOrAgent(req, wallet.userId);
 
       const transactions = await prisma.walletTransaction.findMany({
         where: {
@@ -410,8 +492,14 @@ app.get(
 );
 
 // POST /wallets/:walletId/limits - Update wallet limits (KYC tier change)
+// Orphaned from any legitimate internal caller today (kyc-service applies
+// tier-driven limit changes via a direct prisma.wallet.updateMany() call,
+// not this HTTP endpoint) but state-mutating and previously wide open — a
+// customer could raise their own spending limits past their KYC tier, or
+// tamper with someone else's. Same agent-role bar as suspend/freeze.
 app.post(
   "/wallets/:walletId/limits",
+  requireAgentRole,
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { walletId } = req.params;
@@ -469,6 +557,7 @@ app.post(
 // GET /wallets/:walletId/balance - Get balance (read-only)
 app.get(
   "/wallets/:walletId/balance",
+  requireAuth,
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { walletId } = req.params;
@@ -477,6 +566,7 @@ app.get(
         where: { id: walletId },
         select: {
           id: true,
+          userId: true,
           balance: true,
           pendingBalance: true,
           reservedBalance: true,
@@ -489,6 +579,8 @@ app.get(
           requestId: req.id,
         });
       }
+
+      assertOwnerOrAgent(req, wallet.userId);
 
       const available =
         Number(wallet.balance) -
@@ -591,6 +683,7 @@ app.post(
 // POST /wallets/:walletId/qr — generate a static or dynamic QR code
 app.post(
   "/wallets/:walletId/qr",
+  requireAuth,
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { walletId } = req.params;
@@ -603,7 +696,7 @@ app.post(
 
       const wallet = await prisma.wallet.findUnique({
         where: { id: walletId, isDeleted: false },
-        select: { id: true, walletNumber: true, status: true },
+        select: { id: true, userId: true, walletNumber: true, status: true },
       });
 
       if (!wallet) {
@@ -611,6 +704,8 @@ app.post(
           requestId: req.id,
         });
       }
+
+      assertOwnerOrAgent(req, wallet.userId);
 
       if (wallet.status !== "ACTIVE") {
         throw new AhavaError(
@@ -679,9 +774,13 @@ app.post(
   },
 );
 
-// GET /qr/:qrHash — look up a QR code for display / pre-flight check
+// GET /qr/:qrHash — look up a QR code for display / pre-flight check.
+// Intentionally cross-user: the payer looks up a QR someone else
+// generated. Already omits the recipient's balance, so requireAuth here is
+// about caller identification, not an ownership check.
 app.get(
   "/qr/:qrHash",
+  requireAuth,
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { qrHash } = req.params;
@@ -752,8 +851,15 @@ app.get(
 );
 
 // POST /qr/:qrHash/pay — pay via QR code (debit sender, credit QR wallet)
+// CRITICAL: senderWalletId used to be trusted straight from the request
+// body with no check that the authenticated caller actually owns it — any
+// customer could drain funds from ANY wallet just by supplying its id
+// here. Fixed below via assertOwnerOrAgent once the sender row is locked
+// (it's already fetched for the balance check, so this doesn't add a
+// query) — see the ownership-check comment near requireAuth's definition.
 app.post(
   "/qr/:qrHash/pay",
+  requireAuth,
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { qrHash } = req.params;
@@ -879,6 +985,7 @@ app.post(
               { requestId: req.id },
             );
           }
+          assertOwnerOrAgent(req, senderWallet.userId);
           if (!receiverWallet) {
             throw new AhavaError(
               AhavaErrorCode.WAL_NOT_FOUND,
@@ -1116,6 +1223,8 @@ declare global {
   namespace Express {
     interface Request {
       id?: string;
+      userId?: string;
+      role?: string;
     }
   }
 }
