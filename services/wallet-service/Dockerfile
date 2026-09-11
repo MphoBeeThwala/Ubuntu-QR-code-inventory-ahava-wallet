@@ -1,32 +1,41 @@
+# Ahava eWallet — wallet-service (builder stage)
+# This is a pnpm workspace monorepo (pnpm-workspace.yaml + the
+# "packageManager" field in root package.json). Several services'
+# package.json files use the pnpm-only "workspace:" version protocol,
+# and none of these @ahava/* internal packages exist on the public npm
+# registry — plain "npm ci" fails here (EUNSUPPORTEDPROTOCOL, or a 404
+# trying to fetch "@ahava/shared-errors" from npm). Must use pnpm.
 FROM node:20-slim AS builder
 WORKDIR /app
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends python3 make g++ openssl ca-certificates \
-  && rm -rf /var/lib/apt/lists/*
+  && rm -rf /var/lib/apt/lists/* \
+  && corepack enable \
+  && corepack prepare pnpm@8.15.0 --activate
 
-COPY package.json package-lock.json turbo.json ./
+# Full workspace manifest + source. pnpm needs every workspace member's
+# package.json visible (pnpm-workspace.yaml globs packages/*,
+# services/*, apps/*) to resolve internal @ahava/* dependencies
+# correctly, even though only one service actually gets built below.
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json ./
 COPY prisma/ prisma/
-COPY packages/shared-errors/package.json packages/shared-errors/
-COPY packages/shared-crypto/package.json packages/shared-crypto/
-COPY packages/shared-events/package.json packages/shared-events/
-COPY packages/shared-types/package.json packages/shared-types/
-COPY packages/shared-audit/package.json packages/shared-audit/
-COPY services/wallet-service/package.json services/wallet-service/
+COPY packages/ packages/
+COPY services/ services/
+COPY apps/pwa/package.json apps/pwa/
+COPY apps/agent-portal/package.json apps/agent-portal/
 
-RUN npm ci
+# pnpm-lock.yaml can drift from package.json between deploys (it isn't
+# regenerated automatically here on every dependency change) —
+# --no-frozen-lockfile lets pnpm resolve against the real package.json
+# files instead of hard-failing on a stale lockfile.
+RUN pnpm install --no-frozen-lockfile
+
 RUN npx prisma generate
 
-COPY packages/ packages/
-COPY services/wallet-service/src/ services/wallet-service/src/
-COPY services/wallet-service/tsconfig.json services/wallet-service/
-
-RUN npm run build --workspace=packages/shared-errors \
- && npm run build --workspace=packages/shared-crypto \
- && npm run build --workspace=packages/shared-events \
- && npm run build --workspace=packages/shared-types \
- && npm run build --workspace=packages/shared-audit \
- && npm run build --workspace=services/wallet-service
+# Builds the target service and every @ahava/* package it depends on —
+# the "..." suffix pulls in workspace dependencies, in build order.
+RUN pnpm --filter "@ahava/wallet-service..." run build
 
 FROM node:20-slim AS runner
 WORKDIR /app
