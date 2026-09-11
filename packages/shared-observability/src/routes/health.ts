@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { metricsEndpoint, healthCheckEndpoint } from "../middleware/metrics";
 
-const router = Router()
+const router: Router = Router()
 
 router.get("/health", healthCheckEndpoint("shared"))
 router.get("/ready", (req, res) => res.json({ status: "ready" }))
