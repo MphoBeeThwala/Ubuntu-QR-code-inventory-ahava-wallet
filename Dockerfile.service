@@ -20,7 +20,7 @@ RUN apt-get update \
   && apt-get install -y --no-install-recommends python3 make g++ openssl ca-certificates \
   && rm -rf /var/lib/apt/lists/* \
   && corepack enable \
-  && corepack prepare pnpm@8.15.0 --activate
+  && corepack prepare pnpm@8.15.9 --activate
 
 # Full workspace manifest + source. pnpm needs every workspace member's
 # package.json visible (pnpm-workspace.yaml globs packages/*,
@@ -63,14 +63,25 @@ RUN apt-get update \
 
 RUN groupadd --gid 1001 ahava && useradd --uid 1001 --gid ahava --create-home ahava
 
-COPY --from=builder --chown=ahava:ahava /app/node_modules          ./node_modules
-COPY --from=builder --chown=ahava:ahava /app/packages              ./packages
-COPY --from=builder --chown=ahava:ahava /app/services/${SERVICE_NAME}/dist ./dist
-COPY --from=builder --chown=ahava:ahava /app/services/${SERVICE_NAME}/package.json ./
+# pnpm gives each workspace package its own node_modules with symlinks
+# scoped to that package's own declared dependencies (unlike npm
+# workspaces' root-hoisted layout) — copying only dist/ + package.json
+# leaves that directory behind, so a top-level `require("express")` (or
+# any other direct dependency) has nothing to resolve at runtime. Copy
+# the whole services/${SERVICE_NAME}/ directory instead.
+COPY --from=builder --chown=ahava:ahava /app/node_modules            ./node_modules
+COPY --from=builder --chown=ahava:ahava /app/packages                ./packages
+COPY --from=builder --chown=ahava:ahava /app/services/${SERVICE_NAME} ./services/${SERVICE_NAME}
 
 USER ahava
 
+# Docker's exec-form CMD (the ["node", ...] array form) does NOT perform
+# variable substitution — only the shell form does, and only for
+# variables that exist in the container's actual runtime environment,
+# which means baking SERVICE_NAME as ENV (not just ARG, which is
+# build-time only) here.
+ENV SERVICE_NAME=${SERVICE_NAME}
 ENV PORT=3000
 EXPOSE ${PORT}
 
-CMD ["node", "dist/main.js"]
+CMD node services/$SERVICE_NAME/dist/main.js

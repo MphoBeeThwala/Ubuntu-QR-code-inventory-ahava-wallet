@@ -13,7 +13,7 @@ RUN apt-get update \
   && apt-get install -y --no-install-recommends python3 make g++ openssl ca-certificates \
   && rm -rf /var/lib/apt/lists/* \
   && corepack enable \
-  && corepack prepare pnpm@8.15.0 --activate
+  && corepack prepare pnpm@8.15.9 --activate
 
 # Full workspace manifest + source. pnpm needs every workspace member's
 # package.json visible (pnpm-workspace.yaml globs packages/*,

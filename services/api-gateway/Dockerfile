@@ -10,7 +10,7 @@ WORKDIR /app
 
 RUN apk add --no-cache python3 make g++ openssl ca-certificates \
   && corepack enable \
-  && corepack prepare pnpm@8.15.0 --activate
+  && corepack prepare pnpm@8.15.9 --activate
 
 # Full workspace manifest + source. pnpm needs every workspace member's
 # package.json visible (pnpm-workspace.yaml globs packages/*,
@@ -40,11 +40,18 @@ WORKDIR /app
 
 RUN addgroup -g 1001 -S ahava && adduser -S ahava -u 1001 -G ahava
 
-COPY --from=builder --chown=ahava:ahava /app/node_modules             ./node_modules
-COPY --from=builder --chown=ahava:ahava /app/packages                 ./packages
-COPY --from=builder --chown=ahava:ahava /app/prisma                   ./prisma
-COPY --from=builder --chown=ahava:ahava /app/services/api-gateway/dist ./dist
-COPY --from=builder --chown=ahava:ahava /app/services/api-gateway/package.json ./
+# pnpm gives each workspace package its own node_modules with symlinks
+# scoped to that package's own declared dependencies (e.g. express lives
+# at services/api-gateway/node_modules/express, not the hoisted-to-root
+# layout npm workspaces use) — copying only dist/ + package.json here
+# (as this file used to, back when it ran npm) left that directory
+# behind, so `require("express")` had nothing to resolve at runtime.
+# Copying the whole services/api-gateway/ directory brings it along,
+# matching every other service's Dockerfile.
+COPY --from=builder --chown=ahava:ahava /app/node_modules       ./node_modules
+COPY --from=builder --chown=ahava:ahava /app/packages           ./packages
+COPY --from=builder --chown=ahava:ahava /app/prisma             ./prisma
+COPY --from=builder --chown=ahava:ahava /app/services/api-gateway ./services/api-gateway
 
 USER ahava
 ENV NODE_ENV=production
@@ -53,4 +60,4 @@ EXPOSE 6000
 HEALTHCHECK --interval=30s --timeout=3s --start-period=40s --retries=3 \
   CMD wget --no-verbose --tries=1 --spider http://localhost:6000/health || exit 1
 
-CMD ["node", "dist/main.js"]
+CMD ["node", "services/api-gateway/dist/main.js"]
