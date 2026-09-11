@@ -15,19 +15,19 @@ const logFormat = winston.format.combine(
   winston.format.json()
 )
 
-function createLogger(serviceName: string) {
-  return winston.createLogger({
-    level: process.env.LOG_LEVEL || 'info',
-    format: logFormat,
-    defaultMeta: { service: serviceName },
-    transports: [
-      new winston.transports.Console({
-        format: winston.format.combine(
-          winston.format.colorize(),
-          winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
-          winston.format.simple()
-        ),
-      }),
+// winston's File transport throws synchronously from its constructor if it
+// can't create the log directory (e.g. a read-only container filesystem,
+// or a non-root user without write access to the working directory) —
+// that's an uncaught exception at module-load time, which crashes the
+// whole process before the app ever starts (this took down wallet-service
+// in production: EACCES creating 'logs/shared' on Railway). Hosts like
+// Railway already capture stdout as logs, so local log files are a
+// dev-only convenience, never a production requirement — opt in
+// explicitly, and never let a failure to write them be fatal.
+function fileTransportsIfEnabled(serviceName: string): winston.transport[] {
+  if (process.env.ENABLE_FILE_LOGGING !== 'true') return [];
+  try {
+    return [
       new winston.transports.File({
         filename: 'logs/' + serviceName + '/error.log',
         level: 'error',
@@ -42,6 +42,30 @@ function createLogger(serviceName: string) {
         maxsize: 10485760,
         maxFiles: 10,
       }),
+    ];
+  } catch (error) {
+    console.warn(
+      `[logger] could not set up file logging for "${serviceName}", continuing with console only:`,
+      error instanceof Error ? error.message : String(error),
+    );
+    return [];
+  }
+}
+
+function createLogger(serviceName: string) {
+  return winston.createLogger({
+    level: process.env.LOG_LEVEL || 'info',
+    format: logFormat,
+    defaultMeta: { service: serviceName },
+    transports: [
+      new winston.transports.Console({
+        format: winston.format.combine(
+          winston.format.colorize(),
+          winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
+          winston.format.simple()
+        ),
+      }),
+      ...fileTransportsIfEnabled(serviceName),
     ],
     exitOnError: false,
   })
