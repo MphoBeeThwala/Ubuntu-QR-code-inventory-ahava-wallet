@@ -1,4 +1,5 @@
 # Ahava eWallet — wallet-service (builder stage)
+# cache-bust: force a fresh Railway build (2026-09-11) — see commit 512bc89
 # This is a pnpm workspace monorepo (pnpm-workspace.yaml + the
 # "packageManager" field in root package.json). Several services'
 # package.json files use the pnpm-only "workspace:" version protocol,
